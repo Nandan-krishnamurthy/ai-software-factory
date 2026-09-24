@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "interactions": [
+    {
+      "args": [
+        "label",
+        "list",
+        "--repo",
+        "Nandan-krishnamurthy/factory-sandbox",
+        "--limit",
+        "1000",
+        "--json",
+        "name,color,description"
+      ],
+      "input": null,
+      "returncode": 0,
+      "stdout": "[{\"color\":\"f143ab\",\"description\":\"Barrier affecting people with disabilities\",\"name\":\"accessibility\"},{\"color\":\"d73a4a\",\"description\":\"Something isn't working\",\"name\":\"bug\"},{\"color\":\"0075ca\",\"description\":\"Improvements or additions to documentation\",\"name\":\"documentation\"},{\"color\":\"cfd3d7\",\"description\":\"This issue or pull request already exists\",\"name\":\"duplicate\"},{\"color\":\"a2eeef\",\"description\":\"New feature or request\",\"name\":\"enhancement\"},{\"color\":\"7057ff\",\"description\":\"Good for newcomers\",\"name\":\"good first issue\"},{\"color\":\"008672\",\"description\":\"Extra attention is needed\",\"name\":\"help wanted\"},{\"color\":\"e4e669\",\"description\":\"This doesn't seem right\",\"name\":\"invalid\"},{\"color\":\"d876e3\",\"description\":\"Further information is requested\",\"name\":\"question\"},{\"color\":\"ffffff\",\"description\":\"This will not be worked on\",\"name\":\"wontfix\"}]\n",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "api",
+        "repos/Nandan-krishnamurthy/ai-software-factory/branches/main/protection",
+        "--method",
+        "GET"
+      ],
+      "input": null,
+      "returncode": 0,
+      "stdout": "{\"url\":\"https://api.github.com/repos/Nandan-krishnamurthy/ai-software-factory/branches/main/protection\",\"required_pull_request_reviews\":{\"url\":\"https://api.github.com/repos/Nandan-krishnamurthy/ai-software-factory/branches/main/protection/required_pull_request_reviews\",\"dismiss_stale_reviews\":false,\"require_code_owner_reviews\":false,\"require_last_push_approval\":false,\"required_approving_review_count\":0},\"required_signatures\":{\"url\":\"https://api.github.com/repos/Nandan-krishnamurthy/ai-software-factory/branches/main/protection/required_signatures\",\"enabled\":false},\"enforce_admins\":{\"url\":\"https://api.github.com/repos/Nandan-krishnamurthy/ai-software-factory/branches/main/protection/enforce_admins\",\"enabled\":true},\"required_linear_history\":{\"enabled\":false},\"allow_force_pushes\":{\"enabled\":false},\"allow_deletions\":{\"enabled\":false},\"block_creations\":{\"enabled\":false},\"required_conversation_resolution\":{\"enabled\":false},\"lock_branch\":{\"enabled\":false},\"allow_fork_syncing\":{\"enabled\":false}}",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "api",
+        "repos/Nandan-krishnamurthy/task-tracker/branches/main/protection",
+        "--method",
+        "GET"
+      ],
+      "input": null,
+      "returncode": 1,
+      "stdout": "{\"message\":\"Branch not protected\",\"documentation_url\":\"https://docs.github.com/rest/branches/branch-protection#get-branch-protection\",\"status\":\"404\"}",
+      "stderr": "gh: Branch not protected (HTTP 404)\n"
+    },
+    {
+      "args": [
+        "api",
+        "repos/Nandan-krishnamurthy/factory-sandbox/branches/main/protection",
+        "--method",
+        "GET"
+      ],
+      "input": null,
+      "returncode": 1,
+      "stdout": "{\"message\":\"Branch not found\",\"documentation_url\":\"https://docs.github.com/rest/branches/branch-protection#get-branch-protection\",\"status\":\"404\"}",
+      "stderr": "gh: Branch not found (HTTP 404)\n"
+    },
+    {
+      "args": [
+        "repo",
+        "view",
+        "Nandan-krishnamurthy/factory-sandbox",
+        "--json",
+        "nameWithOwner,viewerPermission,defaultBranchRef,isEmpty"
+      ],
+      "input": null,
+      "returncode": 0,
+      "stdout": "{\"defaultBranchRef\":{\"name\":\"\"},\"isEmpty\":true,\"nameWithOwner\":\"Nandan-krishnamurthy/factory-sandbox\",\"viewerPermission\":\"ADMIN\"}\n",
+      "stderr": ""
+    }
+  ]
+}
