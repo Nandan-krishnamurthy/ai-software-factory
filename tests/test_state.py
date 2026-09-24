@@ -1,0 +1,525 @@
+"""T1.8: the state engine for planning states — derive, invariants, schema, collect, CLI."""
+
+import base64
+import contextlib
+import io
+import json
+import random
+import re
+import tempfile
+import unittest
+from datetime import UTC, datetime
+from pathlib import Path
+from unittest import mock
+
+from factory import cli, target
+from factory import state as st
+from factory.gh import Gh, ProcessResult
+from factory.git import Git
+from factory.markers import (
+    CheckpointMarker,
+    PlanningMarker,
+    ReplyMarker,
+    StoryMarker,
+    build,
+)
+from factory.signals import Verdict
+from factory.state import IssueInfo, PrInfo, Snapshot, derive_state, validate_output
+
+REPO = "owner/app"
+INC = "001-initial"
+ALL_DOCS = frozenset(name for _, name in st.PLAN_DOCS)
+
+
+def story(n, inc=INC):
+    return StoryMarker(id=f"STORY-{n:03d}", increment=inc)
+
+
+def issue(number, n, labels=("factory:story", "status:ready"), state="OPEN", inc=INC,
+          checkpoint_branch=None):
+    return IssueInfo(number, state, frozenset(labels), story(n, inc), checkpoint_branch)
+
+
+def planning_pr(number, state="OPEN", inc=INC):
+    return PrInfo(number, state, f"factory/plan-{inc}", frozenset(), planning_increment=inc)
+
+
+def snap(**kw):
+    kw.setdefault("repo", REPO)
+    kw.setdefault("default_branch", "main")
+    return Snapshot(**kw)
+
+
+PLAN_BRANCH = frozenset({"main", f"factory/plan-{INC}"})
+MERGED_PLANNING = dict(branches=frozenset({"main"}), prs=(planning_pr(5, "MERGED"),),
+                       stories_on_default={INC: frozenset({"STORY-001", "STORY-002"})})
+
+
+def merged_snap(**overrides):
+    """A snapshot after the Planning PR merged, with some fields replaced."""
+    return snap(**{**MERGED_PLANNING, **overrides})
+
+# (name, snapshot, expected state, expected next_station)
+STATE_FIXTURES = [
+    ("empty repository", snap(is_empty=True), st.UNCONFIGURED, None),
+    ("repo with code but no increment", snap(existing_project=True), st.UNCONFIGURED, None),
+    ("plan branch, nothing written yet", snap(branches=PLAN_BRANCH), st.PLANNING, "S00"),
+    ("config + PRD written", snap(branches=PLAN_BRANCH, plan_config={INC: True},
+                                  plan_files={INC: frozenset({"00-prd.md"})}),
+     st.PLANNING, "S02"),
+    ("existing project needs discovery", snap(
+        branches=PLAN_BRANCH, existing_project=True, plan_config={INC: True},
+        plan_files={INC: frozenset({"00-prd.md"})}), st.PLANNING, "S01"),
+    ("up to architecture", snap(branches=PLAN_BRANCH, plan_config={INC: True}, plan_files={
+        INC: frozenset({"00-prd.md", "02-requirements.md", "03-architecture.md"})}),
+     st.PLANNING, "S04"),
+    ("all docs written, PR not opened", snap(branches=PLAN_BRANCH, plan_config={INC: True},
+                                             plan_files={INC: ALL_DOCS}), st.PLANNING, "S05"),
+    ("planning PR closed, branch still there", snap(
+        branches=PLAN_BRANCH, plan_config={INC: True}, plan_files={INC: ALL_DOCS},
+        prs=(planning_pr(5, "CLOSED"),)), st.PLANNING, "S05"),
+    ("planning PR open, pending", snap(branches=PLAN_BRANCH, prs=(planning_pr(5),),
+                                       planning_verdicts={5: "PENDING"}),
+     st.GATE_A_WAITING, None),
+    ("planning PR open, no verdict recorded", snap(branches=PLAN_BRANCH,
+                                                   prs=(planning_pr(5),)),
+     st.GATE_A_WAITING, None),
+    ("planning PR open, /changes", snap(branches=PLAN_BRANCH, prs=(planning_pr(5),),
+                                        planning_verdicts={5: "CHANGES_REQUESTED"}),
+     st.GATE_A_CHANGES, "S05"),
+    ("merged, no issues yet", snap(**MERGED_PLANNING), st.ISSUES_PENDING, "S05b"),
+    ("merged, one issue missing", snap(**MERGED_PLANNING, issues=(issue(10, 1),)),
+     st.ISSUES_PENDING, "S05b"),
+    ("merged, all issues, ready", snap(**MERGED_PLANNING, issues=(
+        issue(10, 1), issue(11, 2, labels=("factory:story", "status:blocked")))),
+     st.IDLE_AT_GATE_C, "S06"),
+    ("needs-human label", snap(branches=PLAN_BRANCH, needs_human=("issue #3",)),
+     st.NEEDS_HUMAN, None),
+    ("planning PR closed and branch deleted", snap(prs=(planning_pr(5, "CLOSED"),)),
+     st.NEEDS_HUMAN, None),
+    ("merged but no stories in the file", snap(branches=frozenset({"main"}),
+                                               prs=(planning_pr(5, "MERGED"),)),
+     st.NEEDS_HUMAN, None),
+    ("every open story blocked", snap(**MERGED_PLANNING, issues=(
+        issue(10, 1, labels=("factory:story", "status:blocked")),
+        issue(11, 2, labels=("factory:story", "status:blocked")))), st.NEEDS_HUMAN, None),
+    ("two stories in progress", snap(**MERGED_PLANNING, issues=(
+        issue(10, 1, labels=("factory:story", "status:in-progress")),
+        issue(11, 2, labels=("factory:story", "status:in-review")))), st.INCONSISTENT, None),
+    ("story in progress (T3.2 territory)", snap(**MERGED_PLANNING, issues=(
+        issue(10, 1, labels=("factory:story", "status:in-progress")), issue(11, 2))),
+     st.UNSUPPORTED, None),
+    ("all stories closed (T3.2 territory)", snap(**MERGED_PLANNING, issues=(
+        issue(10, 1, state="CLOSED"), issue(11, 2, state="CLOSED"))), st.UNSUPPORTED, None),
+]
+
+
+class DeriveStateTest(unittest.TestCase):
+    def test_each_fixture(self):
+        for name, snapshot, expected, station in STATE_FIXTURES:
+            with self.subTest(name):
+                result = derive_state(snapshot)
+                self.assertEqual(result.state, expected, result.details)
+                self.assertEqual(result.next_station, station)
+
+    def test_every_planning_state_has_a_fixture(self):
+        covered = {expected for _, _, expected, _ in STATE_FIXTURES}
+        for required in (st.UNCONFIGURED, st.PLANNING, st.GATE_A_WAITING, st.GATE_A_CHANGES,
+                         st.ISSUES_PENDING, st.IDLE_AT_GATE_C, st.NEEDS_HUMAN,
+                         st.INCONSISTENT):
+            self.assertIn(required, covered)
+
+    def test_details_are_informative(self):
+        result = derive_state(snap(**MERGED_PLANNING, issues=(issue(10, 1),)))
+        self.assertEqual(result.details["missing"], ["STORY-002"])
+        result = derive_state(snap(**MERGED_PLANNING, issues=(issue(10, 1), issue(11, 2))))
+        self.assertEqual(result.details["ready"], [10, 11])
+        result = derive_state(snap(branches=PLAN_BRANCH, plan_config={INC: True},
+                                   plan_files={INC: frozenset({"00-prd.md"})}))
+        self.assertEqual(result.details["missing"], ["02-requirements.md",
+                                                     "03-architecture.md",
+                                                     "04-implementation-plan.md",
+                                                     "05-stories.md"])
+
+    def test_latest_increment_wins(self):
+        result = derive_state(snap(
+            branches=frozenset({"main", "factory/plan-002-due-dates"}),
+            prs=(planning_pr(5, "MERGED"),), stories_on_default={INC: frozenset({"STORY-001"})},
+            issues=(issue(10, 1, state="CLOSED"),)))
+        self.assertEqual((result.state, result.increment), (st.PLANNING, "002-due-dates"))
+
+    def test_only_continue_may_act_at_gate_c(self):
+        data = derive_state(snap(**MERGED_PLANNING, issues=(issue(10, 1), issue(11, 2))))
+        self.assertNotIn(st.RESUME, data.to_dict()["allowed_commands"])
+        self.assertIn(st.CONTINUE, data.to_dict()["allowed_commands"])
+
+    def test_nothing_can_act_on_inconsistent_or_unsupported(self):
+        for state in (st.INCONSISTENT, st.UNSUPPORTED, st.NEEDS_HUMAN, st.GATE_A_WAITING):
+            self.assertEqual(st.StateResult(state, details={"message": "x"})
+                             .to_dict()["allowed_commands"], [st.STATUS])
+
+
+class InvariantTest(unittest.TestCase):
+    """Architecture §6: a broken invariant always yields INCONSISTENT."""
+
+    CASES = [
+        ("two stories active", snap(**MERGED_PLANNING, issues=(
+            issue(10, 1, labels=("factory:story", "status:in-progress")),
+            issue(11, 2, labels=("factory:story", "status:in-progress")))),
+         "more than one story"),
+        ("story PR without an issue", merged_snap(
+            issues=(issue(10, 1),),
+            prs=(planning_pr(5, "MERGED"),
+                 PrInfo(20, "OPEN", "story/9-x", frozenset(), story_id="STORY-009"))),
+         "has 0 issues"),
+        ("story with two issues", snap(**MERGED_PLANNING, issues=(issue(10, 1), issue(12, 1))),
+         "several issues"),
+        ("two open PRs for one story", merged_snap(
+            issues=(issue(10, 1),),
+            prs=(planning_pr(5, "MERGED"),
+                 PrInfo(20, "OPEN", "a", frozenset(), story_id="STORY-001"),
+                 PrInfo(21, "OPEN", "b", frozenset(), story_id="STORY-001"))),
+         "several open PRs"),
+        ("checkpoint branch missing", snap(**MERGED_PLANNING, issues=(
+            issue(10, 1, labels=("factory:story", "status:in-progress"),
+                  checkpoint_branch="story/10-gone"), issue(11, 2))),
+         "does not exist on the remote"),
+        ("direct factory commit on main", snap(**MERGED_PLANNING,
+                                               direct_factory_commits=("abcdef1234",)),
+         "did not arrive through a merged PR"),
+        ("several status labels", snap(**MERGED_PLANNING, issues=(
+            issue(10, 1, labels=("factory:story", "status:ready", "status:done")),)),
+         "several status labels"),
+        ("two open planning PRs", snap(branches=PLAN_BRANCH, prs=(
+            planning_pr(5), planning_pr(6, inc="002-more"))), "several Planning PRs"),
+        ("invalid config", snap(config_error="schema must be 1"), "config is invalid"),
+    ]
+
+    def test_each_broken_invariant_is_inconsistent(self):
+        for name, snapshot, text in self.CASES:
+            with self.subTest(name):
+                result = derive_state(snapshot)
+                self.assertEqual(result.state, st.INCONSISTENT)
+                self.assertTrue(any(text in p for p in result.details["problems"]),
+                                result.details["problems"])
+
+    def test_inconsistent_wins_over_needs_human(self):
+        snapshot = snap(**MERGED_PLANNING, needs_human=("issue #3",),
+                        direct_factory_commits=("abc1234",))
+        self.assertEqual(derive_state(snapshot).state, st.INCONSISTENT)
+
+    def test_existing_checkpoint_branch_is_fine(self):
+        snapshot = merged_snap(
+            branches=frozenset({"main", "story/10-x"}),
+            issues=(issue(10, 1, labels=("factory:story", "status:in-progress"),
+                          checkpoint_branch="story/10-x"), issue(11, 2)))
+        self.assertEqual(st.check_invariants(snapshot), [])
+
+
+class SchemaTest(unittest.TestCase):
+    def test_every_fixture_output_matches_the_schema(self):
+        for name, snapshot, _, _ in STATE_FIXTURES + [(n, s, None, None) for n, s, _ in
+                                                      InvariantTest.CASES]:
+            with self.subTest(name):
+                data = json.loads(json.dumps(derive_state(snapshot).to_dict()))
+                self.assertEqual(validate_output(data), [])
+
+    def test_validator_rejects_bad_output(self):
+        good = derive_state(snap(is_empty=True)).to_dict()
+        bad_cases = [
+            ("not an object", []),
+            ("missing key", {k: v for k, v in good.items() if k != "details"}),
+            ("extra key", {**good, "extra": 1}),
+            ("wrong schema", {**good, "schema": 2}),
+            ("unknown state", {**good, "state": "DANCING"}),
+            ("bad station", {**good, "next_station": "S1"}),
+            ("bad increment", {**good, "increment": "one"}),
+            ("empty commands", {**good, "allowed_commands": []}),
+            ("bad waiting_on", {**good, "waiting_on": "godot"}),
+            ("no message", {**good, "details": {}}),
+        ]
+        for name, data in bad_cases:
+            with self.subTest(name):
+                self.assertTrue(validate_output(data))
+
+    def test_random_snapshots_always_give_exactly_one_valid_state(self):
+        """AC: exactly one state for every snapshot, never a crash."""
+        rng = random.Random(8)
+        labels = ["status:ready", "status:blocked", "status:in-progress", "status:in-review",
+                  "status:done", "factory:needs-human"]
+        for _ in range(3000):
+            incs = rng.sample(["001-initial", "002-more", "003-x"], rng.randint(0, 2))
+            branches = {"main"} | {f"factory/plan-{i}" for i in incs if rng.random() < 0.7}
+            prs = tuple(PrInfo(n, rng.choice(["OPEN", "CLOSED", "MERGED"]), "h", frozenset(),
+                               planning_increment=rng.choice(incs + [None]) if incs else None,
+                               story_id=rng.choice([None, "STORY-001", "STORY-002"]))
+                        for n in range(rng.randint(0, 3)))
+            issues = tuple(IssueInfo(10 + n, rng.choice(["OPEN", "CLOSED"]),
+                                     frozenset(rng.sample(labels, rng.randint(0, 2))),
+                                     story(rng.randint(1, 3), rng.choice(incs or [INC])),
+                                     rng.choice([None, "story/x", "main"]))
+                           for n in range(rng.randint(0, 4)))
+            snapshot = snap(
+                is_empty=rng.random() < 0.05, branches=frozenset(branches), prs=prs,
+                issues=issues, existing_project=rng.random() < 0.5,
+                plan_config={i: rng.random() < 0.8 for i in incs},
+                plan_files={i: frozenset(rng.sample(sorted(ALL_DOCS), rng.randint(0, 6)))
+                            for i in incs},
+                planning_verdicts={p.number: rng.choice([v.value for v in Verdict])
+                                   for p in prs},
+                needs_human=("issue #1",) if rng.random() < 0.1 else (),
+                stories_on_default={i: frozenset(rng.sample(
+                    ["STORY-001", "STORY-002", "STORY-003"], rng.randint(0, 3))) for i in incs},
+                direct_factory_commits=("abc1234",) if rng.random() < 0.05 else (),
+            )
+            data = derive_state(snapshot).to_dict()
+            self.assertEqual(validate_output(data), [], data)
+
+
+# ----------------------------------------------------------------------------- collect
+
+def ts(minute):
+    return datetime(2026, 9, 24, 10, minute, tzinfo=UTC).isoformat().replace("+00:00", "Z")
+
+
+class FakeRepo:
+    """A simulated GitHub repo that answers the exact gh calls collect_snapshot makes."""
+
+    def __init__(self, *, empty=False, default="main"):
+        self.empty, self.default = empty, default
+        self.files: dict[tuple[str, str], str] = {}   # (ref, path) -> text
+        self.branches = {default}
+        self.prs: list[dict] = []
+        self.issues: list[dict] = []
+        self.needs_human: list[int] = []
+        self.pr_views: dict[int, dict] = {}
+        self.issue_comments: dict[int, list[dict]] = {}
+        self.commits: list[dict] = []
+        self.calls: list[list[str]] = []
+
+    def put(self, ref, path, text):
+        self.branches.add(ref)
+        self.files[(ref, path)] = text
+
+    def __call__(self, argv, *, timeout, cwd=None, env=None, input=None):
+        args = list(argv[1:])
+        self.calls.append(args)
+        return self.route(args)
+
+    @staticmethod
+    def ok(data):
+        return ProcessResult([], 0, json.dumps(data), "")
+
+    @staticmethod
+    def not_found():
+        return ProcessResult([], 1, "", "gh: Not Found (HTTP 404)")
+
+    def route(self, a):
+        if a[:3] == ["repo", "view", REPO]:
+            return self.ok({"defaultBranchRef": {"name": "" if self.empty else self.default},
+                            "isEmpty": self.empty})
+        if a[:2] == ["pr", "list"]:
+            return self.ok(self.prs)
+        if a[:2] == ["issue", "list"]:
+            if "factory:needs-human" in a:
+                return self.ok([{"number": n} for n in self.needs_human])
+            return self.ok(self.issues)
+        if a[:2] == ["pr", "view"]:
+            return self.ok(self.pr_views[int(a[2])])
+        assert a[0] == "api", a
+        endpoint = a[1]
+        if endpoint == f"repos/{REPO}/branches":
+            return self.ok([[{"name": b} for b in sorted(self.branches)]])
+        if m := re.fullmatch(rf"repos/{REPO}/issues/(\d+)/comments", endpoint):
+            return self.ok([self.issue_comments.get(int(m[1]), [])])
+        if re.fullmatch(rf"repos/{REPO}/pulls/\d+/comments", endpoint):
+            return self.ok([[]])
+        if endpoint == f"repos/{REPO}/git/trees/{self.default}?recursive=1":
+            if self.empty:
+                return ProcessResult([], 1, "", "gh: Git Repository is empty. (HTTP 409)")
+            return self.ok({"tree": [{"path": p, "type": "blob"} for (r, p) in self.files
+                                     if r == self.default]})
+        if endpoint.startswith(f"repos/{REPO}/commits?"):
+            return self.ok(self.commits)
+        if m := re.fullmatch(rf"repos/{REPO}/contents/(.+)\?ref=(.+)", endpoint):
+            path, ref = m[1], m[2]
+            if (ref, path) in self.files:
+                text = self.files[(ref, path)]
+                return self.ok({"type": "file", "name": path.rsplit("/", 1)[-1],
+                                "content": base64.b64encode(text.encode()).decode()})
+            children = sorted({p[len(path) + 1:].split("/")[0] for (r, p) in self.files
+                               if r == ref and p.startswith(path + "/")})
+            return self.ok([{"name": c} for c in children]) if children else self.not_found()
+        raise AssertionError(f"unexpected call {a}")
+
+
+CONFIG = json.dumps({"schema": 1, "project": "app", "repo": REPO, "default_branch": "main",
+                     "reviewers": ["me"]})
+PLAN = f"factory/plan-{INC}"
+DOCS = f"docs/factory/increments/{INC}"
+
+
+def collect(repo: FakeRepo):
+    return st.collect_snapshot(Gh(transport=repo), REPO)
+
+
+class CollectSnapshotTest(unittest.TestCase):
+    def test_empty_repo(self):
+        fake = FakeRepo(empty=True)
+        result = derive_state(collect(fake))
+        self.assertEqual(result.state, st.UNCONFIGURED)
+        self.assertEqual(len(fake.calls), 1)  # nothing else to read
+
+    def test_planning_in_progress(self):
+        fake = FakeRepo()
+        fake.put("main", "README.md", "# app")
+        fake.put(PLAN, ".factory/config.json", CONFIG)
+        fake.put(PLAN, f"{DOCS}/00-prd.md", "PRD")
+        fake.put(PLAN, f"{DOCS}/02-requirements.md", "REQ")
+        snapshot = collect(fake)
+        self.assertFalse(snapshot.existing_project)  # a README alone is not a project
+        result = derive_state(snapshot)
+        self.assertEqual((result.state, result.increment, result.next_station),
+                         (st.PLANNING, INC, "S03"))
+
+    def test_existing_project_needs_discovery(self):
+        fake = FakeRepo()
+        fake.put("main", "src/app.py", "print()")
+        fake.put(PLAN, ".factory/config.json", CONFIG)
+        fake.put(PLAN, f"{DOCS}/00-prd.md", "PRD")
+        self.assertEqual(derive_state(collect(fake)).next_station, "S01")
+
+    def open_planning_pr(self, comments):
+        fake = FakeRepo()
+        fake.put(PLAN, ".factory/config.json", CONFIG)
+        fake.prs = [{"number": 5, "state": "OPEN", "headRefName": PLAN, "labels": [],
+                     "body": build(PlanningMarker(INC)) + "\nPlanning PR"}]
+        fake.pr_views[5] = {"number": 5, "state": "OPEN", "mergedAt": None,
+                            "headRefName": PLAN, "reviews": [],
+                            "commits": [{"oid": "a" * 40, "committedDate": ts(0)}],
+                            "comments": comments}
+        return fake
+
+    def test_gate_a_waiting(self):
+        fake = self.open_planning_pr([{"id": "1", "author": {"login": "me"},
+                                       "body": "Looks good so far", "createdAt": ts(5)}])
+        self.assertEqual(derive_state(collect(fake)).state, st.GATE_A_WAITING)
+
+    def test_gate_a_changes(self):
+        fake = self.open_planning_pr([{"id": "1", "author": {"login": "me"},
+                                       "body": "/changes split STORY-003", "createdAt": ts(5)}])
+        self.assertEqual(derive_state(collect(fake)).state, st.GATE_A_CHANGES)
+
+    def test_gate_a_changes_answered_by_factory(self):
+        fake = self.open_planning_pr([
+            {"id": "1", "author": {"login": "me"}, "body": "/changes x", "createdAt": ts(5)},
+            {"id": "2", "author": {"login": "me"}, "body": build(ReplyMarker()) + "\nDone",
+             "createdAt": ts(7)}])
+        self.assertEqual(derive_state(collect(fake)).state, st.GATE_A_WAITING)
+
+    def merged(self):
+        fake = FakeRepo()
+        fake.put("main", ".factory/config.json", CONFIG)
+        fake.put("main", f"{DOCS}/05-stories.md",
+                 "# Stories\n\n### STORY-001: First\n...\n### STORY-002: Second\n")
+        fake.prs = [{"number": 5, "state": "MERGED", "headRefName": PLAN, "labels": [],
+                     "body": build(PlanningMarker(INC))}]
+        return fake
+
+    def story_issue(self, number, n, labels=("factory:story", "status:ready")):
+        return {"number": number, "state": "OPEN", "labels": [{"name": x} for x in labels],
+                "body": build(story(n)) + "\n## Story"}
+
+    def test_issues_pending(self):
+        fake = self.merged()
+        fake.issues = [self.story_issue(10, 1)]
+        result = derive_state(collect(fake))
+        self.assertEqual((result.state, result.details["missing"]),
+                         (st.ISSUES_PENDING, ["STORY-002"]))
+
+    def test_idle_at_gate_c(self):
+        fake = self.merged()
+        fake.issues = [self.story_issue(10, 1), self.story_issue(11, 2)]
+        self.assertEqual(derive_state(collect(fake)).state, st.IDLE_AT_GATE_C)
+
+    def test_needs_human_from_label(self):
+        fake = self.merged()
+        fake.issues = [self.story_issue(10, 1), self.story_issue(11, 2)]
+        fake.needs_human = [11]
+        self.assertEqual(derive_state(collect(fake)).state, st.NEEDS_HUMAN)
+
+    def test_checkpoint_branch_is_read_and_checked(self):
+        fake = self.merged()
+        fake.issues = [self.story_issue(10, 1, ("factory:story", "status:in-progress")),
+                       self.story_issue(11, 2)]
+        checkpoint = build(CheckpointMarker("S08", "S09", "story/10-gone", "a" * 40, 0, 0,
+                                            "2026-09-24T10:00:00+00:00"))
+        fake.issue_comments[10] = [{"id": 1, "body": checkpoint}]
+        snapshot = collect(fake)
+        self.assertEqual(snapshot.issues[0].checkpoint_branch, "story/10-gone")
+        self.assertEqual(derive_state(snapshot).state, st.INCONSISTENT)
+
+    def test_direct_factory_commit_detected(self):
+        fake = self.merged()
+        fake.issues = [self.story_issue(10, 1), self.story_issue(11, 2)]
+        fake.commits = [
+            {"sha": "1" * 40, "commit": {"message": "Squash (#3)\n\nFactory-Station: S08"},
+             "committer": {"login": "web-flow"}},          # merged through a PR: fine
+            {"sha": "2" * 40, "commit": {"message": "hotfix\n\nFactory-Station: S08"},
+             "committer": {"login": "me"}},                # pushed directly: not fine
+            {"sha": "3" * 40, "commit": {"message": "human commit"},
+             "committer": {"login": "me"}},                # not the factory's: fine
+        ]
+        snapshot = collect(fake)
+        self.assertEqual(snapshot.direct_factory_commits, ("2" * 40,))
+        self.assertEqual(derive_state(snapshot).state, st.INCONSISTENT)
+
+    def test_invalid_config_is_inconsistent(self):
+        fake = self.merged()
+        fake.put("main", ".factory/config.json", '{"schema": 2}')
+        result = derive_state(collect(fake))
+        self.assertEqual(result.state, st.INCONSISTENT)
+
+
+class StateCliTest(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name).resolve()
+        self.factory = root / "factory"
+        (self.factory / ".factory-local").mkdir(parents=True)
+        app = root / "app"
+        app.mkdir()
+        Git(app).run(["init", "-b", "main"])
+        (self.factory / ".factory-local" / "target.json").write_text(
+            json.dumps({"path": str(app), "repo": REPO}), encoding="utf-8")
+        self.banner = f"Target: {app} ({REPO})"
+
+    def run_cli(self, *argv):
+        out, err = io.StringIO(), io.StringIO()
+        fake = FakeRepo()
+        fake.put(PLAN, ".factory/config.json", CONFIG)
+        with mock.patch.object(target, "FACTORY_ROOT", self.factory), \
+                mock.patch.object(cli, "Gh", lambda: Gh(transport=fake)), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = cli.main(list(argv))
+        return code, out.getvalue(), err.getvalue()
+
+    def test_json_output_is_pure_and_valid(self):
+        code, out, err = self.run_cli("state", "--json")
+        self.assertEqual(code, 0)
+        data = json.loads(out)  # stdout is only JSON
+        self.assertEqual(validate_output(data), [])
+        self.assertEqual((data["state"], data["next_station"]), (st.PLANNING, "S00"))
+        self.assertIn(self.banner, err)
+
+    def test_human_output(self):
+        code, out, _ = self.run_cli("state")
+        self.assertEqual(code, 0)
+        self.assertEqual(out.splitlines()[0], self.banner)
+        self.assertIn("State: PLANNING (increment 001-initial)", out)
+        self.assertIn("Next station: S00", out)
+
+
+if __name__ == "__main__":
+    unittest.main()

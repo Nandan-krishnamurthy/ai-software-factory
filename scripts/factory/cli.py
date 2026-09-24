@@ -5,7 +5,7 @@ import json
 import sys
 from pathlib import Path
 
-from factory import __version__, comments, doctor, labels, target
+from factory import __version__, comments, doctor, labels, state, target
 from factory.errors import FactoryError
 from factory.gh import Gh
 from factory.git import Git
@@ -73,6 +73,14 @@ def build_parser() -> argparse.ArgumentParser:
         description="Called by Claude Code before each Bash, PowerShell, Edit and Write "
                     "call (see .claude/settings.json). Not meant to be run by hand.")
     guard_parser.set_defaults(handler=_guard)
+
+    state_parser = subparsers.add_parser(
+        "state", help="work out the factory's current state from GitHub",
+        description="Reads GitHub and prints exactly one state, the next station, the "
+                    "commands allowed to act, and who the factory is waiting on.")
+    state_parser.add_argument("--json", action="store_true",
+                              help="machine-readable output (schema documented in state.py)")
+    state_parser.set_defaults(handler=_state, needs_target=True)
     return parser
 
 
@@ -100,7 +108,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if getattr(args, "needs_target", False):
             args.target = target.get_target()
-            print(args.target.banner())
+            # With --json the banner goes to stderr, so stdout stays pure JSON.
+            print(args.target.banner(), file=sys.stderr if getattr(args, "json", False)
+                  else sys.stdout)
         return handler(args)
     except FactoryError as err:
         print(f"error: {err}", file=sys.stderr)
@@ -131,6 +141,13 @@ def _labels_ensure(args: argparse.Namespace) -> int:
         print(f"  unchanged  {spec.name}")
     print(f"Labels: {len(plan.create)} created, {len(plan.update)} updated, "
           f"{len(plan.unchanged)} unchanged.")
+    return 0
+
+
+def _state(args: argparse.Namespace) -> int:
+    snapshot = state.collect_snapshot(Gh(), args.target.repo)
+    result = state.derive_state(snapshot)
+    print(json.dumps(result.to_dict(), indent=2) if args.json else state.render(result))
     return 0
 
 

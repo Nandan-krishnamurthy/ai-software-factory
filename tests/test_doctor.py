@@ -258,7 +258,7 @@ class DoctorCliTest(DoctorTestCase):
         code, out = self.run_cli(["doctor", "--json"],
                                  [user(), repo_view(), label_list(), protection()])
         self.assertEqual(code, 0)
-        payload = json.loads(out.split("\n", 1)[1])  # first line is the Target banner
+        payload = json.loads(out)  # with --json the Target banner goes to stderr
         self.assertTrue(payload["ok"])
         self.assertEqual(len(payload["checks"]), 7)
 
