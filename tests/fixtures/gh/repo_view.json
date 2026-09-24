@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "interactions": [
+    {
+      "args": [
+        "repo",
+        "view",
+        "Nandan-krishnamurthy/factory-sandbox",
+        "--json",
+        "nameWithOwner,isEmpty,visibility,defaultBranchRef"
+      ],
+      "input": null,
+      "returncode": 0,
+      "stdout": "{\"defaultBranchRef\":{\"name\":\"\"},\"isEmpty\":true,\"nameWithOwner\":\"Nandan-krishnamurthy/factory-sandbox\",\"visibility\":\"PUBLIC\"}\n",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "repo",
+        "view",
+        "Nandan-krishnamurthy/does-not-exist-factory-test",
+        "--json",
+        "nameWithOwner"
+      ],
+      "input": null,
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "GraphQL: Could not resolve to a Repository with the name 'Nandan-krishnamurthy/does-not-exist-factory-test'. (repository)\n"
+    }
+  ]
+}
