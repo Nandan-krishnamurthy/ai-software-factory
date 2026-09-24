@@ -7,6 +7,7 @@ from pathlib import Path
 
 from factory import (
     __version__,
+    commands,
     comments,
     doctor,
     increments,
@@ -115,6 +116,21 @@ def build_parser() -> argparse.ArgumentParser:
                     help="default: carried over from the existing checkpoint, else 0")
     comment_parser.set_defaults(handler=_comment, needs_target=True)
 
+    route_parser = subparsers.add_parser(
+        "route", help="which station a /factory-* command runs next, or why it stops",
+        description="Used by the command files: reads the state and prints whether the "
+                    "command should run a station (and which file) or stop. Read-only.")
+    route_parser.add_argument(
+        "--command", required=True, type=_command_name, metavar="NAME",
+        help="the running command, without its slash (Git Bash rewrites /…): "
+             + ", ".join(sorted(c[1:] for c in commands.COMMANDS)))
+    route_parser.add_argument("--continuing", action="store_true",
+                              help="a station of this command has just run")
+    route_parser.add_argument("--after", metavar="SXX",
+                              help="the station that has just run (with --continuing)")
+    route_parser.add_argument("--json", action="store_true", help="machine-readable output")
+    route_parser.set_defaults(handler=_route, needs_target=True)
+
     feedback_parser = subparsers.add_parser(
         "feedback", help="list the human feedback on a PR in the current review round",
         description="Reads a PR and prints its verdict and every human feedback item in the "
@@ -146,6 +162,14 @@ def _positive_int(text: str) -> int:
     if value < 1:
         raise argparse.ArgumentTypeError("must be a positive integer")
     return value
+
+
+def _command_name(text: str) -> str:
+    name = commands.normalize_command(text)
+    if name is None:
+        raise argparse.ArgumentTypeError(
+            f"{text!r} is not one of: " + ", ".join(sorted(c[1:] for c in commands.COMMANDS)))
+    return name
 
 
 def _non_negative_int(text: str) -> int:
@@ -230,6 +254,14 @@ def _issues_sync(args: argparse.Namespace) -> int:
     result = issues.sync(Gh(), args.target.path, args.target.repo,
                          increment=args.increment, dry_run=args.dry_run)
     print(issues.render(result))
+    return 0
+
+
+def _route(args: argparse.Namespace) -> int:
+    result = state.derive_state(state.collect_snapshot(Gh(), args.target.repo)).to_dict()
+    decision = commands.route(args.command, result, continuing=args.continuing,
+                              after=args.after)
+    print(json.dumps(decision.to_dict(), indent=2) if args.json else commands.render(decision))
     return 0
 
 
