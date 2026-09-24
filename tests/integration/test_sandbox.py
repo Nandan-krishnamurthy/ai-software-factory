@@ -9,19 +9,26 @@ Skipped unless enabled, because they talk to GitHub and change the sandbox:
 * T1.8: `state` against the sandbox (no increment yet) is UNCONFIGURED and valid.
 * T1.5: on a throwaway issue, post a reply and a checkpoint twice; expect exactly one
   checkpoint comment and a marker on every comment. The issue is closed afterwards.
+* T2.2: `issues sync` for two throwaway stories (unique IDs per run, the second
+  blocked by the first): dry run, then two real runs. The second run must create
+  nothing, and the dependency must be translated to `#N`. The issues are closed
+  afterwards. The Gate A check is skipped here (the sandbox has no merged Planning PR);
+  it is covered by the unit tests.
 """
 
 import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
-from factory import comments, doctor
+from factory import comments, doctor, issues
 from factory import state as state_mod
 from factory.gh import Gh
 from factory.git import Git
 from factory.labels import REQUIRED_LABELS, ensure_labels, list_labels
-from factory.markers import CheckpointMarker, find, has_factory_marker
+from factory.markers import CheckpointMarker, StoryMarker, find, has_factory_marker
+from factory.stories import parse
 from factory.target import validate_target
 
 SANDBOX = os.environ.get("FACTORY_SANDBOX_REPO")
@@ -87,6 +94,80 @@ class SandboxCommentTest(unittest.TestCase):
         self.assertEqual((marker.station, marker.next, marker.fix_attempts), ("S09", "S10", 1))
         print(f"\nsandbox issue #{self.number}: {second.url}")
 
+
+
+STORY = """
+### {id}: Integration story {n}
+- Traces to: REQ-900
+- Blocked by: {blocked}
+- Milestone: M1
+#### Story
+As the factory's test suite, I want a throwaway story so that issues sync is exercised.
+#### Acceptance criteria
+- AC1: Given this story, when issues sync runs twice, then exactly one issue exists.
+#### Out of scope
+None
+#### Technical notes
+Created by tests/integration; closed automatically.
+#### Test plan
+- Integration: tests/integration/test_sandbox.py
+"""
+
+
+@unittest.skipUnless(SANDBOX, "set FACTORY_SANDBOX_REPO=owner/name to run against GitHub")
+class SandboxIssuesSyncTest(unittest.TestCase):
+    INCREMENT = "900-integration"
+
+    def setUp(self):
+        self.gh = Gh()
+        base = 9_000_000 + int(time.time()) % 1_000_000  # unique per run: IDs are never reused
+        self.first, self.second = f"STORY-{base}", f"STORY-{base + 1}"
+        self.text = (STORY.format(id=self.first, n=1, blocked="None")
+                     + STORY.format(id=self.second, n=2, blocked=self.first))
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.target = Path(tmp.name)
+        path = self.target / issues.INCREMENTS_DIR / self.INCREMENT / issues.STORIES_FILE
+        path.parent.mkdir(parents=True)
+        path.write_text(self.text, encoding="utf-8")
+        self.created: list[int] = []
+        self.addCleanup(self.close_created)
+
+    def close_created(self):
+        for number in self.created:
+            self.gh.run(["issue", "close", str(number), "--repo", SANDBOX,
+                         "--reason", "completed"])
+
+    def real_run(self):
+        # What `issues sync` does once Gate A has passed.
+        plan = issues.plan_sync(parse(self.text), self.INCREMENT,
+                                issues.list_story_issues(self.gh, SANDBOX))
+        result = issues.apply_plan(self.gh, SANDBOX, plan)
+        self.created += [result.numbers[story_id] for story_id in result.created]
+        return result
+
+    def test_sync_twice_creates_each_issue_once(self):
+        dry = issues.sync(self.gh, self.target, SANDBOX, dry_run=True)
+        print("\n" + issues.render(dry))
+        self.assertEqual([s.id for s in dry.plan.to_create], [self.first, self.second])
+
+        first = self.real_run()
+        print(issues.render(first))
+        self.assertEqual(first.created, (self.first, self.second))
+        second = self.real_run()
+        print(issues.render(second))
+        self.assertEqual(second.created, ())
+
+        found = issues.list_story_issues(self.gh, SANDBOX)
+        self.assertEqual([len(found[self.first]), len(found[self.second])], [1, 1])
+        n1, n2 = found[self.first][0].number, found[self.second][0].number
+        body = self.gh.json(["issue", "view", str(n2), "--repo", SANDBOX],
+                            fields=["body", "labels", "title"])
+        self.assertIn(f"Blocked by: #{n1}", body["body"])
+        self.assertEqual(find(body["body"], StoryMarker).id, self.second)
+        self.assertEqual({label["name"] for label in body["labels"]},
+                         {"factory:story", "status:ready"})
+        self.assertEqual(body["title"], f"{self.second}: Integration story 2")
 
 
 @unittest.skipUnless(SANDBOX, "set FACTORY_SANDBOX_REPO=owner/name to run against GitHub")

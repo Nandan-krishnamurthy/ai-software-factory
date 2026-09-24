@@ -187,7 +187,7 @@ Written in Python 3.11+ using only the standard library. It calls `git` and `gh`
 | `doctor` | Checks: `gh auth`, remote reachable, target is not the factory repo, clean working tree, required labels exist, branch protection (warns only), config valid | ✔ (read-only) |
 | `labels ensure` | Creates or updates the §4 labels, plus `factory:needs-human` and `factory:planning` | ✔ |
 | `state [--json]` | **Reconciler.** Works out the current state and the next action (§6) | ✔ (read-only) |
-| `issues sync` | Parses `05-stories.md`, then creates only the issues that are missing, matched by their `STORY-###` marker | ✔ |
+| `issues sync [--dry-run]` | Parses `05-stories.md` (§5.4), then creates only the issues that are missing, matched by their `STORY-###` marker. Refuses before Gate A, except with `--dry-run`. | ✔ |
 | `pick --authorized-by-continue` | Applies the unblocked rule (§4 of the requirements), then sets `status:in-progress` and assigns the issue | ✔ (refuses if a story is already in progress) |
 | `checkpoint --issue N --station S09 --next S10 [--note …]` | Adds or updates the single machine-readable checkpoint comment | ✔ |
 | `label --issue N --status in-review` | Moves the status label (removes the other `status:*` labels) | ✔ |
@@ -275,13 +275,21 @@ S0 creates this file. S1 fills in `commands` by discovering them. A missing comm
 - Blocked by: STORY-005
 - Milestone: M2
 #### Story
-…
+As a <user>, I want <capability> so that <benefit>.
 #### Acceptance criteria
 - AC1: Given … when … then …
-#### Out of scope / Technical notes / Test plan
+#### Out of scope
+None
+#### Technical notes
 …
+#### Test plan
+- Unit: …
 ```
-`Blocked by` uses **STORY IDs**. `issues sync` translates them to `#issue` numbers when it creates the issues, so dependencies can be written before any issue number exists.
+`Blocked by` uses **STORY IDs** (or `None`). `issues sync` translates them to `#issue` numbers when it creates the issues, so dependencies can be written before any issue number exists. It creates issues in dependency order for this reason.
+
+The format is strict (`scripts/factory/stories.py` holds the full rules): the three bullets come right after the heading, and the five `####` sections are all required, in this order, with `None` for an empty one. There are 1–5 ACs, numbered from AC1. Every `###` heading must be a story, while `#`/`##` headings (e.g. one per milestone) and text before the first story are ignored. A dependency cycle, an unknown dependency, a reused STORY ID or a `factory:` marker in a story is an error. Every error names the story, the line and the rule it broke.
+
+Each story becomes an issue titled `STORY-###: <title>`, with the body from `templates/story.md`, labelled `factory:story` and `status:ready`. `issues sync --dry-run` reads the local file and prints the exact plan. A real run requires the increment's Planning PR to be merged (Gate A) and reads the file from the default branch.
 
 ### 5.5 Machine-readable markers (in GitHub, invisible when rendered)
 
