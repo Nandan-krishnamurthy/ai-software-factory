@@ -5,7 +5,7 @@ import json
 import sys
 from pathlib import Path
 
-from factory import __version__, comments, doctor, labels, state, target
+from factory import __version__, comments, doctor, issues, labels, state, target
 from factory.errors import FactoryError
 from factory.gh import Gh
 from factory.git import Git
@@ -43,6 +43,22 @@ def build_parser() -> argparse.ArgumentParser:
     ensure_parser = labels_sub.add_parser(
         "ensure", help="create or update the factory labels on the target repo (idempotent)")
     ensure_parser.set_defaults(handler=_labels_ensure, needs_target=True)
+
+    issues_parser = subparsers.add_parser("issues", help="manage the story issues")
+    issues_sub = issues_parser.add_subparsers(dest="issues_command", metavar="<action>")
+    issues_sub.required = True
+    sync_parser = issues_sub.add_parser(
+        "sync", help="create the missing story issues from 05-stories.md (idempotent)",
+        description="Parse the increment's 05-stories.md, validate it against the story "
+                    "contract, and create one issue per story that has none yet. A real run "
+                    "needs the increment's Planning PR to be merged (Gate A) and reads the "
+                    "file from the default branch on GitHub. --dry-run reads the local file "
+                    "and prints the exact plan without changing anything.")
+    sync_parser.add_argument("--dry-run", action="store_true",
+                             help="print the plan; create nothing")
+    sync_parser.add_argument("--increment", metavar="NNN-slug",
+                             help="default: the highest increment folder in the target")
+    sync_parser.set_defaults(handler=_issues_sync, needs_target=True)
 
     comment_parser = subparsers.add_parser(
         "comment", help="post a marked factory comment on an issue or PR (rule S14)",
@@ -149,6 +165,13 @@ def _state(args: argparse.Namespace) -> int:
     snapshot = state.collect_snapshot(Gh(), args.target.repo)
     result = state.derive_state(snapshot)
     print(json.dumps(result.to_dict(), indent=2) if args.json else state.render(result))
+    return 0
+
+
+def _issues_sync(args: argparse.Namespace) -> int:
+    result = issues.sync(Gh(), args.target.path, args.target.repo,
+                         increment=args.increment, dry_run=args.dry_run)
+    print(issues.render(result))
     return 0
 
 
