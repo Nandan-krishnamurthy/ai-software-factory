@@ -5,7 +5,18 @@ import json
 import sys
 from pathlib import Path
 
-from factory import __version__, comments, doctor, increments, issues, labels, state, target
+from factory import (
+    __version__,
+    comments,
+    doctor,
+    increments,
+    issues,
+    labels,
+    signals,
+    state,
+    target,
+)
+from factory.config import load_config
 from factory.errors import FactoryError
 from factory.gh import Gh
 from factory.git import Git
@@ -103,6 +114,16 @@ def build_parser() -> argparse.ArgumentParser:
     cp.add_argument("--review-round", type=_non_negative_int, metavar="N",
                     help="default: carried over from the existing checkpoint, else 0")
     comment_parser.set_defaults(handler=_comment, needs_target=True)
+
+    feedback_parser = subparsers.add_parser(
+        "feedback", help="list the human feedback on a PR in the current review round",
+        description="Reads a PR and prints its verdict and every human feedback item in the "
+                    "current review round (architecture §9.2): comments from config.reviewers "
+                    "without a factory marker, posted after the factory's last push or reply. "
+                    "Read-only. Stations answer each item with `factory.py comment`.")
+    feedback_parser.add_argument("--pr", type=_positive_int, required=True, metavar="N")
+    feedback_parser.add_argument("--json", action="store_true", help="machine-readable output")
+    feedback_parser.set_defaults(handler=_feedback, needs_target=True)
 
     guard_parser = subparsers.add_parser(
         "guard", help="PreToolUse hook: read a tool call on stdin; exit 2 to block it",
@@ -209,6 +230,29 @@ def _issues_sync(args: argparse.Namespace) -> int:
     result = issues.sync(Gh(), args.target.path, args.target.repo,
                          increment=args.increment, dry_run=args.dry_run)
     print(issues.render(result))
+    return 0
+
+
+def _feedback(args: argparse.Namespace) -> int:
+    config = load_config(args.target.path)
+    gate = signals.signals_for(config)
+    pr = signals.fetch_pr(Gh(), args.target.repo, args.pr)
+    verdict = gate.verdict(pr).value
+    items = gate.feedback(pr)
+    if args.json:
+        print(json.dumps({"pr": pr.number, "verdict": verdict, "items": [
+            {"id": f.comment.id, "kind": f.comment.kind, "author": f.comment.author,
+             "created_at": f.comment.created_at.isoformat(), "url": f.comment.url,
+             "path": f.comment.path, "line": f.comment.line, "is_trigger": f.is_trigger,
+             "text": f.text} for f in items]}, indent=2))
+        return 0
+    print(f"PR #{pr.number}: {verdict}, {len(items)} feedback item(s) in this round")
+    for number, f in enumerate(items, 1):
+        where = f" {f.comment.path}:{f.comment.line}" if f.comment.path else ""
+        tag = " (/changes)" if f.is_trigger else ""
+        print(f"\n[{number}] {f.comment.kind}{where} by {f.comment.author}{tag} "
+              f"{f.comment.url}".rstrip())
+        print(f.text or "(no text)")
     return 0
 
 
