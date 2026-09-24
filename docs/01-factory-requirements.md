@@ -136,7 +136,7 @@ Each station is exposed as a Claude Code slash command (D3), for example `/facto
 
 ## 4. Story / Issue contract
 
-Every story is a GitHub Issue with this structure. S5 must reject (split or rewrite) any story that does not fit it.
+Every story is a GitHub Issue with this structure. S5 must reject (split or rewrite) any story that does not fit it. The canonical issue body is [templates/story.md](../templates/story.md), which adds the `factory:story` marker (architecture §5.5) and a line giving the story ID, increment and milestone.
 
 ```markdown
 ## Story
@@ -206,7 +206,7 @@ Likely files/areas touched; relevant architecture decisions.
 
 **Title:** `[#<issue>] <story title>`
 
-**Body template:**
+**Body template** (the canonical version is [templates/pr.md](../templates/pr.md). It adds the `factory:pr` marker and sections for the quality gates in §10, new dependencies (§12), doc changes (architecture §10) and how to review):
 ```markdown
 Closes #<issue>
 
