@@ -108,9 +108,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if getattr(args, "needs_target", False):
             args.target = target.get_target()
-            # With --json the banner goes to stderr, so stdout stays pure JSON.
+            # With --json the banner goes to stderr, so stdout stays pure JSON. Flushed so
+            # it still comes first when stdout is a pipe and an error goes to stderr (T2).
             print(args.target.banner(), file=sys.stderr if getattr(args, "json", False)
-                  else sys.stdout)
+                  else sys.stdout, flush=True)
         return handler(args)
     except FactoryError as err:
         print(f"error: {err}", file=sys.stderr)

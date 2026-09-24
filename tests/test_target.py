@@ -3,6 +3,8 @@
 import contextlib
 import io
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -18,6 +20,7 @@ from factory.target import (
     set_target,
     validate_target,
 )
+from tests import SCRIPTS_DIR
 
 
 def make_repo(path: Path, remote: str | None = "https://github.com/owner/app.git") -> Path:
@@ -258,6 +261,29 @@ class CliTest(TempWorld):
             code, _, err = self.run_cli("dummy")
         self.assertEqual(code, 1)
         self.assertIn("no active target", err)
+
+
+class BannerOrderTest(TempWorld):
+    """Found in the M1 demo: with stdout piped (buffered) and an error on stderr, the
+    error used to appear before the Target banner. The banner must always come first."""
+
+    def test_banner_precedes_error_when_piped(self):
+        repo = make_repo(self.root / "app")  # no commits: the checkpoint fails before any gh
+        set_target(repo, self.factory)
+        script = (
+            "import sys; from pathlib import Path\n"
+            f"sys.path.insert(0, {str(SCRIPTS_DIR)!r})\n"
+            "from factory import cli, target\n"
+            f"target.FACTORY_ROOT = Path({str(self.factory)!r})\n"
+            "sys.exit(cli.main(['comment', '--issue', '1', '--kind', 'checkpoint',"
+            " '--station', 'S08', '--next', 'S09']))\n"
+        )
+        result = subprocess.run([sys.executable, "-c", script], stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, text=True, timeout=60)
+        lines = result.stdout.splitlines()
+        self.assertEqual(result.returncode, 1)
+        self.assertTrue(lines[0].startswith("Target: "), lines)
+        self.assertIn("error: the target has no commits", lines[1])
 
 
 if __name__ == "__main__":
