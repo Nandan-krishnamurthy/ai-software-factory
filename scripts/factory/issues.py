@@ -18,6 +18,7 @@ Gate A. Whether a story's dependencies are done is worked out when a story is pi
 """
 
 import base64
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -33,6 +34,7 @@ STORIES_FILE = "05-stories.md"
 STORY_LABELS = ("factory:story", "status:ready")
 MAX_BODY = 65536  # GitHub's limit for an issue body
 MAX_PROBE = 1000  # issues fetched one by one past the end of the (possibly stale) list
+_BLOCKED_BY_LINE = re.compile(r"^Blocked by:[ \t]*(?P<value>.*)$", re.MULTILINE)
 
 
 class SyncError(FactoryError):
@@ -45,6 +47,8 @@ class ExistingIssue:
     story_id: str
     increment: str
     state: str  # open | closed
+    labels: frozenset[str] = frozenset()
+    blocked_by: tuple[int, ...] = ()  # issue numbers from the body's "Blocked by:" line
 
 
 @dataclass(frozen=True)
@@ -125,6 +129,14 @@ def _creation_order(stories: list[Story]) -> list[Story]:
     for story in stories:
         add(story)
     return order
+
+
+def blocked_by_numbers(body: str) -> tuple[int, ...]:
+    """The issue numbers on a story issue's ``Blocked by: #12, #14`` line (or ``()``)."""
+    match = _BLOCKED_BY_LINE.search(body)
+    if match is None:
+        return ()
+    return tuple(int(n) for n in re.findall(r"#(\d+)", match["value"]))
 
 
 def blocked_by_text(story: Story, numbers: dict[str, int]) -> str:
@@ -220,7 +232,9 @@ def list_story_issues(gh: Gh, repo: str) -> dict[str, list[ExistingIssue]]:
         marker = find(item.get("body"), StoryMarker)
         if marker is not None:
             found.setdefault(marker.id, []).append(ExistingIssue(
-                item["number"], marker.id, marker.increment, item.get("state", "open")))
+                item["number"], marker.id, marker.increment, item.get("state", "open"),
+                frozenset(label["name"] for label in item.get("labels") or []),
+                blocked_by_numbers(item.get("body") or "")))
     return found
 
 

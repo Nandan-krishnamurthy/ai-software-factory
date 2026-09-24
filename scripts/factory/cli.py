@@ -5,7 +5,7 @@ import json
 import sys
 from pathlib import Path
 
-from factory import __version__, comments, doctor, issues, labels, state, target
+from factory import __version__, comments, doctor, increments, issues, labels, state, target
 from factory.errors import FactoryError
 from factory.gh import Gh
 from factory.git import Git
@@ -43,6 +43,26 @@ def build_parser() -> argparse.ArgumentParser:
     ensure_parser = labels_sub.add_parser(
         "ensure", help="create or update the factory labels on the target repo (idempotent)")
     ensure_parser.set_defaults(handler=_labels_ensure, needs_target=True)
+
+    inc_parser = subparsers.add_parser(
+        "increment", help="the current increment, the next one, and the next REQ/STORY IDs")
+    inc_sub = inc_parser.add_subparsers(dest="increment_command", metavar="<action>")
+    inc_sub.required = True
+    inc_show = inc_sub.add_parser(
+        "show", help="report the current increment and the next free REQ/STORY IDs")
+    inc_show.add_argument("--json", action="store_true", help="machine-readable output")
+    inc_show.set_defaults(handler=_increment, needs_target=True, allocate=False, slug=None)
+    inc_next = inc_sub.add_parser(
+        "next", help="allocate the next increment NNN-slug, or explain why not yet",
+        description="Prints the next increment name and the next free REQ/STORY IDs. "
+                    "Refuses (exit 1) while the current increment is still in planning, "
+                    "has stories without issues, or has open, unblocked stories. Changes "
+                    "nothing: the station creates the folder.")
+    inc_next.add_argument("--slug", help="short name, e.g. add-due-dates (free text is "
+                                         "slugified). Optional for the first increment "
+                                         f"(default {increments.FIRST_SLUG!r})")
+    inc_next.add_argument("--json", action="store_true", help="machine-readable output")
+    inc_next.set_defaults(handler=_increment, needs_target=True, allocate=True)
 
     issues_parser = subparsers.add_parser("issues", help="manage the story issues")
     issues_sub = issues_parser.add_subparsers(dest="issues_command", metavar="<action>")
@@ -165,6 +185,23 @@ def _state(args: argparse.Namespace) -> int:
     snapshot = state.collect_snapshot(Gh(), args.target.repo)
     result = state.derive_state(snapshot)
     print(json.dumps(result.to_dict(), indent=2) if args.json else state.render(result))
+    return 0
+
+
+def _increment(args: argparse.Namespace) -> int:
+    try:
+        result = increments.assess_target(Gh(), args.target.path, args.target.repo, args.slug)
+    except ValueError as err:
+        raise increments.IncrementError([str(err)]) from None
+    print(json.dumps(result.to_dict(), indent=2) if args.json
+          else increments.render(result, allocating=args.allocate))
+    if not args.allocate:
+        return 0
+    if result.reasons:
+        return 1
+    if result.next_increment is None:
+        raise increments.IncrementError(
+            [f"--slug is needed: increment {result.current} already exists"])
     return 0
 
 

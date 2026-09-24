@@ -187,6 +187,7 @@ Written in Python 3.11+ using only the standard library. It calls `git` and `gh`
 | `doctor` | Checks: `gh auth`, remote reachable, target is not the factory repo, clean working tree, required labels exist, branch protection (warns only), config valid | ✔ (read-only) |
 | `labels ensure` | Creates or updates the §4 labels, plus `factory:needs-human` and `factory:planning` | ✔ |
 | `state [--json]` | **Reconciler.** Works out the current state and the next action (§6) | ✔ (read-only) |
+| `increment show` / `increment next [--slug S]` | Reports the current increment and the next free `REQ-`/`STORY-` IDs; `next` allocates the next `NNN-slug` or refuses (§5.2). Changes nothing. | ✔ (read-only) |
 | `issues sync [--dry-run]` | Parses `05-stories.md` (§5.4), then creates only the issues that are missing, matched by their `STORY-###` marker. Refuses before Gate A, except with `--dry-run`. | ✔ |
 | `pick --authorized-by-continue` | Applies the unblocked rule (§4 of the requirements), then sets `status:in-progress` and assigns the issue | ✔ (refuses if a story is already in progress) |
 | `checkpoint --issue N --station S09 --next S10 [--note …]` | Adds or updates the single machine-readable checkpoint comment | ✔ |
@@ -234,6 +235,17 @@ An **increment** is one pass through planning: one PRD or change request → one
 - **Existing project** (including Task Tracker once the factory has built it): each new set of requirements starts a new increment `00N-<slug>` with S1 Discovery.
 - IDs are **global and never reused**. `REQ-###` and `STORY-###` numbering continues from the highest existing number, so traceability stays unambiguous.
 - `/factory-start` refuses to start a new increment while the current one has stories that are open and not blocked. The MVP runs one increment at a time.
+
+`factory.py increment show|next` (`scripts/factory/increments.py`) implements these rules:
+- **Current increment:** the highest-numbered one with a local folder, a `factory/plan-<inc>` branch or a Planning PR.
+- **Next increment:** one above the highest increment number seen anywhere, including numbers seen only in story issue markers or abandoned plans. An increment number is therefore never reused.
+- **Next IDs:** one above the highest `REQ-`/`STORY-` number mentioned in any file under `docs/factory/`, in any story issue marker, or in any Planning PR body.
+- **Refusal:** `increment next` refuses (exit 1, with the reasons) while the current increment:
+  - has not passed Gate A, unless its Planning PR was closed and its branch deleted (abandoned);
+  - still has stories without issues;
+  - or has an open story that is not blocked.
+
+  A story counts as blocked if it has `status:blocked` or `factory:needs-human`, or an open story issue in its `Blocked by` line.
 
 ### 5.3 `.factory/config.json`
 
