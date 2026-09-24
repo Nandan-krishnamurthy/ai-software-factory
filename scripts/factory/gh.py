@@ -197,16 +197,25 @@ class Gh:
         *,
         method: str = "GET",
         fields: Mapping[str, str] | None = None,
+        json_body: Any = None,
         paginate: bool = False,
         timeout: float | None = None,
     ) -> Any:
-        """Call ``gh api``. With ``paginate`` the pages are merged into one list."""
+        """Call ``gh api``. With ``paginate`` the pages are merged into one list.
+
+        ``json_body`` is sent on stdin (``--input -``), which avoids command-line length
+        limits (about 32K characters on Windows) and quoting problems for long text.
+        """
         args = ["api", endpoint, "--method", method]
         for key, value in (fields or {}).items():
             args += ["-f", f"{key}={value}"]
+        stdin = None
+        if json_body is not None:
+            args += ["--input", "-"]
+            stdin = json.dumps(json_body)
         if paginate:
             args += ["--paginate", "--slurp"]
-        data = self.json(args, timeout=timeout)
+        data = self.json(args, input=stdin, timeout=timeout)
         if paginate and isinstance(data, list) and all(isinstance(p, list) for p in data):
             return [item for page in data for item in page]
         return data
