@@ -1,0 +1,13 @@
+# Tool configuration only. The factory has no runtime dependencies (stdlib only)
+# and is not packaged. Run lint with `ruff check`.
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["scripts", "."]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["factory", "tests"]
