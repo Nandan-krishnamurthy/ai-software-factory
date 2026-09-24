@@ -6,6 +6,7 @@ Skipped unless enabled, because they talk to GitHub and change the sandbox:
 
 * T1.4: clone the sandbox, run `labels ensure` twice (the second run must change
   nothing), then run doctor and expect no failed checks.
+* T1.8: `state` against the sandbox (no increment yet) is UNCONFIGURED and valid.
 * T1.5: on a throwaway issue, post a reply and a checkpoint twice; expect exactly one
   checkpoint comment and a marker on every comment. The issue is closed afterwards.
 """
@@ -16,6 +17,7 @@ import unittest
 from pathlib import Path
 
 from factory import comments, doctor
+from factory import state as state_mod
 from factory.gh import Gh
 from factory.git import Git
 from factory.labels import REQUIRED_LABELS, ensure_labels, list_labels
@@ -84,6 +86,17 @@ class SandboxCommentTest(unittest.TestCase):
         marker = find(checkpoints[0]["body"], CheckpointMarker)
         self.assertEqual((marker.station, marker.next, marker.fix_attempts), ("S09", "S10", 1))
         print(f"\nsandbox issue #{self.number}: {second.url}")
+
+
+
+@unittest.skipUnless(SANDBOX, "set FACTORY_SANDBOX_REPO=owner/name to run against GitHub")
+class SandboxStateTest(unittest.TestCase):
+    def test_state_of_the_sandbox(self):
+        result = state_mod.derive_state(state_mod.collect_snapshot(Gh(), SANDBOX))
+        data = result.to_dict()
+        print("\nsandbox state:", data["state"], "-", data["details"]["message"])
+        self.assertEqual(state_mod.validate_output(data), [])
+        self.assertEqual(data["state"], state_mod.UNCONFIGURED)
 
 
 if __name__ == "__main__":
