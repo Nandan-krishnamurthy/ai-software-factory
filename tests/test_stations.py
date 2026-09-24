@@ -158,6 +158,14 @@ def guard_context(scratch: Path) -> guard.GuardContext:
 def lint_command(command: str, ctx: guard.GuardContext) -> list[str]:
     """Problems with one command named in a station (or a command file)."""
     problems = []
+    try:
+        raw = shlex.split(command)
+    except ValueError:
+        raw = []
+    for token in raw[1:]:
+        if token.startswith("/") and not token.startswith("//"):
+            problems.append(f"`{command}`: argument {token!r} starts with '/', which Git Bash "
+                            "on Windows rewrites into a Windows path; drop the slash")
     concrete = substitute(command)
     try:
         argv = shlex.split(concrete)

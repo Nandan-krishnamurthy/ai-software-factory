@@ -154,6 +154,15 @@ Each command file follows the same pattern:
 6. After the station finishes, go back to step 2, until a gate or a stop condition is reached.
 ```
 
+As built (T2.5), steps 4–6 are decided in code by `python scripts/factory.py route --command <name> [--continuing --after <Sxx>] --json` (`scripts/factory/commands.py`). It answers `run` (a station and its file) or `stop` (a reason), based on these rules:
+- **Entry:** the command must be in `allowed_commands`.
+- **Continuing:** only while `waiting_on` is `factory`.
+- **Scope:** only the stations that command may run. `/factory-resume` never runs S06.
+- **Progress:** a station that is still named after it ran stops the loop.
+- **Availability:** a station file that doesn't exist yet (S01) stops the command with an explanation.
+
+`/factory-start` enters at S00 from `UNCONFIGURED`, where the state engine names no station. Command names are passed without their slash, e.g. `--command factory-start`, because Git Bash on Windows rewrites `/…` arguments into paths. `/factory-target` and `/factory-status` run no station.
+
 ### 4.3 Stations (Layer 2)
 
 Every station file has the same sections, so behaviour is predictable and auditable:
