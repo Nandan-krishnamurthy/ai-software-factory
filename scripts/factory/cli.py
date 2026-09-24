@@ -1,8 +1,11 @@
 """Argument parsing and subcommand dispatch for ``scripts/factory.py``."""
 
 import argparse
+import json
+import sys
 
-from factory import __version__
+from factory import __version__, target
+from factory.errors import FactoryError
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -11,15 +14,20 @@ def build_parser() -> argparse.ArgumentParser:
         description="AI Software Factory state engine and helpers.",
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
-    # Each later task registers its subcommand here, e.g.
-    #   sub = subparsers.add_parser("doctor", help="...")
-    #   sub.set_defaults(handler=doctor.run)
-    parser.add_subparsers(
-        title="subcommands",
-        dest="command",
-        metavar="<subcommand>",
-        description="none implemented yet (added from T1.1 onwards)",
-    )
+    # Each subcommand sets ``handler``. Commands that operate on the active target also
+    # set ``needs_target=True``: the dispatcher then resolves the target and prints the
+    # ``Target: <path> (<owner/repo>)`` banner before running them (rule T2).
+    subparsers = parser.add_subparsers(title="subcommands", dest="command", metavar="<subcommand>")
+
+    target_parser = subparsers.add_parser("target", help="select or show the active target repo")
+    target_sub = target_parser.add_subparsers(dest="target_command", metavar="<action>")
+    target_sub.required = True
+    set_parser = target_sub.add_parser("set", help="validate <path> and make it the active target")
+    set_parser.add_argument("path", help="local path of the target repository")
+    set_parser.set_defaults(handler=_target_set)
+    show_parser = target_sub.add_parser("show", help="print the active target")
+    show_parser.add_argument("--json", action="store_true", help="machine-readable output")
+    show_parser.set_defaults(handler=_target_show)
     return parser
 
 
@@ -30,4 +38,27 @@ def main(argv: list[str] | None = None) -> int:
     if handler is None:
         parser.print_help()
         return 0
-    return handler(args)
+    try:
+        if getattr(args, "needs_target", False):
+            args.target = target.get_target()
+            print(args.target.banner())
+        return handler(args)
+    except FactoryError as err:
+        print(f"error: {err}", file=sys.stderr)
+        return 1
+
+
+def _target_set(args: argparse.Namespace) -> int:
+    active = target.set_target(args.path)
+    print(active.banner())
+    print("Active target recorded; Claude Code may now access this directory.")
+    return 0
+
+
+def _target_show(args: argparse.Namespace) -> int:
+    active = target.get_target()
+    if args.json:
+        print(json.dumps({"path": str(active.path), "repo": active.repo}))
+    else:
+        print(active.banner())
+    return 0
