@@ -67,6 +67,12 @@ def build_parser() -> argparse.ArgumentParser:
     cp.add_argument("--review-round", type=_non_negative_int, metavar="N",
                     help="default: carried over from the existing checkpoint, else 0")
     comment_parser.set_defaults(handler=_comment, needs_target=True)
+
+    guard_parser = subparsers.add_parser(
+        "guard", help="PreToolUse hook: read a tool call on stdin; exit 2 to block it",
+        description="Called by Claude Code before each Bash, PowerShell, Edit and Write "
+                    "call (see .claude/settings.json). Not meant to be run by hand.")
+    guard_parser.set_defaults(handler=_guard)
     return parser
 
 
@@ -126,6 +132,12 @@ def _labels_ensure(args: argparse.Namespace) -> int:
     print(f"Labels: {len(plan.create)} created, {len(plan.update)} updated, "
           f"{len(plan.unchanged)} unchanged.")
     return 0
+
+
+def _guard(args: argparse.Namespace) -> int:
+    from factory import guard_hook  # imported lazily: only the hook needs it
+
+    return guard_hook.main()
 
 
 def _comment(args: argparse.Namespace) -> int:
