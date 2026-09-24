@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "project": "{{project}}",
+  "repo": "{{repo}}",
+  "default_branch": "{{default_branch}}",
+  "reviewers": ["{{reviewer}}"],
+  "commands": {
+    "install": null,
+    "build": null,
+    "lint": null,
+    "typecheck": null,
+    "test": null
+  },
+  "limits": {
+    "max_fix_attempts": 3,
+    "max_review_rounds": 3,
+    "max_diff_lines": 400
+  },
+  "ci": { "required": false },
+  "identity": {
+    "mode": "single-account",
+    "bot_login": null,
+    "bot_token_env": null
+  }
+}

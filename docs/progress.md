@@ -26,7 +26,7 @@ Milestone demo records, as required by the milestone Definition of Done in [03-f
 | T1.5 `comment` subcommand | #7 | merged |
 | T1.6 Guard hook and settings.json | #8 | merged |
 | T1.7 `signals.py` (single-account) | #9 | merged |
-| T1.8 State reconciler, planning states | #10 | **open, waiting for review.** M1 is complete once it is merged. |
+| T1.8 State reconciler, planning states | #10 | merged. **M1 is complete.** |
 
 ### Demo steps and results (plan §M1)
 
