@@ -26,8 +26,10 @@ Conventions this module relies on (later stations must follow them):
 
 * A planning branch is named ``factory/plan-<increment>``, e.g. ``factory/plan-001-initial``.
 * Every commit the factory makes carries the trailer ``Factory-Station: <Sxx>``. A commit
-  on the default branch with that trailer that was *not* committed by GitHub's merge
-  account (``web-flow``) was pushed directly, and breaks invariant 4.
+  on the default branch with that trailer arrived through a merged PR if GitHub's merge
+  account (``web-flow``) committed it (a squash or rebase merge), or if a ``web-flow``
+  merge commit brought it in from the PR's branch (a normal merge). Any other such commit
+  was pushed directly, and breaks invariant 4.
 """
 
 import base64
@@ -422,6 +424,45 @@ def _parse_config_text(text: str | None) -> tuple[Config | None, str | None]:
 
 
 _BASE_FILES = {"readme.md", "readme", "license", "license.md", ".gitignore", ".gitattributes"}
+_TRAILER = re.compile(rf"^{FACTORY_COMMIT_TRAILER}:", re.MULTILINE | re.IGNORECASE)
+
+
+def direct_factory_commits(commits: list[dict]) -> tuple[str, ...]:
+    """Pure: the factory commits in a ``repos/<r>/commits`` listing that no PR merged.
+
+    A factory commit (one with the trailer) is fine if ``web-flow`` committed it (a
+    squash or rebase merge), or if it is on the branch side of a ``web-flow`` merge
+    commit: reachable from a non-first parent but not from the first one (a normal
+    merge). A merge the human made locally is committed by them, not ``web-flow``, so it
+    does not excuse the commits it brings in.
+    """
+    by_sha = {c["sha"]: c for c in commits}
+
+    def parents(sha: str) -> list[str]:
+        return [p["sha"] for p in by_sha.get(sha, {}).get("parents") or []]
+
+    def reachable(starts: list[str]) -> set[str]:
+        seen: set[str] = set()
+        stack = list(starts)
+        while stack:
+            sha = stack.pop()
+            if sha in seen or sha not in by_sha:
+                continue
+            seen.add(sha)
+            stack.extend(parents(sha))
+        return seen
+
+    def committer(c: dict) -> str | None:
+        return (c.get("committer") or {}).get("login")
+
+    merged: set[str] = set()
+    for c in commits:
+        ps = parents(c["sha"])
+        if len(ps) > 1 and committer(c) == MERGE_COMMITTER:
+            merged |= reachable(ps[1:]) - reachable(ps[:1])
+    return tuple(c["sha"] for c in commits
+                 if _TRAILER.search((c.get("commit") or {}).get("message", ""))
+                 and committer(c) != MERGE_COMMITTER and c["sha"] not in merged)
 
 
 def collect_snapshot(gh: Gh, repo: str) -> Snapshot:
@@ -497,10 +538,7 @@ def collect_snapshot(gh: Gh, repo: str) -> Snapshot:
             verdicts[p.number] = signals.verdict(fetch_pr(gh, repo, p.number)).value
 
     commits = _get(gh, f"repos/{repo}/commits?sha={default}&per_page=100") or []
-    trailer = re.compile(rf"^{FACTORY_COMMIT_TRAILER}:", re.MULTILINE | re.IGNORECASE)
-    direct = tuple(c["sha"] for c in commits
-                   if trailer.search((c.get("commit") or {}).get("message", ""))
-                   and (c.get("committer") or {}).get("login") != MERGE_COMMITTER)
+    direct = direct_factory_commits(commits)
 
     return Snapshot(
         repo=repo, default_branch=default, branches=branches, config_error=config_error,
