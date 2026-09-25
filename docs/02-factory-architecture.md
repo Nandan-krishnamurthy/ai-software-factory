@@ -210,10 +210,10 @@ Written in Python 3.11+ using only the standard library. It calls `git` and `gh`
 | `state [--json]` | **Reconciler.** Works out the current state and the next action (§6) | ✔ (read-only) |
 | `increment show` / `increment next [--slug S]` | Reports the current increment and the next free `REQ-`/`STORY-` IDs; `next` allocates the next `NNN-slug` or refuses (§5.2). Changes nothing. | ✔ (read-only) |
 | `issues sync [--dry-run]` | Parses `05-stories.md` (§5.4), then creates only the issues that are missing, matched by their `STORY-###` marker. Refuses before Gate A, except with `--dry-run`. | ✔ |
-| `pick --authorized-by-continue` | Applies the unblocked rule (§4 of the requirements), then sets `status:in-progress` and assigns the issue | ✔ (refuses if a story is already in progress) |
+| `pick --authorized-by-continue` | Applies the unblocked rule (§4 of the requirements): open, `status:ready`, not `factory:needs-human`, every "Blocked by" issue closed (an issue it cannot see counts as open). Picks the oldest increment, then the lowest milestone, then the lowest issue number. Assigns the issue, then sets `status:in-progress` last, because that label is the lock. | ✔ (refuses without the flag, and while a story is `in-progress`, `in-review` or `changes-requested`) |
 | `checkpoint --issue N --station S09 --next S10 [--note …]` | Adds or updates the single machine-readable checkpoint comment | ✔ |
 | `feedback --pr N [--json]` | Lists the PR's verdict and the human feedback items of the current review round (§9.2). Rework stations answer each item with `comment`. | ✔ (read-only) |
-| `label --issue N --status in-review` | Moves the status label (removes the other `status:*` labels) | ✔ |
+| `label --issue N --status in-review` | Moves the status label on a story issue: adds the new one, then removes the other `status:*` labels, so the issue always has a status. It changes nothing when the label is already right. | ✔ |
 | `guard` | PreToolUse hook entry point. Reads the tool call from stdin and exits with code 2 to block it (§8) | ✔ |
 
 Keeping these operations in code gives three things. The operations the requirements need to be idempotent (issues, labels, checkpoints, picking a story) are idempotent by construction. They can be unit-tested. And a headless runner can call exactly the same code later.

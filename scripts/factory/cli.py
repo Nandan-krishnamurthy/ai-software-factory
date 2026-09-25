@@ -13,6 +13,7 @@ from factory import (
     increments,
     issues,
     labels,
+    pick,
     signals,
     state,
     target,
@@ -91,6 +92,26 @@ def build_parser() -> argparse.ArgumentParser:
     sync_parser.add_argument("--increment", metavar="NNN-slug",
                              help="default: the highest increment folder in the target")
     sync_parser.set_defaults(handler=_issues_sync, needs_target=True)
+
+    pick_parser = subparsers.add_parser(
+        "pick", help="start the next unblocked story (only /factory-continue may)",
+        description="Applies the unblocked rule (lowest milestone, then lowest issue "
+                    "number, among open status:ready stories whose blockers are all "
+                    "closed), assigns the issue and labels it status:in-progress. Refuses "
+                    "without --authorized-by-continue (rule S2) and while another story is "
+                    "in progress, in review or has changes requested.")
+    pick_parser.add_argument("--authorized-by-continue", action="store_true",
+                             help="passed only by /factory-continue (station S06)")
+    pick_parser.add_argument("--json", action="store_true", help="machine-readable output")
+    pick_parser.set_defaults(handler=_pick, needs_target=True)
+
+    label_parser = subparsers.add_parser(
+        "label", help="give a story issue exactly one status:* label",
+        description="Adds status:<STATUS> and removes every other status:* label from the "
+                    "story issue. Changes nothing if it is already the only one.")
+    label_parser.add_argument("--issue", type=_positive_int, required=True, metavar="N")
+    label_parser.add_argument("--status", required=True, choices=pick.STATUSES)
+    label_parser.set_defaults(handler=_label, needs_target=True)
 
     comment_parser = subparsers.add_parser(
         "comment", help="post a marked factory comment on an issue or PR (rule S14)",
@@ -254,6 +275,24 @@ def _issues_sync(args: argparse.Namespace) -> int:
     result = issues.sync(Gh(), args.target.path, args.target.repo,
                          increment=args.increment, dry_run=args.dry_run)
     print(issues.render(result))
+    return 0
+
+
+def _pick(args: argparse.Namespace) -> int:
+    choice, login = pick.pick(Gh(), args.target.repo,
+                              authorized_by_continue=args.authorized_by_continue)
+    print(json.dumps(pick.pick_to_dict(choice, login), indent=2) if args.json
+          else pick.render_pick(choice, login))
+    return 0
+
+
+def _label(args: argparse.Namespace) -> int:
+    add, remove = pick.set_status(Gh(), args.target.repo, args.issue, args.status)
+    if not add and not remove:
+        print(f"#{args.issue} already has only status:{args.status}; nothing changed")
+    else:
+        changes = [f"+{name}" for name in add] + [f"-{name}" for name in remove]
+        print(f"#{args.issue}: " + ", ".join(changes))
     return 0
 
 

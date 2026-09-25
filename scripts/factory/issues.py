@@ -200,6 +200,21 @@ def list_story_issues(gh: Gh, repo: str) -> dict[str, list[ExistingIssue]]:
     """Every issue (open or closed, any labels) carrying a ``factory:story`` marker, by
     story id. There is normally one issue per story; ``plan_sync`` refuses to act on a
     story that has several.
+    """
+    found: dict[str, list[ExistingIssue]] = {}
+    for item in fetch_all_issues(gh, repo):
+        marker = find(item.get("body"), StoryMarker)
+        if marker is not None:
+            found.setdefault(marker.id, []).append(ExistingIssue(
+                item["number"], marker.id, marker.increment, item.get("state", "open"),
+                frozenset(label["name"] for label in item.get("labels") or []),
+                blocked_by_numbers(item.get("body") or "")))
+    return found
+
+
+def fetch_all_issues(gh: Gh, repo: str) -> list[dict]:
+    """Every issue of the repo (open or closed, no pull requests), once each, as GitHub's
+    REST API returns them.
 
     GitHub's issue *list* can lag behind for a while after issues are created (seen in
     the sandbox integration test: a second run seconds after the first did not see the
@@ -223,19 +238,14 @@ def list_story_issues(gh: Gh, repo: str) -> dict[str, list[ExistingIssue]]:
         raise SyncError(f"more than {MAX_PROBE} issues are missing from GitHub's issue list; "
                         "try again in a minute")
 
-    found: dict[str, list[ExistingIssue]] = {}
+    unique: list[dict] = []
     seen: set[int] = set()
     for item in items:
         if "pull_request" in item or item["number"] in seen:
             continue
         seen.add(item["number"])
-        marker = find(item.get("body"), StoryMarker)
-        if marker is not None:
-            found.setdefault(marker.id, []).append(ExistingIssue(
-                item["number"], marker.id, marker.increment, item.get("state", "open"),
-                frozenset(label["name"] for label in item.get("labels") or []),
-                blocked_by_numbers(item.get("body") or "")))
-    return found
+        unique.append(item)
+    return unique
 
 
 def apply_plan(gh: Gh, repo: str, plan: SyncPlan) -> SyncResult:
