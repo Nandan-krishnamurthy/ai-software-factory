@@ -69,6 +69,16 @@ def merged_snap(**overrides):
     """A snapshot after the Planning PR merged, with some fields replaced."""
     return snap(**{**MERGED_PLANNING, **overrides})
 
+
+def rework_snap(checkpoint_next, verdict="PENDING"):
+    """#10 under the rework lock (status:changes-requested), with its PR #20 open."""
+    return merged_snap(
+        branches=frozenset({"main", "story/10-x"}),
+        issues=(issue(10, 1, labels=labelled("changes-requested"),
+                      checkpoint_branch="story/10-x", checkpoint_next=checkpoint_next),
+                issue(11, 2)),
+        prs=(planning_pr(5, "MERGED"), story_pr(20, 1)), story_verdicts={20: verdict})
+
 # (name, snapshot, expected state, expected next_station)
 STATE_FIXTURES = [
     ("empty repository", snap(is_empty=True), st.UNCONFIGURED, None),
@@ -151,6 +161,14 @@ STATE_FIXTURES = [
         issues=(issue(10, 1, labels=labelled("changes-requested")), issue(11, 2)),
         prs=(planning_pr(5, "MERGED"), story_pr(20, 1)), story_verdicts={20: "PENDING"}),
      st.GATE_B_CHANGES_REQUESTED, "S08"),
+    # T4.2: while the rework lock is held, the checkpoint says where the rework stands.
+    ("rework lock taken, S08 checkpointed", rework_snap("S08"), st.GATE_B_CHANGES_REQUESTED, "S08"),
+    ("rework: S08 done, tests next", rework_snap("S09"), st.GATE_B_CHANGES_REQUESTED, "S09"),
+    ("rework: verified, S11 replies next", rework_snap("S11"), st.GATE_B_CHANGES_REQUESTED, "S11"),
+    ("rework lock taken before S08's checkpoint", rework_snap("GATE_B", "CHANGES_REQUESTED"),
+     st.GATE_B_CHANGES_REQUESTED, "S08"),
+    ("rework replied, S11 stopped before the label", rework_snap("GATE_B", "PENDING"),
+     st.GATE_B_CHANGES_REQUESTED, "S11"),
     ("story PR approved (bot mode only)", merged_snap(
         issues=(issue(10, 1, labels=labelled("in-review")), issue(11, 2)),
         prs=(planning_pr(5, "MERGED"), story_pr(20, 1)), story_verdicts={20: "APPROVED"}),
@@ -306,11 +324,10 @@ STATE_TABLE = {
     "GATE_B_WAITING_REVIEW": (merged_snap(
         issues=GATE_B_ISSUES, prs=(planning_pr(5, "MERGED"), story_pr(20, 1)),
         story_verdicts={20: "PENDING"}), st.GATE_B_WAITING_REVIEW, None, set()),
-    # The table lets /factory-resume and /factory-continue rework; T4.2 builds S08's
-    # rework mode and adds them. Until then only /factory-status acts.
     "GATE_B_CHANGES_REQUESTED": (merged_snap(
         issues=GATE_B_ISSUES, prs=(planning_pr(5, "MERGED"), story_pr(20, 1)),
-        story_verdicts={20: "CHANGES_REQUESTED"}), st.GATE_B_CHANGES_REQUESTED, "S08", set()),
+        story_verdicts={20: "CHANGES_REQUESTED"}), st.GATE_B_CHANGES_REQUESTED, "S08",
+        {st.RESUME, st.CONTINUE}),
     "GATE_B_APPROVED_UNMERGED": (merged_snap(
         issues=GATE_B_ISSUES, prs=(planning_pr(5, "MERGED"), story_pr(20, 1)),
         story_verdicts={20: "APPROVED"}), st.GATE_B_APPROVED_UNMERGED, None, set()),
@@ -419,6 +436,10 @@ class InvariantTest(unittest.TestCase):
                     issue(11, 2, labels=labelled("in-progress"))),
             prs=(planning_pr(5, "MERGED"), story_pr(20, 1, "MERGED"))),
          "more than one story is in flight"),
+        ("rework checkpoint points outside the rework stations", rework_snap("S06"),
+         "points to S06, which is not a rework station"),
+        ("rework checkpoint points to close-out", rework_snap("S12"),
+         "points to S12, which is not a rework station"),
         ("direct factory commit on main", snap(**MERGED_PLANNING,
                                                direct_factory_commits=("abcdef1234",)),
          "did not arrive through a merged PR"),

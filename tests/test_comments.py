@@ -58,7 +58,16 @@ class FakeGitHub:
     def __call__(self, argv, *, timeout, cwd=None, env=None, input=None):
         assert timeout and timeout > 0
         args = argv[1:]
+        if args[:2] == ["pr", "view"]:  # read by `comment --to` to check the id
+            number = int(args[2])
+            return self._ok({"number": number, "state": "OPEN", "headRefName": "story/7-x",
+                             "commits": [], "reviews": [], "comments": [
+                                 {"id": str(c["id"]), "author": {"login": "me"},
+                                  "body": c["body"], "createdAt": "2026-09-24T10:00:00Z"}
+                                 for c in self.comments.get(number, [])]})
         assert args[0] == "api", args
+        if re.fullmatch(rf"repos/{REPO}/pulls/\d+/comments", args[1]):
+            return self._ok([[]])
         endpoint, method = args[1], args[args.index("--method") + 1]
         if m := re.fullmatch(rf"repos/{REPO}/issues/(\d+)", endpoint):
             number = int(m[1])
@@ -307,6 +316,34 @@ class CommentCliTest(unittest.TestCase):
         marker = find(cps[0]["body"], CheckpointMarker)
         self.assertEqual((marker.branch, marker.sha, marker.station),
                          ("story/7-add-thing", self.head, "S09"))
+
+    def test_reply_to_a_feedback_item(self):
+        """T4.2: a rework reply names the comment it answers."""
+        item = self.fake.add_human_comment(9, "/changes\nRename x")
+        self.body.write_text("Renamed x to y in abc1234.", encoding="utf-8")
+        code, out, err = self.run_cli("comment", "--pr", "9", "--kind", "reply",
+                                      "--to", str(item["id"]), "--body-file", str(self.body))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.fake.comments[9][-1]["body"],
+                         f"<!-- factory:reply to={item['id']} -->\nRenamed x to y in abc1234.")
+
+    def test_reply_to_refusals(self):
+        self.fake.add_human_comment(9, "/changes\nRename x")
+        self.body.write_text("text", encoding="utf-8")
+        cases = [
+            (("--pr", "9", "--kind", "reply", "--to", "555", "--body-file", str(self.body)),
+             "has no comment with id 555"),
+            (("--issue", "7", "--kind", "reply", "--to", "1", "--body-file", str(self.body)),
+             "use it with --pr"),
+            (("--issue", "7", "--kind", "checkpoint", "--station", "S08", "--next", "S09",
+              "--to", "1"), "only for --kind reply"),
+        ]
+        for extra, message in cases:
+            with self.subTest(extra=extra):
+                code, _, err = self.run_cli("comment", *extra)
+                self.assertEqual(code, 1)
+                self.assertIn(message, err)
+        self.assertEqual(self.fake.writes, [])
 
     def test_cli_refusals(self):
         self.body.write_text("text", encoding="utf-8")

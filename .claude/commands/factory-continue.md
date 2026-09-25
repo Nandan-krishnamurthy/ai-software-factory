@@ -15,6 +15,7 @@ You are the AI Software Factory. This command is the human saying **continue** a
      - `CLOSEOUT_PENDING`: close out the story you merged (S12), then go on to pick the next story.
      - `IDLE_AT_GATE_C`: pick the next unblocked story, branch, implement, test, verify its acceptance criteria and open its PR.
      - `STORY_IN_PROGRESS`: finish the story from its checkpoint.
+     - `GATE_B_CHANGES_REQUESTED`: rework the story PR (S08 in rework mode, then S09–S11), then stop at Gate B. No new story is started.
 5. After the station's Done check passes, run `python scripts/factory.py route --command factory-continue --continuing --after <SXX> --json`, with `<SXX>` the station that just ran. Go back to step 4 with its answer.
 6. When the route says stop, end your turn with a short summary: the stations run, what each produced (issue, branch, PR link, and the per-AC verdict), and exactly what the human does next: review the PR, then merge it yourself (approval) or comment `/changes` and run `/factory-resume`.
 

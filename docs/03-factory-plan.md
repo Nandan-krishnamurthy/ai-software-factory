@@ -227,7 +227,7 @@ The milestones run strictly in order. Within a milestone, tasks can be done in a
 
 ### T4.2 Rework path (S08 rework mode) · M
 - **Depends:** T4.1, T3.3
-- **Build:** S08 in rework mode: `signals.feedback()` gathers the items → address each one → run S09 and S10 again → push → reply to each item via `factory.py comment` → refresh the AC section of the PR → `review_round += 1`. When `max_review_rounds` is exceeded, the factory sets `factory:needs-human`.
+- **Build:** S08 in rework mode: take the rework lock (`status:changes-requested`) → `signals.rework_items()` gathers the items → address each one → run S09 and S10 again → push. S11 in rework mode then refreshes the PR (including its AC section), replies to each item via `factory.py comment --to <id>`, closes the round with a summary reply, sets `review_round += 1`, and moves the label back to `status:in-review`. When `max_review_rounds` is exceeded, the factory sets `factory:needs-human` (architecture §7.2).
 - **Acceptance criteria:** the same `/changes` never starts rework twice; every feedback item gets a marked reply.
 - **Tests:** a signals-level round-closure test; the demo.
 

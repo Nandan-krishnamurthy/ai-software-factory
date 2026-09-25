@@ -143,6 +143,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--body-file", metavar="F",
         help="UTF-8 file with the comment text, or '-' for stdin. Required for reply; "
              "an optional note for checkpoint.")
+    comment_parser.add_argument(
+        "--to", metavar="ID",
+        help="reply only (with --pr): the id of the feedback comment this reply answers, "
+             "as `feedback --rework --json` prints it. A reply without --to closes the "
+             "review round.")
     cp = comment_parser.add_argument_group("checkpoint options")
     cp.add_argument("--station", help="station just completed, e.g. S09")
     cp.add_argument("--next", dest="next_station", help="next station or gate, e.g. S10, GATE_B")
@@ -176,6 +181,11 @@ def build_parser() -> argparse.ArgumentParser:
                     "without a factory marker, posted after the factory's last push or reply. "
                     "Read-only. Stations answer each item with `factory.py comment`.")
     feedback_parser.add_argument("--pr", type=_positive_int, required=True, metavar="N")
+    feedback_parser.add_argument(
+        "--rework", action="store_true",
+        help="instead: the items of the round being reworked that no factory reply "
+             "answers yet (architecture §7.2). They stay listed after a rework push, until "
+             "each has its `comment --to` reply.")
     feedback_parser.add_argument("--json", action="store_true", help="machine-readable output")
     feedback_parser.set_defaults(handler=_feedback, needs_target=True)
 
@@ -341,20 +351,21 @@ def _feedback(args: argparse.Namespace) -> int:
     gate = signals.signals_for(config)
     pr = signals.fetch_pr(Gh(), args.target.repo, args.pr)
     verdict = gate.verdict(pr).value
-    items = gate.feedback(pr)
+    items = gate.rework_items(pr) if args.rework else gate.feedback(pr)
+    label = "unanswered rework item(s)" if args.rework else "feedback item(s) in this round"
     if args.json:
-        print(json.dumps({"pr": pr.number, "verdict": verdict, "items": [
+        print(json.dumps({"pr": pr.number, "verdict": verdict, "rework": args.rework, "items": [
             {"id": f.comment.id, "kind": f.comment.kind, "author": f.comment.author,
              "created_at": f.comment.created_at.isoformat(), "url": f.comment.url,
              "path": f.comment.path, "line": f.comment.line, "is_trigger": f.is_trigger,
              "text": f.text} for f in items]}, indent=2))
         return 0
-    print(f"PR #{pr.number}: {verdict}, {len(items)} feedback item(s) in this round")
+    print(f"PR #{pr.number}: {verdict}, {len(items)} {label}")
     for number, f in enumerate(items, 1):
         where = f" {f.comment.path}:{f.comment.line}" if f.comment.path else ""
         tag = " (/changes)" if f.is_trigger else ""
-        print(f"\n[{number}] {f.comment.kind}{where} by {f.comment.author}{tag} "
-              f"{f.comment.url}".rstrip())
+        print(f"\n[{number}] id {f.comment.id}: {f.comment.kind}{where} by "
+              f"{f.comment.author}{tag} {f.comment.url}".rstrip())
         print(f.text or "(no text)")
     return 0
 
@@ -376,8 +387,16 @@ def _comment(args: argparse.Namespace) -> int:
         if not text.strip():
             raise comments.CommentError("--kind reply needs --body-file with some text")
         comments.check_target_kind(gh, repo, number, expect_pr=args.pr is not None)
-        posted = comments.post_reply(gh, repo, number, text)
+        if args.to is not None:
+            if args.pr is None:
+                raise comments.CommentError("--to answers a PR comment; use it with --pr N")
+            ids = {c.id for c in signals.fetch_pr(gh, repo, number).comments}
+            if args.to not in ids:
+                raise comments.CommentError(f"PR #{number} has no comment with id {args.to}")
+        posted = comments.post_reply(gh, repo, number, text, to=args.to)
     else:
+        if args.to is not None:
+            raise comments.CommentError("--to is only for --kind reply")
         if args.pr is not None:
             raise comments.CommentError("checkpoints live on the story issue; use --issue N")
         if not args.station or not args.next_station:

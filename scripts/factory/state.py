@@ -20,12 +20,8 @@ All 14 states of the architecture §6 table are derived here. GATE_B_APPROVED_UN
 reachable only in bot mode: single-account signals never return ``APPROVED``. A story PR
 closed without merging is NEEDS_HUMAN (the story was rejected).
 
-Stations that are not built yet are handled without guessing:
-
-* CLOSEOUT_PENDING names S12. Until ``stations/S12-*.md`` exists (T4.3), ``route`` stops
-  and says the station is not available yet.
-* GATE_B_CHANGES_REQUESTED names S08, but only ``/factory-status`` may act on it until
-  S08 has its rework mode (T4.2). The normal S08 must never run on a reviewed PR.
+CLOSEOUT_PENDING names S12. Until ``stations/S12-*.md`` exists (T4.3), ``route`` stops
+and says the station is not available yet, so the factory never guesses.
 
 Conventions this module relies on (later stations must follow them):
 
@@ -36,10 +32,17 @@ Conventions this module relies on (later stations must follow them):
   no checkpoint yet, S06 has just picked it and S07 is next. A checkpoint that says
   ``GATE_B`` while the label still says in progress means S11 stopped between opening
   the PR and moving the label, so S11 runs again (it must be idempotent).
-* ``status:changes-requested`` is the rework lock: it stays until the rework moves the
-  label back to ``status:in-review`` (T4.2). While it is set, the state is
-  GATE_B_CHANGES_REQUESTED whatever the verdict says: a pushed rework commit starts a new
-  review round (so the verdict reads ``PENDING``) before every item has its reply.
+* Rework (T4.2, architecture §7.2). A ``/changes`` on the open story PR while the issue
+  is ``status:in-review`` means S08 starts rework mode. S08 first moves the label to
+  ``status:changes-requested``, the rework lock, and writes the checkpoint ``S08`` →
+  ``S08``. From then on the state is GATE_B_CHANGES_REQUESTED whatever the verdict says
+  (a pushed rework commit starts a new review round, so the verdict reads ``PENDING``
+  before every item has its reply), and the checkpoint's ``next`` names the station, as
+  while in progress: S08 → S09 → S10 → S11. S11 in rework mode replies to every item,
+  writes the checkpoint ``S11`` → ``GATE_B`` and moves the label back to
+  ``status:in-review`` last. A lock whose checkpoint says ``GATE_B`` is therefore either
+  a rework not yet started (the verdict still reads ``CHANGES_REQUESTED``: S08) or one
+  whose S11 stopped before moving the label (the replies closed the round: S11 again).
 * A story is done when its issue is closed **and** labelled ``status:done`` (S12). A
   story whose PR is merged but which is not ``status:done`` needs close-out, whether the
   merge closed its issue (``Closes #<I>``) or not. Such a story is still in flight
@@ -99,7 +102,7 @@ _ALLOWED = {
     IDLE_AT_GATE_C: [CONTINUE, STATUS],
     STORY_IN_PROGRESS: [RESUME, CONTINUE, STATUS],
     GATE_B_WAITING_REVIEW: [STATUS],
-    GATE_B_CHANGES_REQUESTED: [STATUS],  # T4.2 adds RESUME and CONTINUE (S08 rework mode)
+    GATE_B_CHANGES_REQUESTED: [RESUME, CONTINUE, STATUS],
     GATE_B_APPROVED_UNMERGED: [STATUS],
     CLOSEOUT_PENDING: [RESUME, CONTINUE, STATUS],
     INCREMENT_COMPLETE: [START, STATUS],
@@ -129,8 +132,10 @@ IN_PROGRESS, IN_REVIEW, CHANGES_REQUESTED, DONE = (
 _ACTIVE = {IN_PROGRESS, IN_REVIEW, CHANGES_REQUESTED}  # the same lock as ``pick``
 _FIRST_STORY_STATION = "S07"  # S06 (pick) sets in-progress before any checkpoint exists
 _REWORK_STATION = "S08"  # in rework mode (T4.2)
+_REWORK_EXIT_STATION = "S11"  # in rework mode: replies, then the label back to in-review
 _CLOSEOUT_STATION = "S12"
 _STORY_STATION = re.compile(r"S(0[6-9]|1[0-2])")  # S06-S12: the story loop and close-out
+_REWORK = re.compile(r"S(0[89]|1[01])")  # S08-S11: the stations a rework runs
 _INCREMENT = re.compile(r"^\d{3}-[a-z0-9]+(?:-[a-z0-9]+)*$")
 _STORY_HEADING = re.compile(r"^###\s+(STORY-\d{3,})\b", re.MULTILINE)
 
@@ -326,11 +331,11 @@ def _story_state(snap: Snapshot, increment: str, issue: IssueInfo) -> StateResul
         base["pr"] = pr.number
         verdict = snap.story_verdicts.get(pr.number, Verdict.PENDING.value)
         if CHANGES_REQUESTED in issue.labels or verdict == Verdict.CHANGES_REQUESTED.value:
-            return StateResult(GATE_B_CHANGES_REQUESTED, increment, _REWORK_STATION, details={
+            station = _rework_station(issue, verdict)
+            return StateResult(GATE_B_CHANGES_REQUESTED, increment, station, details={
                 **base, "branch": pr.head_ref,
-                "message": f"Changes requested on PR #{pr.number} ({story_id}). Rework (S08 "
-                           "rework mode) arrives in T4.2; until then only /factory-status "
-                           "is available."})
+                "message": f"Changes requested on PR #{pr.number} ({story_id}): rework is "
+                           f"next ({station} in rework mode)."})
         if verdict == Verdict.APPROVED.value:
             return StateResult(GATE_B_APPROVED_UNMERGED, increment, details={
                 **base, "message": f"PR #{pr.number} ({story_id}) is approved. Please merge "
@@ -355,6 +360,18 @@ def _story_state(snap: Snapshot, increment: str, issue: IssueInfo) -> StateResul
         **base, "items": [f"issue #{issue.number}"],
         "message": f"Story #{issue.number} ({story_id}) is in review but has no PR. Set it "
                    "back to status:in-progress to finish it, or to status:ready."})
+
+
+def _rework_station(issue: IssueInfo, verdict: str) -> str:
+    """Where rework stands; see the module docstring (T4.2)."""
+    nxt = issue.checkpoint_next
+    if CHANGES_REQUESTED not in issue.labels or nxt is None:
+        return _REWORK_STATION  # not started: S08 takes the lock
+    if nxt == "GATE_B":
+        if verdict == Verdict.CHANGES_REQUESTED.value:
+            return _REWORK_STATION  # the lock is taken, but S08 has not checkpointed yet
+        return _REWORK_EXIT_STATION  # replied; S11 stopped before moving the label
+    return nxt  # a rework station S08-S11; check_invariants rejected anything else
 
 
 def _story_prs(snap: Snapshot, issue: IssueInfo, state: str) -> list[PrInfo]:
@@ -444,6 +461,10 @@ def check_invariants(snap: Snapshot) -> list[str]:
                 and not (nxt == "GATE_B" or _STORY_STATION.fullmatch(nxt))):
             problems.append(f"issue #{issue.number} is in progress, but its checkpoint "
                             f"points to {nxt}, which is not a story station")
+        if (CHANGES_REQUESTED in issue.labels and nxt is not None
+                and not (nxt == "GATE_B" or _REWORK.fullmatch(nxt))):
+            problems.append(f"issue #{issue.number} is being reworked, but its checkpoint "
+                            f"points to {nxt}, which is not a rework station (S08-S11)")
 
     # 4. No unexpected factory commits on the default branch.
     for sha in snap.direct_factory_commits:

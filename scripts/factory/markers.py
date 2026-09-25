@@ -9,6 +9,7 @@ the human's in single-account mode (D5).
     <!-- factory:pr story=STORY-007 -->
     <!-- factory:checkpoint {"station":"S09","next":"S10",...} -->
     <!-- factory:reply -->
+    <!-- factory:reply to=IC_kwDOabc -->     (answers one feedback item, T4.2)
 
 ``build`` is strict and raises ``ValueError`` on bad input (that is a factory bug).
 ``parse_all`` / ``find`` are tolerant of whitespace, line breaks and CRLF, and silently
@@ -18,7 +19,7 @@ ignore anything malformed: parsing never raises on input text. Whether a marker 
 
 import json
 import re
-from dataclasses import asdict, dataclass, fields
+from dataclasses import MISSING, asdict, dataclass, fields
 from datetime import datetime
 from typing import ClassVar, TypeVar
 
@@ -27,6 +28,7 @@ _INCREMENT = re.compile(r"^\d{3}-[a-z0-9]+(?:-[a-z0-9]+)*$")
 _STATION = re.compile(r"^S\d{2}b?$")
 _NEXT = re.compile(r"^(?:S\d{2}b?|GATE_[ABC])$")
 _SHA = re.compile(r"^[0-9a-f]{7,40}$")
+_COMMENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,100}$")  # REST ids are numbers, GraphQL ids not
 
 # One marker: "<!--", optional whitespace, "factory:<kind>", a body that never contains
 # another comment opener or closer, then "-->". Excluding "<!--" from the body means an
@@ -113,9 +115,18 @@ class CheckpointMarker:
 
 @dataclass(frozen=True)
 class ReplyMarker:
-    """On every other comment or reply the factory posts."""
+    """On every other comment or reply the factory posts.
+
+    ``to`` is the id of the human comment this reply answers (a rework reply, T4.2). A
+    reply without ``to`` closes a review round (architecture §7.2).
+    """
 
     KIND: ClassVar[str] = "reply"
+    to: str | None = None
+
+    def __post_init__(self):
+        if self.to is not None:
+            _check(_COMMENT_ID, self.to, "comment id")
 
 
 Marker = StoryMarker | PlanningMarker | PrMarker | CheckpointMarker | ReplyMarker
@@ -131,7 +142,8 @@ def build(marker: Marker) -> str:
         payload = payload.replace("<", "\\u003c").replace(">", "\\u003e")
         return f"<!-- factory:checkpoint {payload} -->"
     if type(marker) in _ATTR_KINDS.values():
-        attrs = "".join(f" {f.name}={getattr(marker, f.name)}" for f in fields(marker))
+        attrs = "".join(f" {f.name}={getattr(marker, f.name)}" for f in fields(marker)
+                        if getattr(marker, f.name) is not None)  # optional and unset
         return f"<!-- factory:{marker.KIND}{attrs} -->"
     raise TypeError(f"not a factory marker: {marker!r}")
 
@@ -188,7 +200,8 @@ def _parse_one(kind: str, body: str) -> Marker | None:
             if match is None or match["key"] in attrs:
                 return None
             attrs[match["key"]] = match["value"]
-        if set(attrs) != {f.name for f in fields(cls)}:
+        required = {f.name for f in fields(cls) if f.default is MISSING}
+        if not required <= set(attrs) <= {f.name for f in fields(cls)}:
             return None
         return cls(**attrs)
     except (ValueError, TypeError, RecursionError):

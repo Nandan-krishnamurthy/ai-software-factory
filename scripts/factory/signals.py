@@ -20,6 +20,12 @@ A **review round** starts at the latest of: the newest commit on the PR, and the
 factory comment on it. The rework station pushes commits and replies to every item, which
 starts a new round, so the same ``/changes`` never triggers rework twice (§7.2).
 
+**Rework items** (T4.2) do not move with each push: they are the human comments since the
+factory's last **round summary** (a factory reply *without* ``to=``) that no factory reply
+answers yet (a reply marked ``to=<comment id>``). A rework that is interrupted after its
+push, or half-way through its replies, therefore finds exactly the items still open; a
+finished round has none.
+
 ``SingleAccountSignals`` is pure: it works on a ``PrSnapshot``. ``fetch_pr`` builds one
 from GitHub.
 """
@@ -33,7 +39,7 @@ from typing import Protocol
 
 from factory.errors import FactoryError
 from factory.gh import Gh
-from factory.markers import has_factory_marker
+from factory.markers import ReplyMarker, find, has_factory_marker
 
 
 class Verdict(Enum):
@@ -76,6 +82,7 @@ class Feedback:
 class GateSignals(Protocol):
     def verdict(self, pr: PrSnapshot) -> Verdict: ...
     def feedback(self, pr: PrSnapshot, since: datetime | None = None) -> list[Feedback]: ...
+    def rework_items(self, pr: PrSnapshot) -> list[Feedback]: ...
     def is_human(self, comment: Comment) -> bool: ...
 
 
@@ -129,7 +136,31 @@ class SingleAccountSignals:
 
     def feedback(self, pr: PrSnapshot, since: datetime | None = None) -> list[Feedback]:
         """Every human comment in the current round (or since ``since``), oldest first."""
-        start = since if since is not None else self.round_start(pr)
+        return self._items(pr, since if since is not None else self.round_start(pr))
+
+    # -- rework (T4.2) ------------------------------------------------------------------
+    def answered(self, pr: PrSnapshot) -> set[str]:
+        """Ids of the comments that a factory reply answers (``to=<id>``)."""
+        ids = set()
+        for comment in pr.comments:
+            reply = find(comment.body, ReplyMarker) if self.is_factory(comment) else None
+            if reply is not None and reply.to is not None:
+                ids.add(reply.to)
+        return ids
+
+    def last_round_close(self, pr: PrSnapshot) -> datetime | None:
+        """When the factory last closed a review round: its newest reply without ``to``."""
+        moments = [c.created_at for c in pr.comments if self.is_factory(c)
+                   and (reply := find(c.body, ReplyMarker)) is not None and reply.to is None]
+        return max(moments) if moments else None
+
+    def rework_items(self, pr: PrSnapshot) -> list[Feedback]:
+        """The feedback items of the round being reworked that have no answer yet."""
+        answered = self.answered(pr)
+        return [f for f in self._items(pr, self.last_round_close(pr))
+                if f.comment.id not in answered]
+
+    def _items(self, pr: PrSnapshot, start: datetime | None) -> list[Feedback]:
         items = []
         for comment in sorted(pr.comments, key=lambda c: c.created_at):
             if not self.is_human(comment) or not _after(comment.created_at, start):

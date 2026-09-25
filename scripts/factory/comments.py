@@ -4,7 +4,8 @@ Every comment the factory posts goes through this module, so every one carries a
 ``factory:`` marker (architecture §5.5, rule S14). That is how the factory's comments are
 told apart from the human's when both use the same GitHub account (D5).
 
-* ``post_reply`` adds a new comment that starts with ``<!-- factory:reply -->``.
+* ``post_reply`` adds a new comment that starts with ``<!-- factory:reply -->``, or
+  ``<!-- factory:reply to=<id> -->`` when it answers one feedback item (T4.2).
 * ``upsert_checkpoint`` keeps exactly **one** checkpoint comment per issue: it edits the
   existing one in place, or creates it if there is none.
 
@@ -56,11 +57,15 @@ def list_comments(gh: Gh, repo: str, number: int) -> list[dict]:
     return gh.api(f"repos/{repo}/issues/{number}/comments", paginate=True)
 
 
-def post_reply(gh: Gh, repo: str, number: int, text: str) -> Posted:
-    """Add a new comment marked ``<!-- factory:reply -->``."""
+def post_reply(gh: Gh, repo: str, number: int, text: str, *, to: str | None = None) -> Posted:
+    """Add a new comment marked ``<!-- factory:reply -->`` (``to=<id>`` if it answers one)."""
     if not text.strip():
         raise CommentError("a reply needs a non-empty body")
-    body = _checked_body(ReplyMarker(), text)
+    try:
+        marker = ReplyMarker(to=to)
+    except ValueError as err:
+        raise CommentError(f"invalid --to: {err}") from None
+    body = _checked_body(marker, text)
     created = gh.api(f"repos/{repo}/issues/{number}/comments", method="POST",
                      json_body={"body": body})
     return Posted("created", created["id"], created["html_url"], body)

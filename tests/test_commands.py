@@ -72,6 +72,10 @@ IDLE = snap(**MERGED, issues=(issue(10, 1), issue(11, 2)))
 
 def after_station(snapshot, station):
     """What the world looks like after ``station`` did its job (a simulated station)."""
+    if result(snapshot)["state"] == st.GATE_B_CHANGES_REQUESTED:
+        if station == "S11":  # replied to every item, label back to in-review: Gate B
+            return GATE_B
+        return rework_at(f"S{int(station[1:]) + 1:02d}")  # pushed: the verdict is PENDING
     files = set(snapshot.plan_files.get(INC, frozenset()))
     doc = dict(st.PLAN_DOCS).get(station)
     if station == "S00":
@@ -104,6 +108,20 @@ def story_at(next_station):
 
 GATE_B = snap(**{**MERGED, "prs": (*MERGED["prs"], story_pr(20, 1))},
               issues=(issue(10, 1, labels=labelled("in-review")), issue(11, 2)))
+# The human commented /changes on #10's PR: rework is next.
+CHANGES = dataclasses.replace(GATE_B, story_verdicts={20: "CHANGES_REQUESTED"})
+
+
+def rework_at(next_station):
+    """#10 under the rework lock; its checkpoint names ``next_station``."""
+    return snap(**{**MERGED, "branches": frozenset({"main", "story/10-first"}),
+                   "prs": (*MERGED["prs"], story_pr(20, 1))},
+                issues=(issue(10, 1, labels=labelled("changes-requested"),
+                              checkpoint_branch="story/10-first",
+                              checkpoint_next=next_station), issue(11, 2)),
+                story_verdicts={20: "PENDING"})
+
+
 # The human merged #10's PR, and the merge closed the issue: close-out is next.
 CLOSEOUT = snap(**{**MERGED, "prs": (*MERGED["prs"], story_pr(20, 1, "MERGED"))},
                 issues=(issue(10, 1, labels=labelled("in-review"), state="CLOSED"),
@@ -344,15 +362,23 @@ class RouteTest(unittest.TestCase):
         self.assertEqual((final.action, final.state), ("stop", st.CLOSEOUT_PENDING))
         self.assertIn("did not complete", final.message)
 
-    def test_changes_requested_waits_for_rework_mode(self):
-        """T4.1: the normal S08 never runs on a reviewed PR; rework mode arrives in T4.2."""
-        changes = dataclasses.replace(GATE_B, story_verdicts={20: "CHANGES_REQUESTED"})
-        self.assertEqual(result(changes)["state"], st.GATE_B_CHANGES_REQUESTED)
+    def test_rework_runs_s08_to_s11_then_stops_at_gate_b(self):
+        """T4.2 (architecture §7.2): /changes → S08 rework → S09 → S10 → S11 → Gate B."""
+        self.assertEqual(result(CHANGES)["state"], st.GATE_B_CHANGES_REQUESTED)
         for command in ("/factory-resume", "/factory-continue"):
             with self.subTest(command=command):
-                decision = route(command, result(changes))
-                self.assertEqual(decision.action, "stop")
-                self.assertIn("cannot act in state GATE_B_CHANGES_REQUESTED", decision.message)
+                first = route(command, result(CHANGES))
+                self.assertEqual((first.action, first.station, first.station_file),
+                                 ("run", "S08", "stations/S08-implement.md"))
+                ran, final = drive(command, CHANGES)
+                self.assertEqual(ran, ["S08", "S09", "S10", "S11"])  # never S06
+                self.assertEqual((final.action, final.state),
+                                 ("stop", st.GATE_B_WAITING_REVIEW))
+
+    def test_an_interrupted_rework_resumes_from_its_checkpoint(self):
+        ran, final = drive("/factory-resume", rework_at("S10"))
+        self.assertEqual(ran, ["S10", "S11"])
+        self.assertEqual(final.state, st.GATE_B_WAITING_REVIEW)
 
     def test_needs_human_and_inconsistent_stop(self):
         needs = snap(**MERGED, issues=(issue(10, 1), issue(11, 2)), needs_human=("issue #11",))
