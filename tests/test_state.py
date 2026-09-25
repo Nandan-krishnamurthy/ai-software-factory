@@ -474,11 +474,89 @@ class CollectSnapshotTest(unittest.TestCase):
         self.assertEqual(snapshot.direct_factory_commits, ("2" * 40,))
         self.assertEqual(derive_state(snapshot).state, st.INCONSISTENT)
 
+    def test_planning_pr_merged_with_a_merge_commit_is_consistent(self):
+        # Regression: the M2 demo merged Planning PR #1 with a normal merge commit, and
+        # the state became INCONSISTENT because the branch's own commits (committed by
+        # the human's account, not web-flow) were taken for direct pushes.
+        fake = self.merged()
+        fake.commits = merge_commit_history()
+        snapshot = collect(fake)
+        self.assertEqual(snapshot.direct_factory_commits, ())
+        self.assertEqual(derive_state(snapshot).state, st.ISSUES_PENDING)
+
     def test_invalid_config_is_inconsistent(self):
         fake = self.merged()
         fake.put("main", ".factory/config.json", '{"schema": 2}')
         result = derive_state(collect(fake))
         self.assertEqual(result.state, st.INCONSISTENT)
+
+
+def commit(sha, message, committer, *parents):
+    """One entry of a ``repos/<r>/commits`` listing, as GitHub returns it."""
+    return {"sha": sha, "commit": {"message": message}, "committer": {"login": committer},
+            "parents": [{"sha": p} for p in parents]}
+
+
+def merge_commit_history(merger="web-flow"):
+    """The target's `main` after the M2 demo, newest first (shas shortened to letters).
+
+    99e0ddf ─ 1e32681 ──────────────────────────────────── 2a5a64e (merge of PR #1)
+          └─ c6b13c2 S00 ─ … ─ 01ef0d9 S04 ─ e2babf0 S05 ─┘
+    """
+    base, moved, merge = "0" * 40, "m" * 40, "x" * 40
+    stations = ["S00", "S02", "S03", "S04", "S04", "S05"]
+    branch = [f"{chr(ord('a') + i)}" * 40 for i in range(len(stations))]
+    listing = [commit(merge, "Merge pull request #1 from o/factory/plan-001-initial",
+                      merger, moved, branch[-1])]
+    for i in reversed(range(len(stations))):
+        parent = branch[i - 1] if i else base
+        listing.append(commit(branch[i], f"{stations[i]}: step\n\nFactory-Station: {stations[i]}",
+                              "me", parent))
+    listing.append(commit(moved, "chore: move PRD under factory docs", "me", base))
+    listing.append(commit(base, "chore: initialize factory test target", "me"))
+    return listing
+
+
+class DirectFactoryCommitsTest(unittest.TestCase):
+    """Invariant 4: factory commits on the default branch must come from a merged PR."""
+
+    def test_normal_merge_by_github_is_fine(self):
+        self.assertEqual(st.direct_factory_commits(merge_commit_history()), ())
+
+    def test_local_merge_does_not_excuse_the_branch_commits(self):
+        history = merge_commit_history(merger="me")
+        flagged = st.direct_factory_commits(history)
+        self.assertEqual(len(flagged), 6)
+        self.assertEqual(derive_state(merged_snap(direct_factory_commits=flagged)).state,
+                         st.INCONSISTENT)
+
+    def test_direct_push_after_a_merge_is_still_detected(self):
+        history = merge_commit_history()
+        pushed = commit("p" * 40, "fix\n\nFactory-Station: S08", "me", history[0]["sha"])
+        self.assertEqual(st.direct_factory_commits([pushed, *history]), ("p" * 40,))
+
+    def test_direct_push_that_a_later_merge_also_contains_is_detected(self):
+        # A factory commit pushed straight to main, then a PR branched from after it and
+        # merged: the commit is an ancestor of the merge's first parent, so the merge
+        # did not bring it in.
+        base, pushed, side, merge = "0" * 40, "p" * 40, "s" * 40, "x" * 40
+        history = [
+            commit(merge, "Merge pull request #2", "web-flow", pushed, side),
+            commit(side, "S08: work\n\nFactory-Station: S08", "me", pushed),
+            commit(pushed, "hotfix\n\nFactory-Station: S08", "me", base),
+            commit(base, "init", "me"),
+        ]
+        self.assertEqual(st.direct_factory_commits(history), (pushed,))
+
+    def test_squash_and_rebase_merges_are_fine(self):
+        history = [commit("q" * 40, "Story (#3)\n\nFactory-Station: S08", "web-flow", "0" * 40),
+                   commit("0" * 40, "init", "me")]
+        self.assertEqual(st.direct_factory_commits(history), ())
+
+    def test_listing_without_parents_keeps_the_committer_rule(self):
+        history = [{"sha": "1" * 40, "commit": {"message": "x\n\nFactory-Station: S02"},
+                    "committer": {"login": "me"}}]
+        self.assertEqual(st.direct_factory_commits(history), ("1" * 40,))
 
 
 class StateCliTest(unittest.TestCase):
