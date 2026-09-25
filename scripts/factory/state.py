@@ -20,8 +20,8 @@ All 14 states of the architecture §6 table are derived here. GATE_B_APPROVED_UN
 reachable only in bot mode: single-account signals never return ``APPROVED``. A story PR
 closed without merging is NEEDS_HUMAN (the story was rejected).
 
-CLOSEOUT_PENDING names S12. Until ``stations/S12-*.md`` exists (T4.3), ``route`` stops
-and says the station is not available yet, so the factory never guesses.
+CLOSEOUT_PENDING names S12, whose ``factory.py closeout`` refuses unless the story PR is
+merged; S12 sets ``status:done`` (T4.3), which moves the state on to Gate C.
 
 Conventions this module relies on (later stations must follow them):
 

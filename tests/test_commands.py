@@ -128,28 +128,16 @@ CLOSEOUT = snap(**{**MERGED, "prs": (*MERGED["prs"], story_pr(20, 1, "MERGED"))}
                         issue(11, 2)))
 
 
-def drive(command, snapshot, *, stuck=None, limit=20, stations_dir=commands.STATIONS_DIR):
+def drive(command, snapshot, *, stuck=None, limit=20):
     """Run a command's loop as its file describes. Returns (stations run, final route)."""
     ran = []
-    decision = route(command, result(snapshot), stations_dir=stations_dir)
+    decision = route(command, result(snapshot))
     while decision.action == "run" and len(ran) < limit:
         ran.append(decision.station)
         if decision.station != stuck:
             snapshot = after_station(snapshot, decision.station)
-        decision = route(command, result(snapshot), continuing=True, after=decision.station,
-                         stations_dir=stations_dir)
+        decision = route(command, result(snapshot), continuing=True, after=decision.station)
     return ran, decision
-
-
-def stations_with_s12(test):
-    """The real station files plus a stand-in S12, until T4.3 writes the real one."""
-    tmp = tempfile.TemporaryDirectory()
-    test.addCleanup(tmp.cleanup)
-    folder = Path(tmp.name)
-    for path in commands.STATIONS_DIR.glob("*.md"):
-        (folder / path.name).write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
-    (folder / "S12-closeout.md").write_text("stand-in for T4.3", encoding="utf-8")
-    return folder
 
 
 class RouteAcceptanceTest(unittest.TestCase):
@@ -317,31 +305,28 @@ class RouteTest(unittest.TestCase):
         self.assertEqual((decision.action, decision.state), ("stop", st.GATE_B_WAITING_REVIEW))
         self.assertEqual(route("/factory-resume", result(IDLE)).action, "stop")
 
-    def test_closeout_routes_to_s12_which_is_not_built_yet(self):
-        """T4.1: after the human's merge, both commands route to S12 (built in T4.3)."""
+    def test_closeout_routes_to_s12(self):
+        """T4.1/T4.3: after the human's merge, both commands run S12 first."""
         self.assertEqual(result(CLOSEOUT)["state"], st.CLOSEOUT_PENDING)
         for command in ("/factory-resume", "/factory-continue"):
             with self.subTest(command=command):
                 decision = route(command, result(CLOSEOUT))
-                self.assertEqual(decision.action, "stop")
-                self.assertIn("S12, which is not available yet", decision.message)
-                self.assertIn("S12", COMMANDS[command].stations)
+                self.assertEqual((decision.action, decision.station, decision.station_file),
+                                 ("run", "S12", "stations/S12-closeout.md"))
 
     def test_resume_closes_out_then_stops_at_gate_c(self):
-        ran, final = drive("/factory-resume", CLOSEOUT, stations_dir=stations_with_s12(self))
+        ran, final = drive("/factory-resume", CLOSEOUT)
         self.assertEqual(ran, ["S12"])
         self.assertEqual((final.action, final.state), ("stop", st.IDLE_AT_GATE_C))
         self.assertNotIn("S12", COMMANDS["/factory-resume"].through_gate_c)
 
     def test_continue_closes_out_then_takes_exactly_one_story_to_gate_b(self):
-        ran, final = drive("/factory-continue", CLOSEOUT,
-                           stations_dir=stations_with_s12(self))
+        ran, final = drive("/factory-continue", CLOSEOUT)
         self.assertEqual(ran, ["S12", "S06", "S07", "S08", "S09", "S10", "S11"])
         self.assertEqual((final.action, final.state), ("stop", st.GATE_B_WAITING_REVIEW))
         self.assertEqual(ran.count("S06"), 1)
 
     def test_continue_after_closeout_stops_when_nothing_can_start(self):
-        folder = stations_with_s12(self)
         last_done = snap(**MERGED, issues=(
             issue(10, 1, labels=labelled("done"), state="CLOSED"),
             issue(11, 2, labels=labelled("done"), state="CLOSED")))
@@ -352,12 +337,11 @@ class RouteTest(unittest.TestCase):
                                 (all_blocked, st.NEEDS_HUMAN)):
             with self.subTest(state=state):
                 decision = route("/factory-continue", result(snapshot), continuing=True,
-                                 after="S12", stations_dir=folder)
+                                 after="S12")
                 self.assertEqual((decision.action, decision.state), ("stop", state))
 
     def test_an_incomplete_closeout_stops_continue(self):
-        ran, final = drive("/factory-continue", CLOSEOUT, stuck="S12",
-                           stations_dir=stations_with_s12(self))
+        ran, final = drive("/factory-continue", CLOSEOUT, stuck="S12")
         self.assertEqual(ran, ["S12"])
         self.assertEqual((final.action, final.state), ("stop", st.CLOSEOUT_PENDING))
         self.assertIn("did not complete", final.message)

@@ -37,7 +37,7 @@ FRONTMATTER_KEYS = ["id", "name", "allowed_from", "next"]
 GATES = {"GATE_A", "GATE_B", "GATE_C"}
 ENTRY_POINTS = {"START"}  # /factory-start
 # Stations that other stations may already name, before they are built.
-PENDING = {"S01": "T5.1 (M5)", "S12": "T4.3 (M4)"}
+PENDING = {"S01": "T5.1 (M5)"}
 # The stations built by T2.4. Later tasks add more; these must always exist.
 PLANNING_STATIONS = {"S00-intake.md", "S02-requirements.md", "S03-architecture.md",
                      "S04-plan.md", "S05-stories.md", "S05b-issues.md"}
@@ -486,6 +486,33 @@ class StoryStationsTest(unittest.TestCase):
         self.assertIn("Repeat until `feedback --pr <P> --rework` lists no item", s11)
         self.assertIn("feedback --pr <P> --rework` lists no item",
                       self.section("S11", "Done check"))
+
+    def test_s12_closes_out_only_after_an_observed_merge(self):
+        """T4.3: S12 confirms the merge first, merges nothing and picks nothing."""
+        s12 = self.by_id["S12"]
+        self.assertEqual((s12.allowed_from, s12.next), (["GATE_B"], "GATE_C"))
+        steps = self.section("S12", "Steps")
+        confirm = steps.index("python scripts/factory.py closeout --issue <I> --json")
+        for later in ("git -C <T> switch <D>", "git -C <T> branch -D <B>",
+                      "python scripts/factory.py comment --issue <I> --kind reply",
+                      "python scripts/factory.py closeout --issue <I> --finish"):
+            self.assertLess(confirm, steps.index(later), later)
+        self.assertNotIn("pick", " ".join(commands(s12.text)))
+        self.assertIn("reports `CLOSEOUT_PENDING` with `next_station` `S12`",
+                      self.section("S12", "Preconditions"))
+        self.assertIn("reports `IDLE_AT_GATE_C`", self.section("S12", "Done check"))
+
+    def test_s12_deletes_only_the_merged_branch_and_marks_done_before_the_checkpoint(self):
+        steps = self.section("S12", "Steps")
+        delete = steps.index("git -C <T> branch -D <B>")
+        self.assertLess(steps.index("git -C <T> rev-parse <B>"), delete)
+        self.assertIn("If they differ, the branch has commits that are not in the PR: keep it",
+                      steps)
+        # status:done (closeout --finish) first; the checkpoint is only a record after it.
+        self.assertLess(steps.index("closeout --issue <I> --finish"),
+                        steps.index("**Checkpoint**"))
+        self.assertIn("--station S12 --next GATE_C --branch <B> --sha <merge_sha>",
+                      self.section("S12", "Checkpoint"))
 
     def test_s11_brings_the_branch_up_to_date_and_re_tests_before_the_pr(self):
         steps = self.section("S11", "Steps")
