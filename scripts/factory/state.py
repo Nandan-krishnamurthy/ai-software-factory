@@ -43,6 +43,9 @@ Conventions this module relies on (later stations must follow them):
   ``status:in-review`` last. A lock whose checkpoint says ``GATE_B`` is therefore either
   a rework not yet started (the verdict still reads ``CHANGES_REQUESTED``: S08) or one
   whose S11 stopped before moving the label (the replies closed the round: S11 again).
+* Gate C lists as ready only the stories ``pick`` may start: the unblocked rule is
+  ``pick.readiness`` for both, so ``IDLE_AT_GATE_C`` always means ``pick`` will succeed,
+  and open stories that are all blocked are NEEDS_HUMAN.
 * A story is done when its issue is closed **and** labelled ``status:done`` (S12). A
   story whose PR is merged but which is not ``status:done`` needs close-out, whether the
   merge closed its issue (``Closes #<I>``) or not. Such a story is still in flight
@@ -61,9 +64,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from factory import comments as comments_mod
+from factory import pick as pick_mod
 from factory.config import Config, ConfigError, parse_config
 from factory.errors import GhError
 from factory.gh import Gh
+from factory.issues import blocked_by_numbers
 from factory.markers import PlanningMarker, PrMarker, StoryMarker, find
 from factory.signals import Verdict, fetch_pr, signals_for
 
@@ -151,6 +156,7 @@ class IssueInfo:
     story: StoryMarker | None
     checkpoint_branch: str | None = None
     checkpoint_next: str | None = None  # e.g. "S09" or "GATE_B"; read for active stories
+    blocked_by: tuple[int, ...] = ()  # issue numbers on the body's "Blocked by:" line
 
     @property
     def status_labels(self) -> set[str]:
@@ -182,6 +188,8 @@ class Snapshot:
     planning_verdicts: dict[int, str] = field(default_factory=dict)  # open PR no. -> Verdict
     story_verdicts: dict[int, str] = field(default_factory=dict)  # open story PR -> Verdict
     issues: tuple[IssueInfo, ...] = ()
+    # Blockers that are not story issues: number -> open? (absent: not found, so open)
+    other_blockers: dict[int, bool] = field(default_factory=dict)
     needs_human: tuple[str, ...] = ()  # e.g. ("issue #4", "PR #7")
     stories_on_default: dict[str, frozenset[str]] = field(default_factory=dict)
     direct_factory_commits: tuple[str, ...] = ()  # shas
@@ -292,15 +300,31 @@ def derive_state(snap: Snapshot) -> StateResult:
             "message": f"Increment {increment} is complete: all {len(story_issues)} "
                        "stories are done. Run /factory-start with new requirements.",
             "done": sorted(i.number for i in story_issues)})
-    ready = sorted(i.number for i in open_issues if "status:ready" in i.labels)
+    found = _readiness(snap)
+    ready = sorted(s.number for s in found.unblocked if s.increment == increment)
+    blocked = {str(n): list(bs) for n, bs in sorted(found.blocked.items())}
     if not ready:
+        waits = "; ".join(f"#{n} waits for " + ", ".join(f"#{b}" for b in bs)
+                          for n, bs in blocked.items())
         return StateResult(NEEDS_HUMAN, increment, details={
-            "message": "No story is ready: every open story is blocked.",
-            "items": [f"issue #{i.number}" for i in open_issues]})
+            "message": "No story is ready: every open story is blocked"
+                       + (f" ({waits})." if waits else "."),
+            "items": [f"issue #{i.number}" for i in open_issues], "blocked": blocked})
     return StateResult(IDLE_AT_GATE_C, increment, "S06", details={
         "message": f"{len(ready)} story(ies) ready. Say continue (/factory-continue) to "
                    "start the next one.",
-        "ready": ready})
+        "ready": ready, "blocked": blocked})
+
+
+def _readiness(snap: Snapshot) -> pick_mod.Readiness:
+    """The unblocked rule exactly as ``pick`` applies it (requirements §4): ready means
+    labelled ``status:ready`` **and** every ``Blocked by`` issue closed, not the label alone."""
+    stories = [pick_mod.StoryIssue(
+        number=i.number, story_id=i.story.id, increment=i.story.increment, title="",
+        open=i.state == "OPEN", labels=i.labels, milestone=None, blocked_by=i.blocked_by)
+        for i in snap.issues if i.story is not None]
+    is_open = {**snap.other_blockers, **{i.number: i.state == "OPEN" for i in snap.issues}}
+    return pick_mod.readiness(stories, is_open)
 
 
 def _story_state(snap: Snapshot, increment: str, issue: IssueInfo) -> StateResult:
@@ -663,7 +687,22 @@ def collect_snapshot(gh: Gh, repo: str) -> Snapshot:
             checkpoint = found[1] if found else None
         issues.append(IssueInfo(i["number"], i["state"], labels, find(i.get("body"), StoryMarker),
                                 checkpoint.branch if checkpoint else None,
-                                checkpoint.next if checkpoint else None))
+                                checkpoint.next if checkpoint else None,
+                                blocked_by_numbers(i.get("body") or "")))
+
+    # A "Blocked by" line can name an issue that is not a story (a human edited it). pick
+    # sees every issue, so read those too; one that cannot be found counts as open.
+    other_blockers: dict[int, bool] = {}
+    seen = {i.number for i in issues}
+    for number in sorted({n for i in issues for n in i.blocked_by} - seen):
+        try:
+            item = _get(gh, f"repos/{repo}/issues/{number}")
+        except GhError as err:
+            if "HTTP 410" not in err.stderr:  # 410: a deleted issue, like pick skips it
+                raise
+            item = None
+        if isinstance(item, dict):
+            other_blockers[number] = (item.get("state") or "open").lower() == "open"
 
     needs_human = [f"issue #{i['number']}" for i in gh.json(
         ["issue", "list", "--repo", repo, "--state", "open", "--label", "factory:needs-human",
@@ -678,7 +717,8 @@ def collect_snapshot(gh: Gh, repo: str) -> Snapshot:
 
     config_text = _file_text(gh, repo, ".factory/config.json", default)
     snapshot = Snapshot(repo=repo, default_branch=default, branches=branches, prs=tuple(prs),
-                        issues=tuple(issues), needs_human=tuple(needs_human),
+                        issues=tuple(issues), other_blockers=other_blockers,
+                        needs_human=tuple(needs_human),
                         existing_project=existing)
     increment = current_increment(snapshot)
 
@@ -721,5 +761,5 @@ def collect_snapshot(gh: Gh, repo: str) -> Snapshot:
         config_found=config_text is not None, existing_project=existing,
         plan_files=plan_files, plan_config=plan_config, prs=tuple(prs),
         planning_verdicts=verdicts, story_verdicts=story_verdicts, issues=tuple(issues),
-        needs_human=tuple(needs_human),
+        other_blockers=other_blockers, needs_human=tuple(needs_human),
         stories_on_default=stories, direct_factory_commits=direct)

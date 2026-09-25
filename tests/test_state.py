@@ -37,9 +37,9 @@ def story(n, inc=INC):
 
 
 def issue(number, n, labels=("factory:story", "status:ready"), state="OPEN", inc=INC,
-          checkpoint_branch=None, checkpoint_next=None):
+          checkpoint_branch=None, checkpoint_next=None, blocked_by=()):
     return IssueInfo(number, state, frozenset(labels), story(n, inc), checkpoint_branch,
-                     checkpoint_next)
+                     checkpoint_next, tuple(blocked_by))
 
 
 def labelled(status):
@@ -567,6 +567,7 @@ class FakeRepo:
         self.needs_human: list[int] = []
         self.pr_views: dict[int, dict] = {}
         self.issue_comments: dict[int, list[dict]] = {}
+        self.rest_issues: dict[int, dict] = {}  # issues that are not stories, by number
         self.commits: list[dict] = []
         self.calls: list[list[str]] = []
 
@@ -605,6 +606,9 @@ class FakeRepo:
             return self.ok([[{"name": b} for b in sorted(self.branches)]])
         if m := re.fullmatch(rf"repos/{REPO}/issues/(\d+)/comments", endpoint):
             return self.ok([self.issue_comments.get(int(m[1]), [])])
+        if m := re.fullmatch(rf"repos/{REPO}/issues/(\d+)", endpoint):
+            found = self.rest_issues.get(int(m[1]))
+            return self.ok(found) if found else self.not_found()
         if re.fullmatch(rf"repos/{REPO}/pulls/\d+/comments", endpoint):
             return self.ok([[]])
         if endpoint == f"repos/{REPO}/git/trees/{self.default}?recursive=1":
@@ -690,7 +694,8 @@ class CollectSnapshotTest(unittest.TestCase):
              "createdAt": ts(7)}])
         self.assertEqual(derive_state(collect(fake)).state, st.GATE_A_WAITING)
 
-    def merged(self):
+    @staticmethod
+    def merged():
         fake = FakeRepo()
         fake.put("main", ".factory/config.json", CONFIG)
         fake.put("main", f"{DOCS}/05-stories.md",
@@ -699,7 +704,8 @@ class CollectSnapshotTest(unittest.TestCase):
                      "body": build(PlanningMarker(INC))}]
         return fake
 
-    def story_issue(self, number, n, labels=("factory:story", "status:ready")):
+    @staticmethod
+    def story_issue(number, n, labels=("factory:story", "status:ready")):
         return {"number": number, "state": "OPEN", "labels": [{"name": x} for x in labels],
                 "body": build(story(n)) + "\n## Story"}
 
@@ -952,6 +958,124 @@ class StateCliTest(unittest.TestCase):
         self.assertEqual(out.splitlines()[0], self.banner)
         self.assertIn("State: PLANNING (increment 001-initial)", out)
         self.assertIn("Next station: S00", out)
+
+
+
+class ReadinessTest(unittest.TestCase):
+    """Gate C "ready" follows the unblocked rule (requirements §4) exactly as ``pick`` does:
+    labelled ``status:ready`` and every ``Blocked by`` issue closed. Regression: after the
+    close-out of STORY-002 the state engine reported #4-#13 ready although #5-#13 were
+    still blocked, because it looked at the label alone."""
+
+    def stories(self, *numbers):
+        return {INC: frozenset(f"STORY-{n:03d}" for n in numbers)}
+
+    def test_demo_after_story_002_closeout(self):
+        done = labelled("done")
+        issues = (issue(2, 1, labels=done, state="CLOSED"),
+                  issue(3, 2, labels=done, state="CLOSED", blocked_by=[2]),
+                  issue(4, 3, blocked_by=[3]),
+                  issue(5, 4, blocked_by=[4]), issue(6, 5, blocked_by=[4]),
+                  issue(7, 6, blocked_by=[6]), issue(8, 7, blocked_by=[4]),
+                  issue(9, 8, blocked_by=[8]), issue(10, 9, blocked_by=[7, 9]),
+                  issue(11, 10, blocked_by=[8]), issue(12, 11, blocked_by=[7, 10, 11]),
+                  issue(13, 12, blocked_by=[7, 10, 11]))
+        result = derive_state(merged_snap(issues=issues,
+                                          stories_on_default=self.stories(*range(1, 13))))
+        self.assertEqual((result.state, result.next_station), (st.IDLE_AT_GATE_C, "S06"))
+        self.assertEqual(result.details["ready"], [4])
+        self.assertEqual(result.details["message"], "1 story(ies) ready. Say continue "
+                                                    "(/factory-continue) to start the next one.")
+        self.assertEqual(result.details["blocked"]["5"], [4])
+        self.assertEqual(result.details["blocked"]["12"], [7, 10, 11])
+        self.assertEqual(validate_output(result.to_dict()), [])
+
+    def test_every_ready_story_blocked_is_needs_human(self):
+        issues = (issue(10, 1, labels=labelled("blocked")), issue(11, 2, blocked_by=[10]))
+        result = derive_state(merged_snap(issues=issues))
+        self.assertEqual(result.state, st.NEEDS_HUMAN)
+        self.assertEqual(result.details["blocked"], {"11": [10]})
+        self.assertIn("#11 waits for #10", result.details["message"])
+
+    def test_a_closed_blocker_unblocks(self):
+        issues = (issue(10, 1, labels=labelled("done"), state="CLOSED"),
+                  issue(11, 2, blocked_by=[10]))
+        result = derive_state(merged_snap(issues=issues))
+        self.assertEqual((result.state, result.details["ready"]), (st.IDLE_AT_GATE_C, [11]))
+
+    def test_an_unseen_blocker_counts_as_open(self):
+        issues = (issue(10, 1, blocked_by=[99]), issue(11, 2, labels=labelled("blocked")))
+        self.assertEqual(derive_state(merged_snap(issues=issues)).state, st.NEEDS_HUMAN)
+        closed = merged_snap(issues=issues, other_blockers={99: False})
+        self.assertEqual(derive_state(closed).details["ready"], [10])
+        still_open = merged_snap(issues=issues, other_blockers={99: True})
+        self.assertEqual(derive_state(still_open).state, st.NEEDS_HUMAN)
+
+    def test_state_and_pick_agree(self):
+        """Random Gate C snapshots, collected the way the CLI does: the state engine's
+        ready list is exactly the set of stories ``pick`` may start."""
+        from factory import pick as pick_mod
+        rng = random.Random(4)
+        for _ in range(150):
+            count = rng.randint(1, 6)
+            fake = CollectSnapshotTest.merged()
+            fake.put("main", f"{DOCS}/05-stories.md", "# Stories\n" + "".join(
+                f"### STORY-{n:03d}: S{n}\n" for n in range(1, count + 1)))
+            raw = []
+            for n in range(1, count + 1):
+                number = 9 + n
+                status = rng.choice(["ready", "ready", "blocked", "done"])
+                blockers = sorted(rng.sample(range(10, 10 + count + 2), rng.randint(0, 2)))
+                body = (build(story(n)) + "\n## Dependencies\nBlocked by: "
+                        + (", ".join(f"#{b}" for b in blockers) or "None") + "\n")
+                raw.append({"number": number, "title": f"S{n}",
+                            "state": "CLOSED" if status == "done" else "OPEN",
+                            "labels": [{"name": "factory:story"},
+                                       {"name": f"status:{status}"}], "body": body})
+            fake.issues = raw
+            result = derive_state(collect(fake))
+            stories, is_open = pick_mod.parse_issues(raw)
+            with self.subTest(issues=[(i["number"], i["labels"][1]["name"], i["state"],
+                                       i["body"].rsplit("Blocked by: ", 1)[1].strip())
+                                      for i in raw]):
+                try:
+                    choice = pick_mod.choose(stories, is_open)
+                except pick_mod.PickError:
+                    if any(i["state"] == "OPEN" for i in raw):
+                        self.assertEqual(result.state, st.NEEDS_HUMAN)
+                    else:
+                        self.assertEqual(result.state, st.INCREMENT_COMPLETE)
+                    continue
+                self.assertEqual(result.state, st.IDLE_AT_GATE_C)
+                self.assertEqual(result.details["ready"],
+                                 sorted(s.number for s in choice.unblocked))
+                self.assertIn(choice.picked.number, result.details["ready"])
+
+
+class CollectBlockersTest(unittest.TestCase):
+    def test_blocked_by_is_read_from_the_issue_body(self):
+        fake = CollectSnapshotTest.merged()
+        first = CollectSnapshotTest.story_issue(10, 1)
+        second = CollectSnapshotTest.story_issue(11, 2)
+        second["body"] += "\n## Dependencies\nBlocked by: #10\n"
+        fake.issues = [first, second]
+        snapshot = collect(fake)
+        self.assertEqual([i.blocked_by for i in snapshot.issues], [(), (10,)])
+        result = derive_state(snapshot)
+        self.assertEqual((result.state, result.details["ready"]), (st.IDLE_AT_GATE_C, [10]))
+
+    def test_a_blocker_that_is_not_a_story_is_read_too(self):
+        fake = CollectSnapshotTest.merged()
+        first = CollectSnapshotTest.story_issue(10, 1)
+        first["body"] += "\nBlocked by: #50, #51\n"
+        second = CollectSnapshotTest.story_issue(11, 2, ("factory:story", "status:blocked"))
+        fake.issues = [first, second]
+        fake.rest_issues[50] = {"number": 50, "state": "closed"}  # #51 does not exist
+        snapshot = collect(fake)
+        self.assertEqual(snapshot.other_blockers, {50: False})
+        self.assertEqual(derive_state(snapshot).details["blocked"], {"10": [51]})
+        fake.rest_issues[51] = {"number": 51, "state": "closed"}
+        self.assertEqual(derive_state(collect(fake)).details["ready"], [10])
 
 
 if __name__ == "__main__":

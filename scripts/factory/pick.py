@@ -101,16 +101,16 @@ def parse_issues(items: list[dict]) -> tuple[list[StoryIssue], dict[int, bool]]:
     return stories, is_open
 
 
-def choose(stories: list[StoryIssue], is_open: dict[int, bool]) -> Choice:
-    """Apply the unblocked rule. Raises ``PickError`` when nothing may be picked."""
-    in_flight = sorted((s for s in stories if s.open and s.labels & IN_FLIGHT),
-                       key=lambda s: s.number)
-    if in_flight:
-        busy = ", ".join(f"#{s.number} ({s.story_id}, {sorted(s.labels & IN_FLIGHT)[0]})"
-                         for s in in_flight)
-        raise PickError(f"a story is already in flight: {busy}. The factory works on one "
-                        "story at a time; finish it first")
+@dataclass(frozen=True)
+class Readiness:
+    unblocked: tuple[StoryIssue, ...]  # in picking order
+    blocked: dict[int, tuple[int, ...]]  # ready story -> its blockers that are still open
+    duplicates: dict[str, list[int]]  # story id -> its issues, when it has several
 
+
+def readiness(stories: list[StoryIssue], is_open: dict[int, bool]) -> Readiness:
+    """The unblocked rule (requirements §4), and nothing else. ``choose`` and the state
+    engine both use it, so they always agree on which stories are ready."""
     by_story: dict[str, list[int]] = {}
     for s in stories:
         by_story.setdefault(s.story_id, []).append(s.number)
@@ -127,6 +127,21 @@ def choose(stories: list[StoryIssue], is_open: dict[int, bool]) -> Choice:
         else:
             unblocked.append(s)
     unblocked.sort(key=StoryIssue.sort_key)
+    return Readiness(tuple(unblocked), blocked, duplicates)
+
+
+def choose(stories: list[StoryIssue], is_open: dict[int, bool]) -> Choice:
+    """Apply the unblocked rule. Raises ``PickError`` when nothing may be picked."""
+    in_flight = sorted((s for s in stories if s.open and s.labels & IN_FLIGHT),
+                       key=lambda s: s.number)
+    if in_flight:
+        busy = ", ".join(f"#{s.number} ({s.story_id}, {sorted(s.labels & IN_FLIGHT)[0]})"
+                         for s in in_flight)
+        raise PickError(f"a story is already in flight: {busy}. The factory works on one "
+                        "story at a time; finish it first")
+
+    found = readiness(stories, is_open)
+    unblocked, blocked, duplicates = found.unblocked, found.blocked, found.duplicates
 
     if not unblocked:
         reasons = [f"#{n} waits for " + ", ".join(f"#{b}" for b in bs)

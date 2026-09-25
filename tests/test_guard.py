@@ -310,6 +310,123 @@ class GuardTableTest(unittest.TestCase):
                 decide(*pwsh(command), ctx())
 
 
+# PowerShell spellings seen in the M4 demo (T4.5), run from the factory repo with a target
+# active, exactly as the model sent them. The guard used to block all three: a statement
+# starting with a variable was taken for a command whose name is computed at run time,
+# and `Out-File -Encoding utf8 <path>` was taken to write a file called `utf8`.
+DEMO_PWSH_ALLOW = [
+    ("demo: variable holding the target path",
+     pwsh(f'$T="{TARGET}"; git -C $T status --porcelain; '
+          "python scripts/factory.py closeout --issue 3 --json")),
+    ("demo: if ($?)",
+     pwsh(f'python scripts/factory.py comment --issue 3 --kind reply --body-file '
+          f'"{SCRATCH / "closeout-3.md"}"; if ($?) {{ python scripts/factory.py closeout '
+          "--issue 3 --finish }")),
+    ("demo: Out-File -Encoding utf8",
+     pwsh(f'(Get-Content -Raw -Encoding utf8 "{SCRATCH / "pr-4.md"}").Replace("#PR", "#16")'
+          f' | Out-File -Encoding utf8 -NoNewline "{SCRATCH / "pr-4.md"}"')),
+]
+
+PWSH_ALLOW = [
+    ("pwsh assignment with spaces", pwsh(f'$T = "{TARGET}"; git -C $T log -1')),
+    ("pwsh env assignment", pwsh('$env:NO_COLOR = "1"; npm test')),
+    ("pwsh $LASTEXITCODE test", pwsh("npm test; if ($LASTEXITCODE -ne 0) { exit 1 }")),
+    ("pwsh $? and -and", pwsh("git status; if ($? -and $LASTEXITCODE -eq 0) { git log -1 }")),
+    ("pwsh assignment from a command", pwsh("$branch = git branch --show-current")),
+    ("pwsh $null discard", pwsh("$null = git fetch origin; git status > $null")),
+    ("pwsh known variable in cd", pwsh(f'$T = "{TARGET}"; cd $T; "x" > notes.txt')),
+    ("pwsh push through known -C",
+     pwsh(f'$T = "{TARGET}"; git -C $T push -u origin story/12-add-due-date')),
+    ("Out-File -FilePath and -Encoding",
+     pwsh(f'"x" | Out-File -FilePath "{SCRATCH / "a.md"}" -Encoding utf8')),
+    ("Out-File abbreviated -Enc", pwsh(f'"x" | Out-File -Enc utf8 "{SCRATCH / "a.md"}"')),
+    ("Out-File -Encoding:utf8", pwsh(f'"x" | Out-File -Encoding:utf8 "{SCRATCH / "a.md"}"')),
+    ("Set-Content value before path",
+     pwsh(f'Set-Content -Encoding utf8 -Value "x" "{TARGET / "f.txt"}"')),
+    ("Add-Content -Path first",
+     pwsh(f'Add-Content -Path "{TARGET / ".factory" / "log.md"}" -Value "x" -Encoding utf8')),
+    ("Tee-Object -Encoding", pwsh(f'"x" | Tee-Object -Encoding utf8 "{SCRATCH / "t.txt"}"')),
+    ("bash tee -a", bash(f'echo x | tee -a "{SCRATCH / "t.txt"}"')),
+    ("piped into python -c", bash("gh pr list --json number | python -c \"import sys\"")),
+    ("piped into python -m", bash("cat x.json | python -m json.tool")),
+]
+
+PWSH_BLOCK = [
+    # A variable must not hide a merge or a push from the guard.
+    ("$null = discards but still runs", pwsh("$null = gh pr merge 5"), "gh pr merge"),
+    ("assignment runs its right-hand side", pwsh("$r = gh pr merge 5"), "gh pr merge"),
+    ("verb in a variable", pwsh('$v = "merge"; gh pr $v 5'), "gh pr merge"),
+    ("branch in a variable", pwsh('$b = "main"; git push origin $b'), "default branch"),
+    ("repo dir in a variable", pwsh(f'$D = "{OUTSIDE}"; git -C $D push'), "default branch"),
+    ("query in a variable",
+     pwsh("$q = 'mutation { mergePullRequest(input: {}) { id } }'; "
+          "gh api graphql -f query=$q"), "GraphQL merge"),
+    ("endpoint in a variable",
+     pwsh('$u = "repos/o/r/pulls/5/merge"; gh api $u -X PUT'), "REST API"),
+    ("exe in a variable", pwsh('$c = "gh"; & $c pr merge 5'), "gh pr merge"),
+    ("iex of a variable", pwsh('$x = "gh pr merge 5"; Invoke-Expression $x'), "gh pr merge"),
+    ("call operator on an unknown variable", pwsh("& $tool pr merge 5"),
+     "computed at run time"),
+    ("call operator on a computed variable", pwsh("$c = Get-Tool; & $c pr merge 5"),
+     "computed at run time"),
+    ("iex of an unknown variable", pwsh("Invoke-Expression $script"), "computed at run time"),
+    ("pwsh -Command of an unknown variable", pwsh("powershell -Command $script"),
+     "computed at run time"),
+    ("member call on a variable",
+     pwsh("$ExecutionContext.InvokeCommand.InvokeScript('gh pr merge 5')"),
+     "computed at run time"),
+    ("write to a computed path", pwsh('$p = Get-Path; "x" > $p'), "cannot tell where"),
+    # Code piped into something that runs it cannot be inspected.
+    ("variable piped into iex", pwsh('$x = "gh pr merge 5"; $x | iex'), "piped into it"),
+    ("string piped into iex", pwsh('"gh pr merge 5" | Invoke-Expression'), "piped into it"),
+    ("echo piped into bash", bash('echo "gh pr merge 5" | bash'), "piped into it"),
+    ("echo piped into python", bash('echo "print(1)" | python'), "piped into it"),
+    ("piped into pwsh -Command -", pwsh('"gh pr merge 5" | pwsh -Command -'), "piped into it"),
+    ("query piped into gh api",
+     pwsh("$q = '{}'; $q | gh api graphql --input -"), "piped into it"),
+    # The file is still checked when -Encoding and friends come first.
+    ("Out-File -Encoding into the factory",
+     pwsh(f'"x" | Out-File -Encoding utf8 -NoNewline "{FACTORY / "stations" / "x.md"}"'),
+     "read-only"),
+    ("Out-File -Encoding outside", pwsh(f'"x" | Out-File -Encoding utf8 "{OUTSIDE / "x"}"'),
+     "only inside"),
+    ("Set-Content value first into the factory",
+     pwsh(f'Set-Content -Value "x" -Encoding utf8 "{FACTORY / "x.md"}"'), "read-only"),
+    ("unknown parameter: every positional checked",
+     pwsh(f'"x" | Out-File -Frobnicate y "{OUTSIDE / "x"}"'), "only inside"),
+    ("ambiguous prefix: every positional checked",
+     pwsh(f'"x" | Out-File -E utf8 "{OUTSIDE / "x"}"'), "only inside"),
+    ("Tee-Object alias -Encoding outside",
+     pwsh(f'"x" | tee -Encoding utf8 "{OUTSIDE / "t.txt"}"'), "only inside"),
+]
+
+
+class PowerShellGuardTest(unittest.TestCase):
+    """PowerShell expressions, assignments and write cmdlets (T4.5 hardening)."""
+
+    check = GuardTableTest.check
+
+    def test_demo_commands_are_allowed(self):
+        self.check(DEMO_PWSH_ALLOW, ctx(cwd=FACTORY), expect_allowed=True)
+
+    def test_allowed(self):
+        self.check(PWSH_ALLOW, ctx(), expect_allowed=True)
+
+    def test_blocked(self):
+        self.check(PWSH_BLOCK, ctx(), expect_allowed=False)
+
+    def test_known_variable_decides_where_a_write_goes(self):
+        # `cd $F` follows the literal value: a relative write lands in $F, not in the cwd.
+        decision = decide(*pwsh(f'$F = "{FACTORY}"; cd $F; "x" > notes.txt'), ctx())
+        self.assertFalse(decision.allowed)
+        self.assertIn("read-only", decision.reason)
+
+    def test_variable_expressions_only_at_top_level(self):
+        # Inside a nested script the text itself may have been computed.
+        self.assertFalse(decide(*pwsh("pwsh -Command '$?'"), ctx()).allowed)
+        self.assertTrue(decide(*pwsh("$?"), ctx()).allowed)
+
+
 class HookAdapterTest(unittest.TestCase):
     def run_hook(self, payload):
         raw = payload if isinstance(payload, bytes) else json.dumps(payload).encode("utf-8")
