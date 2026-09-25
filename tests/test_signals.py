@@ -267,3 +267,79 @@ class FetchTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def answer(item_id, minute, author=ME):
+    """A factory reply that answers one feedback item (T4.2)."""
+    return conv(author, build(ReplyMarker(to=str(item_id))) + "\nDone: renamed it.", minute)
+
+
+class RoundClosureTest(unittest.TestCase):
+    """T4.2 (architecture §7.2): a rework round and how it closes.
+
+    The human comments, then says /changes. The factory pushes, answers each item with a
+    ``to=`` reply, then closes the round with a summary reply (no ``to``).
+    """
+
+    FEEDBACK = [conv(ME, "Why is this a class?", 3, cid="IC_q"),
+                conv(ME, "/changes\nRename x to y.", 5, cid="IC_changes")]
+    INLINE = [inline(ME, "use a constant here", 4)]  # REST id 9004
+    ITEMS = ["IC_q", "9004", "IC_changes"]
+
+    def snapshot(self, *later, commits=(0,)):
+        return pr(comments=[*self.FEEDBACK, *later], inline_comments=self.INLINE,
+                  commits=commits)
+
+    def ids(self, snapshot):
+        return [f.comment.id for f in SIGNALS.rework_items(snapshot)]
+
+    def test_the_round_to_rework(self):
+        snapshot = self.snapshot()
+        self.assertEqual(SIGNALS.verdict(snapshot), Verdict.CHANGES_REQUESTED)
+        self.assertEqual(self.ids(snapshot), self.ITEMS)
+        trigger = SIGNALS.rework_items(snapshot)[-1]
+        self.assertEqual((trigger.is_trigger, trigger.text), (True, "Rename x to y."))
+
+    def test_a_rework_push_does_not_lose_the_items(self):
+        snapshot = self.snapshot(commits=(0, 10))
+        self.assertEqual(SIGNALS.verdict(snapshot), Verdict.PENDING)  # a new round began
+        self.assertEqual(SIGNALS.feedback(snapshot), [])
+        self.assertEqual(self.ids(snapshot), self.ITEMS)  # but every item is still open
+
+    def test_each_answer_removes_its_item(self):
+        snapshot = self.snapshot(answer("IC_q", 11), answer(9004, 12), commits=(0, 10))
+        self.assertEqual(self.ids(snapshot), ["IC_changes"])
+
+    def test_a_closed_round_never_starts_rework_twice(self):
+        closed = self.snapshot(answer("IC_q", 11), answer(9004, 12), answer("IC_changes", 13),
+                               conv(ME, REPLY + "\nRework round 1 done.", 14),
+                               commits=(0, 10))
+        self.assertEqual(SIGNALS.verdict(closed), Verdict.PENDING)
+        self.assertEqual(self.ids(closed), [])
+        # Even with no new push, the replies alone close the round for the verdict.
+        replies_only = self.snapshot(answer("IC_q", 11), answer(9004, 12),
+                                     answer("IC_changes", 13))
+        self.assertEqual(SIGNALS.verdict(replies_only), Verdict.PENDING)
+
+    def test_the_next_round_has_only_the_new_items(self):
+        snapshot = self.snapshot(answer("IC_q", 11), answer(9004, 12), answer("IC_changes", 13),
+                                 conv(ME, REPLY + "\nRework round 1 done.", 14),
+                                 conv(ME, "/changes\nAlso add a test.", 20, cid="IC_again"),
+                                 commits=(0, 10))
+        self.assertEqual(SIGNALS.verdict(snapshot), Verdict.CHANGES_REQUESTED)
+        self.assertEqual(self.ids(snapshot), ["IC_again"])
+
+    def test_a_comment_made_during_the_rework_is_not_lost(self):
+        snapshot = self.snapshot(answer("IC_q", 11), conv(ME, "One more thing", 12, cid="IC_late"),
+                                 commits=(0, 10))
+        self.assertEqual(self.ids(snapshot), ["9004", "IC_changes", "IC_late"])
+
+    def test_only_the_factory_can_answer_an_item(self):
+        forged = self.snapshot(answer("IC_q", 11, author=STRANGER), commits=(0, 10))
+        self.assertEqual(self.ids(forged), self.ITEMS)
+
+    def test_a_reply_marker_without_to_still_parses(self):
+        self.assertEqual(ReplyMarker().to, None)
+        self.assertEqual(build(ReplyMarker(to="IC_q")), "<!-- factory:reply to=IC_q -->")
+        with self.assertRaises(ValueError):
+            ReplyMarker(to="bad id")

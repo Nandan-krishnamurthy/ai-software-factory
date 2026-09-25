@@ -335,6 +335,7 @@ Each story becomes an issue titled `STORY-###: <title>`, with the body from `tem
 | Story PR body | `<!-- factory:pr story=STORY-007 -->` |
 | Checkpoint comment (one per issue, edited in place) | `<!-- factory:checkpoint {"station":"S09","next":"S10","branch":"story/14-…","sha":"abc123","fix_attempts":1,"review_round":0,"ts":"…"} -->` followed by a human-readable line |
 | **Every other comment or reply the factory posts** | `<!-- factory:reply -->` (or a more specific `factory:*` marker) |
+| Rework reply to one feedback item (§7.2) | `<!-- factory:reply to=<comment id> -->`: the id of the human comment it answers |
 
 The reconciler finds everything by these markers, not by titles, which a human may edit.
 
@@ -385,7 +386,7 @@ UNCONFIGURED ──/factory-start──► PLANNING(S0…S5) ──► GATE_A_WA
 | IDLE_AT_GATE_C | No story is in progress or in review; ready stories exist | **Report "say continue"** | Run S6 → S11 |
 | STORY_IN_PROGRESS | One issue has `status:in-progress` | Continue from `checkpoint.next` | Same |
 | GATE_B_WAITING_REVIEW | Story PR open, verdict `PENDING` | Report "review, then merge or comment `/changes`" | Report |
-| GATE_B_CHANGES_REQUESTED | Verdict `CHANGES_REQUESTED` | S8 rework → S9 → S10 → push → reply to each feedback item | Same |
+| GATE_B_CHANGES_REQUESTED | Verdict `CHANGES_REQUESTED`, or the rework lock `status:changes-requested` is held (§7.2) | S8 rework → S9 → S10 → push → reply to each feedback item | Same |
 | GATE_B_APPROVED_UNMERGED | Verdict `APPROVED` (**bot mode only**, never reached in the MVP) | Report "approved, please merge" | Report |
 | CLOSEOUT_PENDING | Verdict `MERGED` (your approval), issue not yet `status:done` | Run S12, then **stop at Gate C** | Run S12, then S6… |
 | *(→ NEEDS_HUMAN)* | Verdict `CLOSED_UNMERGED` | Report "story rejected" | Same |
@@ -426,11 +427,18 @@ STOP  "PR #21 ready for review: <url>"
 
 A push happens after every station, so if the session dies, at most one station's work is lost. Resuming re-runs that station from the pushed state.
 
-### 7.2 Rework (`/factory-resume` at GATE_B_CHANGES_REQUESTED)
-1. `signals.feedback(pr, since=last_round)` collects the human feedback items.
-2. S8 addresses each item on the same branch. S9 and S10 are re-run.
-3. Push. Reply to each item via `factory.py comment` (marked, §5.5) with what changed, or why not. Update the PR body's AC section. The marked replies and the new push close the round, so the same `/changes` never triggers rework twice.
-4. `review_round += 1` in the checkpoint. If it goes over `max_review_rounds` → `factory:needs-human`.
+### 7.2 Rework (`/factory-resume` or `/factory-continue` at GATE_B_CHANGES_REQUESTED)
+1. **S8 (rework mode) checks the round limit.** If round `review_round + 1` would go over `limits.max_review_rounds`, it sets `factory:needs-human` and asks. Otherwise it takes the **rework lock**: it moves the label to `status:changes-requested`, then writes the checkpoint `S08` → `S08`.
+2. **S8 collects the items and addresses each one.** `signals.rework_items(pr)` (`factory.py feedback --pr <P> --rework`) returns the human feedback items since the factory's last round summary that no factory reply answers yet. Pushing a commit does not reset this list, so an interrupted rework finds exactly the items still open. S8 addresses each item on the same branch, and records one `Feedback <id>: …` line per item in the commit body.
+3. **S9 and S10 run again.** The state stays `GATE_B_CHANGES_REQUESTED` while the lock is held, and the checkpoint's `next` names the station, as it does while a story is in progress.
+4. **S11 (rework mode) finishes the round**, in this order:
+   - refreshes the PR body, including the AC section with the new verdict;
+   - replies to each item via `factory.py comment --to <id>` (marked `to=<id>`, §5.5), with what changed or why not;
+   - closes the round with a summary reply that has no `to`;
+   - writes `review_round += 1` in the checkpoint (`S11` → `GATE_B`);
+   - moves the label back to `status:in-review`, last.
+
+   The push and the marked replies start a new review round, so the same `/changes` never triggers rework twice.
 
 ### 7.3 Close-out (after you merge)
 S12 checks that the PR is merged, sets `status:done`, runs `git -C T switch main && git pull`, deletes the local story branch, and posts a summary listing the stories that are now unblocked. The station itself only closes out the merged story: it ends at Gate C and **never picks the next story**. What happens next depends on the command that ran it:

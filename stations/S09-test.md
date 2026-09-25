@@ -12,7 +12,7 @@ Read [`stations/_rules.md`](_rules.md) before anything else. Where this file and
 Write the tests for the story's acceptance criteria, then run the project's full quality commands. A failure is fixed and retried up to `limits.max_fix_attempts`. After that, the factory is stuck: it opens a **draft** PR that explains the problem and asks the human.
 
 ## Preconditions
-- `python scripts/factory.py state --json` reports `STORY_IN_PROGRESS` with `next_station` `S09`. Use `details.issue` as `<I>`, `details.branch` as `<B>` and `increment` as `<INC>`.
+- `python scripts/factory.py state --json` reports `STORY_IN_PROGRESS` with `next_station` `S09`, or `GATE_B_CHANGES_REQUESTED` with `next_station` `S09` (a rework, see [S08](S08-implement.md): the same steps apply). Use `details.issue` as `<I>`, `details.branch` as `<B>` and `increment` as `<INC>`.
 - `git -C <T> switch <B>` and `git -C <T> pull --ff-only` succeed.
 - `git -C <T> status --porcelain` prints nothing. Otherwise report the files and stop.
 
@@ -58,4 +58,4 @@ Write the tests for the story's acceptance criteria, then run the project's full
 ## Done check
 - [ ] Every acceptance criterion of issue `<I>` has at least one test named after it (`#<I> AC<n>`), or a written reason and manual steps.
 - [ ] Every non-`null` command was run on the pushed commit and passed; `git -C <T> log origin/<B> -1 --format=%B` shows `Factory-Station: S09`.
-- [ ] `python scripts/factory.py state --json` reports `STORY_IN_PROGRESS` with `next_station` `S10` (or `NEEDS_HUMAN` on the stuck path, which must be reported to the human).
+- [ ] `python scripts/factory.py state --json` reports `STORY_IN_PROGRESS` with `next_station` `S10` (in a rework: `GATE_B_CHANGES_REQUESTED` with `next_station` `S10`) (or `NEEDS_HUMAN` on the stuck path, which must be reported to the human).

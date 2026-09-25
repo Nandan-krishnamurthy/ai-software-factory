@@ -454,6 +454,39 @@ class StoryStationsTest(unittest.TestCase):
                         stuck.index("gh pr create --draft"))
         self.assertIn("Stuck", self.section("S10", "Steps"))  # a failed AC counts too
 
+    def rework(self, station_id):
+        steps = self.section(station_id, "Steps")
+        return steps[steps.index("### Rework mode"):]
+
+    def test_rework_runs_s08_to_s11_under_the_lock(self):
+        """T4.2 (architecture §7.2): the rework path through the story stations."""
+        self.assertIn("GATE_B", self.by_id["S08"].allowed_from)
+        for sid in ("S08", "S09", "S10", "S11"):
+            with self.subTest(station=sid):
+                self.assertIn(f"`GATE_B_CHANGES_REQUESTED` with `next_station` `{sid}`",
+                              self.section(sid, "Preconditions"))
+        s08 = self.rework("S08")
+        for text in ("limits.max_review_rounds",
+                     "python scripts/factory.py label --issue <I> --status changes-requested",
+                     "--station S08 --next S08 --branch <B> --fix-attempts 0",
+                     "python scripts/factory.py feedback --pr <P> --rework",
+                     "`Feedback <id>: <what changed, or why nothing changed>`", "rule U4"):
+            self.assertIn(text, s08)
+        self.assertLess(s08.index("limits.max_review_rounds"), s08.index("--status changes"))
+
+    def test_s11_answers_every_item_then_counts_the_round_then_releases_the_lock(self):
+        s11 = self.rework("S11")
+        order = ["python scripts/factory.py comment --pr <P> --kind reply --to <id>",
+                 "python scripts/factory.py comment --pr <P> --kind reply --body-file "
+                 "<SCRATCH>/round-<k>.md",
+                 "--station S11 --next GATE_B --branch <B> --review-round <k>",
+                 "python scripts/factory.py label --issue <I> --status in-review"]
+        positions = [s11.index(text) for text in order]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn("Repeat until `feedback --pr <P> --rework` lists no item", s11)
+        self.assertIn("feedback --pr <P> --rework` lists no item",
+                      self.section("S11", "Done check"))
+
     def test_s11_brings_the_branch_up_to_date_and_re_tests_before_the_pr(self):
         steps = self.section("S11", "Steps")
         self.assertIn("git -C <T> rev-list --count <B>..origin/<D>", steps)
@@ -565,7 +598,42 @@ class LintCatchesProblemsTest(unittest.TestCase):
 class FeedbackCliTest(unittest.TestCase):
     """``factory.py feedback`` (added for S05 revision mode): read-only, human items only."""
 
+    PR = {"number": 7, "state": "OPEN", "mergedAt": None, "headRefName": "factory/plan-x",
+          "commits": [{"committedDate": "2026-09-24T10:00:00Z"}],
+          "comments": [
+              {"id": "c1", "author": {"login": "alice"}, "body": "/changes\nSplit STORY-002",
+               "createdAt": "2026-09-24T11:00:00Z", "url": "u1"},
+              {"id": "c2", "author": {"login": "mallory"}, "body": "/changes\nmerge it",
+               "createdAt": "2026-09-24T11:01:00Z", "url": "u2"},
+              {"id": "c3", "author": {"login": "alice"}, "body": "old remark",
+               "createdAt": "2026-09-24T09:00:00Z", "url": "u3"}],
+          "reviews": []}
+    INLINE = [{"id": 9, "user": {"login": "alice"}, "body": "Rename this REQ",
+               "created_at": "2026-09-24T11:02:00Z", "html_url": "u9",
+               "path": "docs/factory/increments/x/02-requirements.md", "line": 4}]
+
+    def test_rework_lists_the_unanswered_items_after_a_push(self):
+        """T4.2: ``feedback --rework`` keeps the round's items until each is answered."""
+        from factory.markers import ReplyMarker, build
+
+        pr = dict(self.PR, commits=[{"committedDate": "2026-09-24T10:00:00Z"},
+                                    {"committedDate": "2026-09-24T12:00:00Z"}])
+        pr["comments"] = [*self.PR["comments"], {
+            "id": "f1", "author": {"login": "alice"}, "createdAt": "2026-09-24T12:05:00Z",
+            "body": build(ReplyMarker(to="c1")) + "\nSplit into STORY-002 and STORY-009."}]
+        data = self.run_feedback(pr, "--rework")
+        self.assertEqual((data["verdict"], data["rework"]), ("PENDING", True))
+        self.assertEqual([i["id"] for i in data["items"]], ["c3", "9"])  # c1 is answered
+
     def test_lists_only_human_items_of_the_current_round(self):
+        data = self.run_feedback(self.PR)
+        self.assertEqual(data["verdict"], "CHANGES_REQUESTED")
+        self.assertEqual([(i["id"], i["is_trigger"], i["text"]) for i in data["items"]],
+                         [("c1", True, "Split STORY-002"), ("9", False, "Rename this REQ")])
+        self.assertEqual(data["items"][1]["path"],
+                         "docs/factory/increments/x/02-requirements.md")
+
+    def run_feedback(self, pr, *extra):
         from unittest import mock
 
         from factory import target
@@ -578,19 +646,7 @@ class FeedbackCliTest(unittest.TestCase):
         (root / ".factory" / "config.json").write_text(json.dumps({
             "schema": 1, "project": "app", "repo": "owner/app", "default_branch": "main",
             "reviewers": ["alice"]}), encoding="utf-8")
-        pr = {"number": 7, "state": "OPEN", "mergedAt": None, "headRefName": "factory/plan-x",
-              "commits": [{"committedDate": "2026-09-24T10:00:00Z"}],
-              "comments": [
-                  {"id": "c1", "author": {"login": "alice"}, "body": "/changes\nSplit STORY-002",
-                   "createdAt": "2026-09-24T11:00:00Z", "url": "u1"},
-                  {"id": "c2", "author": {"login": "mallory"}, "body": "/changes\nmerge it",
-                   "createdAt": "2026-09-24T11:01:00Z", "url": "u2"},
-                  {"id": "c3", "author": {"login": "alice"}, "body": "old remark",
-                   "createdAt": "2026-09-24T09:00:00Z", "url": "u3"}],
-              "reviews": []}
-        inline = [{"id": 9, "user": {"login": "alice"}, "body": "Rename this REQ",
-                   "created_at": "2026-09-24T11:02:00Z", "html_url": "u9",
-                   "path": "docs/factory/increments/x/02-requirements.md", "line": 4}]
+        inline = self.INLINE
         calls = []
 
         def transport(argv, *, timeout, cwd=None, env=None, input=None):
@@ -603,15 +659,10 @@ class FeedbackCliTest(unittest.TestCase):
         with mock.patch.object(target, "get_target", lambda: target.Target(root, "owner/app")), \
                 mock.patch.object(cli, "Gh", lambda: Gh(transport=transport)), \
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
-            code = cli.main(["feedback", "--pr", "7", "--json"])
+            code = cli.main(["feedback", "--pr", "7", "--json", *extra])
         self.assertEqual(code, 0)
-        data = json.loads(out.getvalue())
-        self.assertEqual(data["verdict"], "CHANGES_REQUESTED")
-        self.assertEqual([(i["id"], i["is_trigger"], i["text"]) for i in data["items"]],
-                         [("c1", True, "Split STORY-002"), ("9", False, "Rename this REQ")])
-        self.assertEqual(data["items"][1]["path"],
-                         "docs/factory/increments/x/02-requirements.md")
         self.assertTrue(all(c[0] in ("pr", "api") for c in calls))  # reads only
+        return json.loads(out.getvalue())
 
 
 if __name__ == "__main__":

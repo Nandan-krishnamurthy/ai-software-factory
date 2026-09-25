@@ -12,7 +12,7 @@ Read [`stations/_rules.md`](_rules.md) before anything else. Where this file and
 Have every acceptance criterion checked by someone other than the implementer: the **`ac-verifier` subagent** (`.claude/agents/ac-verifier.md`, architecture §4.5). It sees only the criteria, the diff and the test commands, re-runs the tests, and returns `pass`, `fail` or `not-verifiable` for each criterion, with evidence. Its verdict is stored on the issue, so S11 can copy it into the PR **unchanged** (rule H5).
 
 ## Preconditions
-- `python scripts/factory.py state --json` reports `STORY_IN_PROGRESS` with `next_station` `S10`. Use `details.issue` as `<I>`, `details.branch` as `<B>` and `increment` as `<INC>`.
+- `python scripts/factory.py state --json` reports `STORY_IN_PROGRESS` with `next_station` `S10`, or `GATE_B_CHANGES_REQUESTED` with `next_station` `S10` (a rework, see [S08](S08-implement.md): the same steps apply). Use `details.issue` as `<I>`, `details.branch` as `<B>` and `increment` as `<INC>`.
 - `git -C <T> switch <B>` and `git -C <T> pull --ff-only` succeed, and `git -C <T> status --porcelain` prints nothing.
 - The `ac-verifier` subagent is available (`.claude/agents/ac-verifier.md` in the factory repo). If it is not, stop: never verify your own work in its place.
 
@@ -50,4 +50,4 @@ Nothing is committed: the code has not changed since S09. The verdict is kept on
 
 ## Done check
 - [ ] `python scripts/factory.py verdict check --issue <I>` (which reads the verdict from the checkpoint comment) prints `OK` and exits 0: one line per criterion, each with evidence, and nothing failed.
-- [ ] `python scripts/factory.py state --json` reports `STORY_IN_PROGRESS` with `next_station` `S11`.
+- [ ] `python scripts/factory.py state --json` reports `STORY_IN_PROGRESS` with `next_station` `S11` (in a rework: `GATE_B_CHANGES_REQUESTED` with `next_station` `S11`).
