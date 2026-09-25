@@ -338,6 +338,21 @@ class StationFilesTest(unittest.TestCase):
         self.assertIn("GATE_A", by_id["S05"].allowed_from)  # revision mode (GATE_A_CHANGES)
         self.assertEqual(by_id["S05b"].allowed_from, ["GATE_A"])
 
+    def test_branches_prs_and_issues_are_created_only_through_idempotent_helpers(self):
+        """T4.4: a create-type action always looks for the item first, so a resumed
+        station never makes a second branch, PR or issue. The helpers do that in code
+        (``factory.py branch``, ``pr``, ``issues sync``); no station creates one directly."""
+        direct = re.compile(r"\bgh\s+(?:pr|issue)\s+create\b|\bgit\b[^`\n]*\b(?:switch\s+-c|"
+                            r"checkout\s+-b|branch\s+(?!-)[^`\s]+)")
+        for station in self.stations:
+            with self.subTest(station=station.id):
+                found = [c for c in commands(station.text) if direct.search(c)]
+                self.assertEqual(found, [])
+        by_id = {s.id: s for s in self.stations}
+        self.assertIn("python scripts/factory.py branch --name factory/plan-<INC> --base <D>",
+                      by_id["S00"].sections["Steps"])
+        self.assertIn("python scripts/factory.py branch --name <B>", by_id["S07"].sections["Steps"])
+
     def test_every_station_the_state_engine_names_exists(self):
         ids = {s.id for s in self.stations}
         named = {station for station, _ in state.PLAN_DOCS} | {"S05b"}
@@ -372,8 +387,7 @@ class StationFilesTest(unittest.TestCase):
     def test_planning_pr_is_opened_idempotently_with_its_marker(self):
         s05 = {s.id: s for s in self.stations}["S05"]
         steps = s05.sections["Steps"]
-        self.assertIn("gh pr list --repo <R> --head factory/plan-<INC> --state open", steps)
-        self.assertLess(steps.index("gh pr list"), steps.index("gh pr create"))
+        self.assertIn("python scripts/factory.py pr --head factory/plan-<INC>", steps)
         self.assertIn("--label factory:planning", steps)
         self.assertIn("issues sync --dry-run", steps)
         self.assertIn("<!-- factory:planning increment=<INC> -->", steps)
@@ -448,10 +462,9 @@ class StoryStationsTest(unittest.TestCase):
         self.assertIn("limits.max_fix_attempts", s09)
         self.assertIn("--fix-attempts <k>", s09)
         stuck = self.section("S09", "Stop conditions")
-        self.assertIn("gh pr create --draft", stuck)
+        self.assertIn('python scripts/factory.py pr --head <B> --title "[#<I>] <story title>" '
+                      "--body-file <SCRATCH>/pr-<I>.md --draft", stuck)
         self.assertIn("gh issue edit <I> --repo <R> --add-label factory:needs-human", stuck)
-        self.assertLess(stuck.index("gh pr list --repo <R> --head <B>"),
-                        stuck.index("gh pr create --draft"))
         self.assertIn("Stuck", self.section("S10", "Steps"))  # a failed AC counts too
 
     def rework(self, station_id):
@@ -519,15 +532,16 @@ class StoryStationsTest(unittest.TestCase):
         self.assertIn("git -C <T> rev-list --count <B>..origin/<D>", steps)
         self.assertIn("git -C <T> pull --no-rebase --no-edit origin <D>", steps)
         self.assertIn("run the full commands again", steps)
-        self.assertLess(steps.index("pull --no-rebase"), steps.index("gh pr create"))
+        self.assertLess(steps.index("pull --no-rebase"),
+                        steps.index("python scripts/factory.py pr --head <B>"))
 
     def test_s11_pr_follows_the_template_and_copies_the_verdict_unchanged(self):
         steps = self.section("S11", "Steps")
         self.assertIn("templates/pr.md", steps)
         self.assertIn("**copied unchanged** (rule H5)", steps)
         self.assertIn("`<!-- factory:pr story=<STORY-###> -->`", steps)
-        self.assertLess(steps.index("gh pr list --repo <R> --head <B>"),
-                        steps.index("gh pr create"))
+        self.assertIn('python scripts/factory.py pr --head <B> --title "[#<I>] <story title>"',
+                      steps)
         self.assertIn('--title "[#<I>] <story title>"', steps)
         self.assertIn("every heading of `templates/pr.md` in order, no `{{`",
                       self.section("S11", "Done check"))

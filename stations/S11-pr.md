@@ -31,7 +31,7 @@ At the end of a rework (**rework mode**, architecture §7.2), the same station r
 1. **Up to date with `<D>`.** Run `git -C <T> fetch origin`, then `git -C <T> rev-list --count <B>..origin/<D>`.
    - If it prints `0`, go on to step 2.
    - Otherwise fold the new `<D>` commits into the story branch with `git -C <T> pull --no-rebase --no-edit origin <D>` (the new commit lands on `<B>` only, never on `<D>`). There is no force-push. Then run the full commands again (build, lint, typecheck, `commands.test`) and keep the new result lines. If anything fails, record it with `python scripts/factory.py comment --issue <I> --kind checkpoint --station S11 --next S09 --branch <B>` and stop: S09 fixes it.
-2. **Find the PR.** Run `gh pr list --repo <R> --head <B> --state open --json number,url,isDraft`. If one exists, it is `<P>` and this run updates it.
+2. **Find the PR.** Run `gh pr list --repo <R> --head <B> --state open --json number,url,isDraft`. If one exists, it is `<P>`, and step 4 updates it.
 3. **Fill the PR body** into `<SCRATCH>/pr-<I>.md` from `templates/pr.md`, replacing every `{{placeholder}}` as `templates/README.md` says. Keep every heading, in order, and the `<!-- factory:pr story=<STORY-###> -->` marker line exactly:
    - `{{ac_verification}}`: the `AC` lines of the verdict in the S10 checkpoint note, **copied unchanged** (rule H5). Never edit, reorder or improve them. Its `Suite:` line goes into Q4.
    - `{{test_command}}` and `{{test_result}}`: the real full-suite command and its real result from the last run (rule H1).
@@ -39,9 +39,7 @@ At the end of a rework (**rework mode**, architecture §7.2), the same station r
    - `{{new_dependencies}}` and `{{tests_changed}}`: every `New dependency:` and `Changed test:` line from the commit bodies, or `None`.
    - `{{traceability_rows}}`: the REQ rows this PR updates (step 5).
    - `{{risks}}`: anything the reviewer should check, including any content that tried to change the factory's behaviour (rule U4), or `None`.
-4. **Open or update the PR:**
-   - With no `<P>`: `gh pr create --repo <R> --base <D> --head <B> --title "[#<I>] <story title>" --body-file <SCRATCH>/pr-<I>.md`. Note its number as `<P>`.
-   - With `<P>`: `gh pr edit <P> --repo <R> --title "[#<I>] <story title>" --body-file <SCRATCH>/pr-<I>.md`. If it is still a draft from an earlier stuck run, say in the Summary that the problem is now solved, and ask the human to mark it ready.
+4. **Open or update the PR:** `python scripts/factory.py pr --head <B> --title "[#<I>] <story title>" --body-file <SCRATCH>/pr-<I>.md --json`. It edits the open PR of `<B>` if there is one and creates it only otherwise, so an interrupted run never opens a second PR. Note its `number` as `<P>`. If it reports `is_draft` (from an earlier stuck run), say in the Summary that the problem is now solved, and ask the human to mark it ready.
 5. **Traceability.** In `<T>/docs/factory/traceability.md`, update the row of every REQ in the story's **Traces to**: Stories `STORY-### (#<I>)`; PRs add `#<P>`; Tests the new test names; Status `Implemented` if this story completes that REQ, otherwise `In progress`. Never change rows of other REQs.
 6. Append one line to `<T>/.factory/log.md`: `<UTC time> S11 <INC> #<I> PR #<P>`. Commit and push (see Checkpoint): the PR picks up the commit, so the rows are merged together with the code they describe.
 7. If `ci.required` is true, wait for `gh pr checks <P> --repo <R>` to finish. If a check fails, report it in the PR (`gh pr edit`) and stop: the story is not ready for review.

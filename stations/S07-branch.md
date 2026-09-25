@@ -20,10 +20,7 @@ Create the story branch `story/<I>-<slug>` from the latest `<D>`, push it, and w
 
 ## Steps
 1. Choose the slug: 2–5 lower-case words from the issue title joined by `-` (for example `add-task-by-title`). `<B>` is `story/<I>-<slug>`.
-2. Run `git -C <T> fetch origin`. Reuse an existing branch if there is one, so an interrupted run never makes a second branch:
-   - If `git -C <T> ls-remote --heads origin "story/<I>-*"` lists a branch, use that name as `<B>`, then run `git -C <T> switch <B>` and `git -C <T> pull --ff-only`.
-   - Else, if `git -C <T> branch --list "story/<I>-*"` lists a local branch, use it as `<B>` and run `git -C <T> switch <B>`.
-   - Otherwise run `git -C <T> switch -c <B> origin/<D>`.
+2. Run `python scripts/factory.py branch --name <B> --json`. It reuses the story's branch if an earlier run left one (any `story/<I>-*` on `origin`, then pulled, or only local), and creates `<B>` from `origin/<D>` only when there is none, so an interrupted run never makes a second branch. Use the `branch` it prints as `<B>` from here on. If it refuses (several `story/<I>-*` branches, or uncommitted changes, which it never discards), report its message exactly and stop.
 3. Append one line to `<T>/.factory/log.md`: `<UTC time> S07 <INC> #<I> branch <B>`.
 4. Commit and push. See Checkpoint.
 5. Write the checkpoint: `python scripts/factory.py comment --issue <I> --kind checkpoint --station S07 --next S08 --branch <B>`.
@@ -41,7 +38,7 @@ Create the story branch `story/<I>-<slug>` from the latest `<D>`, push it, and w
 
 ## Stop conditions
 - `git -C <T> status --porcelain` shows changes that this station did not make.
-- `git -C <T> ls-remote --heads origin "story/<I>-*"` lists more than one branch: report them and stop.
+- `factory.py branch` refuses: more than one `story/<I>-*` branch, or uncommitted changes. Report its message and stop.
 - The push is refused: report the error exactly and stop.
 
 ## Done check

@@ -48,7 +48,7 @@ Write the tests for the story's acceptance criteria, then run the project's full
 - **Stuck** (tests or commands still fail after `limits.max_fix_attempts` attempts), rule H2:
   1. Commit and push what exists, so the human can see it.
   2. Fill [`templates/pr.md`](../templates/pr.md) into `<SCRATCH>/pr-<I>.md` **honestly**: the Summary starts with what failed; every gate shows its real result; unchecked ACs stay `- [ ]`.
-  3. Look for an existing PR first: `gh pr list --repo <R> --head <B> --state open --json number`. If there is one, run `gh pr edit <P> --repo <R> --body-file <SCRATCH>/pr-<I>.md`. Otherwise run `gh pr create --draft --repo <R> --base <D> --head <B> --title "[#<I>] <story title>" --body-file <SCRATCH>/pr-<I>.md`.
+  3. Open a **draft** PR, or update the existing one: `python scripts/factory.py pr --head <B> --title "[#<I>] <story title>" --body-file <SCRATCH>/pr-<I>.md --draft`. It never opens a second PR for `<B>`.
   4. Write the failure and the question to `<SCRATCH>/question-<I>.md` and run `python scripts/factory.py comment --issue <I> --kind reply --body-file <SCRATCH>/question-<I>.md`.
   5. Run `gh issue edit <I> --repo <R> --add-label factory:needs-human` and stop.
 - The baseline was already red: the full suite fails on `origin/<D>` too, before this story's changes. Stop and ask as in **Stuck**, steps 4–5 (rule H6).

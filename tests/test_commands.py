@@ -20,6 +20,7 @@ from unittest import mock
 from factory import cli, commands, target
 from factory import state as st
 from factory.commands import COMMANDS, route
+from factory.git import Git
 from tests import REPO_ROOT
 from tests.test_state import (
     ALL_DOCS,
@@ -401,16 +402,29 @@ class RouteTest(unittest.TestCase):
 
 
 class RouteCliTest(unittest.TestCase):
-    def run_cli(self, snapshot, *argv):
+    def run_cli(self, snapshot, *argv, dirty=False):
         out = io.StringIO()
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
+        Git(tmp.name).run(["init", "-q"])  # the route reads the target's working tree
+        if dirty:
+            (Path(tmp.name) / "half-done.ts").write_text("x", encoding="utf-8")
         with mock.patch.object(target, "get_target",
                                lambda: target.Target(Path(tmp.name), "owner/app")), \
                 mock.patch.object(st, "collect_snapshot", lambda gh, repo: snapshot), \
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
             code = cli.main(["route", *argv])
         return code, out.getvalue()
+
+    def test_uncommitted_changes_stop_every_station(self):
+        """T4.4: a dirty target (e.g. a session killed in S08) runs nothing, discards nothing."""
+        code, out = self.run_cli(ISSUES_PENDING, "--command", "factory-resume", "--json",
+                                 dirty=True)
+        self.assertEqual(code, 0)
+        decision = json.loads(out[out.index("{"):])
+        self.assertEqual((decision["action"], decision["station"]), ("stop", None))
+        self.assertIn("uncommitted changes, which the factory never discards", decision["message"])
+        self.assertIn("?? half-done.ts", decision["message"])
 
     def test_json(self):
         code, out = self.run_cli(ISSUES_PENDING, "--command", "/factory-resume", "--json")
