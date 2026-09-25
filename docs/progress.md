@@ -70,3 +70,75 @@ Each attempt was deliberately written so that it does **not** match a `permissio
 
 ### Observations for later tasks
 - In an empty target, `comment --kind checkpoint` can't default `--sha` (there is no HEAD), and `--branch` defaults to `main`. Real checkpoints run after S07 has created and pushed a story branch, so this only affects empty repos, but the S07+ stations (T3.3) should always pass `--branch` explicitly.
+
+---
+
+## M2: Planning pipeline
+
+| | |
+|---|---|
+| **Demo run** | 2026-09-25 |
+| **Target** | `Nandan-krishnamurthy/task-tracker-factory-test` (fresh repo; prerequisite P3), cloned at `C:\Projects\task-tracker-factory-test` |
+| **Input** | The Task Tracker PRD, supplied as `Task Tracker.pdf` (5 pages) |
+| **Factory code** | `main` at d8d55b0 (T2.1–T2.5 merged) |
+| **Result** | ⏸ **Partly run, up to Gate A as requested.** `/factory-target` → `/factory-start` → S00 → S02 → S03 → S04 → S05 → **Planning PR [#1](https://github.com/Nandan-krishnamurthy/task-tracker-factory-test/pull/1)**, state `GATE_A_WAITING`. The rest of the plan's demo (a `/changes` revision, the human merge, then `/factory-resume` creating the issues and stopping at "say continue") waits on the human's Gate A review. Four factory problems were found (below); none is fixed yet. |
+
+### Tasks
+| Task | PR | Status |
+|---|---|---|
+| T2.1 Templates | #11 | merged |
+| T2.2 Stories parser and `issues sync` | #12 | merged |
+| T2.3 Increment handling | #13 | merged |
+| T2.4 Station files S00, S02–S05, S05b | #14 | merged |
+| T2.5 Planning commands | #15 | merged |
+
+### Demo steps and results
+
+**0. Pre-check**
+- First attempt (2026-09-24): the GitHub repo was empty (`isEmpty: true`, no default branch). The factory stopped without creating or pushing anything. The human pushed an initial commit (`99e0ddf`) and copied the PDF in.
+
+**1. `/factory-target C:\Projects\task-tracker-factory-test`**
+
+| Step | Result |
+|---|---|
+| `target set` | ✅ `Target: C:\Projects\task-tracker-factory-test (Nandan-krishnamurthy/task-tracker-factory-test)` |
+| `doctor` | ❌ `Doctor FAILED: 1 failed, 2 warning(s)`. `labels` FAIL: none of the 9 factory labels existed. *Problem 1.* |
+| `labels ensure` (doctor's own fix) | ✅ `Labels: 9 created, 0 updated, 0 unchanged.` |
+| `doctor` again | ✅ `Doctor PASSED: 0 failed, 2 warning(s)`: `config` (expected before S00) and `branch protection` (advice; the factory never changes it, rule S5) |
+| `state` | ✅ `UNCONFIGURED`; allowed `/factory-start, /factory-status` |
+
+**2. `/factory-start "Task Tracker.pdf"`: S00 Intake**
+
+| Step | Result |
+|---|---|
+| `route --command factory-start` | ✅ `run S00` |
+| Increment | ✅ `increment next` gave `001-initial`, `REQ-001`, `STORY-001` |
+| `00-prd.md` | ⚠️ S00 says to copy the requirements file unchanged, which cannot be done with a PDF. *Problem 3.* The text was extracted (`pdftotext`, cross-checked with `pypdf`) and transcribed word for word, with tables restored as Markdown and a header comment naming the PDF as the source of record. No secrets found. |
+| Checkpoint | ✅ `S00: intake for 001-initial` pushed to `factory/plan-001-initial` |
+| Done check | ❌ `state` reported `next_station: S01`, which is not available until M5. The S00 stop condition and `route` (`action: stop`) both stopped the run correctly. *Problem 2.* The human moved the PDF to `docs/factory/Task Tracker.pdf` on `main` (1e32681). |
+
+**3. `/factory-resume`: S02 → S05**
+
+| Station | Output | Done check |
+|---|---|---|
+| S02 Requirements | `02-requirements.md`: REQ-001..REQ-021 (15 functional, 6 non-functional), 11 assumptions, 6 non-blocking open questions | ✅ all 22 PRD headings have a coverage row; numbering consecutive from REQ-001; `state` → S03 |
+| S03 Architecture | `03-architecture.md`: layered plain TypeScript + Vite, `localStorage` write-through, 10 key decisions, 6 dev dependencies each with a reason | ✅ 21/21 REQs mapped, no extras; `state` → S04 |
+| S04 Plan | `04-implementation-plan.md`: M1 (walking skeleton + capture) … M6 (accessibility/performance audit) | ✅ 21/21 REQs covered; M1 starts with the walking skeleton; `state` → S05. *Problem 4* was found here and corrected in a second S04 commit. |
+| S05 Stories + PR | `05-stories.md`: STORY-001..STORY-012, 3–5 ACs each; `docs/factory/traceability.md` with 21 rows; Planning PR #1, labelled `factory:planning` | ✅ `issues sync --dry-run` exit 0 (`12 to create, 0 already exist`), embedded unedited; every REQ traced and in the matrix; exactly one open PR carrying the `factory:planning increment=001-initial` marker; `state` → **`GATE_A_WAITING`**, and `route` → `stop` |
+
+Every factory commit carries its `Factory-Station:` trailer (S00, S02, S03, S04, S04, S05). The guard also blocked a `$VAR` path in a shell command (`cannot tell where '$T/.factory/log.md' points`). That is working as designed; the command was re-run with a literal path.
+
+### Problems found (not fixed; candidates for follow-up tasks)
+1. **S00 cannot pass on a brand-new repo.** Step 1 stops on any `doctor` FAIL, but step 2 (`labels ensure`) is what fixes the `labels` FAIL. *Fix:* run `labels ensure` before `doctor` in S00, or make `labels` a WARN in `doctor` until S00 has run.
+2. **A PDF counts as existing code.** `collect_snapshot` in `state.py` treats every file on the default branch outside `docs/factory/`, `.factory/` and README/LICENSE/.gitignore as code, so a repo holding only a README and a PDF is routed to S01. *Fix* (fits T5.2's existing-project detection): only count source or build files, or ignore documents (`*.md`, `*.pdf`, `docs/**`).
+3. **S00 assumes a Markdown requirements file.** "Copy unchanged to `00-prd.md`" has no rule for PDF or other formats. *Fix:* S00 converts non-Markdown input to faithful Markdown with a source header (as done here), or asks for Markdown.
+4. **Forward references use up IDs.** `scan_layout` in `increments.py` counts every `STORY-###`/`REQ-###` mentioned in any file under `docs/factory/`. S04's plan mentioned "STORY-001" before S05 had allocated it, so `next_story` became STORY-002. It was caught before any story was written, and the plan was reworded. *Fix:* S04 (and S02/S03) must not name STORY IDs, or the scanner counts only story headings, issue markers and PR bodies.
+
+### Observations
+- The `Target: <local path>` banner is part of `issues sync` stdout, so the dry-run block in the (public) Planning PR shows the local path `C:\Projects\…`. Harmless, but the banner could go to stderr for this command, as `state --json` already does.
+- No page renderer (`pdftoppm`) is installed, so the PDF was checked through two text extractions, not visually.
+
+### Cleanup and hand-off
+- The target was deactivated to write this record (rule S3): the gitignored `.factory-local/target.json` and `.claude/settings.local.json` were removed. Run `/factory-target C:\Projects\task-tracker-factory-test` before the next `/factory-resume`.
+- Nothing was merged, and nothing was pushed to `main` in any repo. No issues have been created.
+- **Next (human):** review Planning PR #1. Either comment `/changes` with feedback and run `/factory-resume` (the revision step of the demo), or merge it and run `/factory-resume` (issue creation, then a stop at "say continue"). Record those steps here to complete the M2 demo.
