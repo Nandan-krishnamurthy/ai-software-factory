@@ -37,7 +37,7 @@ FRONTMATTER_KEYS = ["id", "name", "allowed_from", "next"]
 GATES = {"GATE_A", "GATE_B", "GATE_C"}
 ENTRY_POINTS = {"START"}  # /factory-start
 # Stations that other stations may already name, before they are built.
-PENDING = {"S01": "T5.1 (M5)"}
+PENDING = {"S01": "T5.1 (M5)", "S12": "T4.3 (M4)"}
 # The stations built by T2.4. Later tasks add more; these must always exist.
 PLANNING_STATIONS = {"S00-intake.md", "S02-requirements.md", "S03-architecture.md",
                      "S04-plan.md", "S05-stories.md", "S05b-issues.md"}
@@ -341,6 +341,7 @@ class StationFilesTest(unittest.TestCase):
     def test_every_station_the_state_engine_names_exists(self):
         ids = {s.id for s in self.stations}
         named = {station for station, _ in state.PLAN_DOCS} | {"S05b"}
+        named |= {"S06", "S07", "S08", "S11", "S12"}  # named literally by story states
         self.assertEqual(named - ids, set(PENDING))
 
     def test_each_planning_station_outputs_the_document_the_state_engine_expects(self):

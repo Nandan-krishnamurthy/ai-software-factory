@@ -16,12 +16,16 @@ Output schema (``schema`` 1)::
       "details": {"message": "<one line for humans>", …state-specific keys…}
     }
 
-States derived here: UNCONFIGURED, PLANNING, GATE_A_WAITING, GATE_A_CHANGES,
-ISSUES_PENDING, IDLE_AT_GATE_C, NEEDS_HUMAN, INCONSISTENT (T1.8), and STORY_IN_PROGRESS,
-GATE_B_WAITING_REVIEW, INCREMENT_COMPLETE (T3.2). The rest of the story phase
-(GATE_B_CHANGES_REQUESTED, GATE_B_APPROVED_UNMERGED, CLOSEOUT_PENDING, a rejected story
-PR) arrives in T4.1; until then such snapshots yield **UNSUPPORTED**, which allows only
-``/factory-status``, so the factory never guesses.
+All 14 states of the architecture §6 table are derived here. GATE_B_APPROVED_UNMERGED is
+reachable only in bot mode: single-account signals never return ``APPROVED``. A story PR
+closed without merging is NEEDS_HUMAN (the story was rejected).
+
+Stations that are not built yet are handled without guessing:
+
+* CLOSEOUT_PENDING names S12. Until ``stations/S12-*.md`` exists (T4.3), ``route`` stops
+  and says the station is not available yet.
+* GATE_B_CHANGES_REQUESTED names S08, but only ``/factory-status`` may act on it until
+  S08 has its rework mode (T4.2). The normal S08 must never run on a reviewed PR.
 
 Conventions this module relies on (later stations must follow them):
 
@@ -32,7 +36,14 @@ Conventions this module relies on (later stations must follow them):
   no checkpoint yet, S06 has just picked it and S07 is next. A checkpoint that says
   ``GATE_B`` while the label still says in progress means S11 stopped between opening
   the PR and moving the label, so S11 runs again (it must be idempotent).
-* A story is done when its issue is closed **and** labelled ``status:done`` (S12).
+* ``status:changes-requested`` is the rework lock: it stays until the rework moves the
+  label back to ``status:in-review`` (T4.2). While it is set, the state is
+  GATE_B_CHANGES_REQUESTED whatever the verdict says: a pushed rework commit starts a new
+  review round (so the verdict reads ``PENDING``) before every item has its reply.
+* A story is done when its issue is closed **and** labelled ``status:done`` (S12). A
+  story whose PR is merged but which is not ``status:done`` needs close-out, whether the
+  merge closed its issue (``Closes #<I>``) or not. Such a story is still in flight
+  (invariant 1).
 * Every commit the factory makes carries the trailer ``Factory-Station: <Sxx>``. A commit
   on the default branch with that trailer arrived through a merged PR if GitHub's merge
   account (``web-flow``) committed it (a squash or rebase merge), or if a ``web-flow``
@@ -66,13 +77,16 @@ ISSUES_PENDING = "ISSUES_PENDING"
 IDLE_AT_GATE_C = "IDLE_AT_GATE_C"
 STORY_IN_PROGRESS = "STORY_IN_PROGRESS"
 GATE_B_WAITING_REVIEW = "GATE_B_WAITING_REVIEW"
+GATE_B_CHANGES_REQUESTED = "GATE_B_CHANGES_REQUESTED"
+GATE_B_APPROVED_UNMERGED = "GATE_B_APPROVED_UNMERGED"  # bot mode only (architecture §9.4)
+CLOSEOUT_PENDING = "CLOSEOUT_PENDING"
 INCREMENT_COMPLETE = "INCREMENT_COMPLETE"
 NEEDS_HUMAN = "NEEDS_HUMAN"
 INCONSISTENT = "INCONSISTENT"
-UNSUPPORTED = "UNSUPPORTED"
 STATES = (UNCONFIGURED, PLANNING, GATE_A_WAITING, GATE_A_CHANGES, ISSUES_PENDING,
-          IDLE_AT_GATE_C, STORY_IN_PROGRESS, GATE_B_WAITING_REVIEW, INCREMENT_COMPLETE,
-          NEEDS_HUMAN, INCONSISTENT, UNSUPPORTED)
+          IDLE_AT_GATE_C, STORY_IN_PROGRESS, GATE_B_WAITING_REVIEW, GATE_B_CHANGES_REQUESTED,
+          GATE_B_APPROVED_UNMERGED, CLOSEOUT_PENDING, INCREMENT_COMPLETE, NEEDS_HUMAN,
+          INCONSISTENT)
 
 RESUME, CONTINUE, START, STATUS = ("/factory-resume", "/factory-continue",
                                    "/factory-start", "/factory-status")
@@ -85,17 +99,20 @@ _ALLOWED = {
     IDLE_AT_GATE_C: [CONTINUE, STATUS],
     STORY_IN_PROGRESS: [RESUME, CONTINUE, STATUS],
     GATE_B_WAITING_REVIEW: [STATUS],
+    GATE_B_CHANGES_REQUESTED: [STATUS],  # T4.2 adds RESUME and CONTINUE (S08 rework mode)
+    GATE_B_APPROVED_UNMERGED: [STATUS],
+    CLOSEOUT_PENDING: [RESUME, CONTINUE, STATUS],
     INCREMENT_COMPLETE: [START, STATUS],
     NEEDS_HUMAN: [STATUS],
     INCONSISTENT: [STATUS],
-    UNSUPPORTED: [STATUS],
 }
 _WAITING = {
     UNCONFIGURED: "human", PLANNING: "factory", GATE_A_WAITING: "human",
     GATE_A_CHANGES: "factory", ISSUES_PENDING: "factory", IDLE_AT_GATE_C: "human",
     STORY_IN_PROGRESS: "factory", GATE_B_WAITING_REVIEW: "human",
-    INCREMENT_COMPLETE: "human", NEEDS_HUMAN: "human", INCONSISTENT: "human",
-    UNSUPPORTED: "nobody",
+    GATE_B_CHANGES_REQUESTED: "factory", GATE_B_APPROVED_UNMERGED: "human",
+    CLOSEOUT_PENDING: "factory", INCREMENT_COMPLETE: "human", NEEDS_HUMAN: "human",
+    INCONSISTENT: "human",
 }
 
 # Planning documents in station order (architecture §5.1).
@@ -111,6 +128,8 @@ IN_PROGRESS, IN_REVIEW, CHANGES_REQUESTED, DONE = (
     "status:in-progress", "status:in-review", "status:changes-requested", "status:done")
 _ACTIVE = {IN_PROGRESS, IN_REVIEW, CHANGES_REQUESTED}  # the same lock as ``pick``
 _FIRST_STORY_STATION = "S07"  # S06 (pick) sets in-progress before any checkpoint exists
+_REWORK_STATION = "S08"  # in rework mode (T4.2)
+_CLOSEOUT_STATION = "S12"
 _STORY_STATION = re.compile(r"S(0[6-9]|1[0-2])")  # S06-S12: the story loop and close-out
 _INCREMENT = re.compile(r"^\d{3}-[a-z0-9]+(?:-[a-z0-9]+)*$")
 _STORY_HEADING = re.compile(r"^###\s+(STORY-\d{3,})\b", re.MULTILINE)
@@ -250,14 +269,19 @@ def derive_state(snap: Snapshot) -> StateResult:
     active = [i for i in open_issues if i.labels & _ACTIVE]  # at most one (invariant 1)
     if active:
         return _story_state(snap, increment, active[0])
-    unclosed = sorted(i.number for i in story_issues
-                      if i.state != "OPEN" and DONE not in i.labels)
+    unclosed = sorted((i for i in story_issues if i.state != "OPEN" and DONE not in i.labels),
+                      key=lambda i: i.number)
+    for closed in unclosed:  # its merge closed the issue (Closes #<I>): close it out
+        merged = _merged_pr(snap, closed)
+        if merged is not None:
+            return _closeout(increment, closed, merged)
     if unclosed:
-        return StateResult(UNSUPPORTED, increment, details={
-            "message": "Story issue(s) " + ", ".join(f"#{n}" for n in unclosed)
-                       + " are closed but not status:done: close-out (CLOSEOUT_PENDING) "
-                       "arrives in T4.1. Only /factory-status is available.",
-            "issues": unclosed})
+        numbers = [i.number for i in unclosed]
+        return StateResult(NEEDS_HUMAN, increment, details={
+            "message": "Story issue(s) " + ", ".join(f"#{n}" for n in numbers)
+                       + " were closed without a merged PR. Reopen an issue to build the "
+                       "story again, or label it status:done if it needs no more work.",
+            "items": [f"issue #{n}" for n in numbers]})
     if not open_issues:
         return StateResult(INCREMENT_COMPLETE, increment, details={
             "message": f"Increment {increment} is complete: all {len(story_issues)} "
@@ -284,6 +308,9 @@ def _story_state(snap: Snapshot, increment: str, issue: IssueInfo) -> StateResul
         if nxt is None:
             station = _FIRST_STORY_STATION
         elif nxt == "GATE_B":
+            merged = _merged_pr(snap, issue)
+            if merged is not None and not _story_prs(snap, issue, "OPEN"):
+                return _closeout(increment, issue, merged)  # merged before S11 finished
             station = "S11"  # the PR is open, but S11 had not moved the label yet
         else:
             station = nxt  # a story station; check_invariants rejected anything else
@@ -292,30 +319,61 @@ def _story_state(snap: Snapshot, increment: str, issue: IssueInfo) -> StateResul
             "message": f"Story #{issue.number} ({story_id}) is in progress: next is "
                        f"{station}."})
 
-    if IN_REVIEW in issue.labels:
-        prs = sorted((p for p in snap.prs if p.story_id == story_id and p.state == "OPEN"),
-                     key=lambda p: p.number)
-        if prs:
-            pr = prs[0]  # one open PR per story (invariant 2)
-            verdict = snap.story_verdicts.get(pr.number, Verdict.PENDING.value)
-            if verdict == Verdict.PENDING.value:
-                return StateResult(GATE_B_WAITING_REVIEW, increment, details={
-                    **base, "pr": pr.number,
-                    "message": f"Waiting for you to review PR #{pr.number} ({story_id}): "
-                               "merge it to approve, or comment /changes."})
-            return StateResult(UNSUPPORTED, increment, details={
-                **base, "pr": pr.number, "verdict": verdict,
-                "message": f"PR #{pr.number} ({story_id}) is {verdict}; that Gate B state "
-                           "arrives in T4.1. Only /factory-status is available."})
-        return StateResult(UNSUPPORTED, increment, details={
-            **base, "message": f"Story #{issue.number} ({story_id}) is in review but has no "
-                               "open PR (merged or closed): close-out arrives in T4.1. Only "
-                               "/factory-status is available."})
-
-    return StateResult(UNSUPPORTED, increment, details={
-        **base, "message": f"Changes were requested on story #{issue.number} ({story_id}); "
-                           "GATE_B_CHANGES_REQUESTED arrives in T4.1. Only /factory-status "
+    # In review, or changes requested: the story PR decides.
+    open_prs = _story_prs(snap, issue, "OPEN")
+    if open_prs:
+        pr = open_prs[0]  # one open PR per story (invariant 2)
+        base["pr"] = pr.number
+        verdict = snap.story_verdicts.get(pr.number, Verdict.PENDING.value)
+        if CHANGES_REQUESTED in issue.labels or verdict == Verdict.CHANGES_REQUESTED.value:
+            return StateResult(GATE_B_CHANGES_REQUESTED, increment, _REWORK_STATION, details={
+                **base, "branch": pr.head_ref,
+                "message": f"Changes requested on PR #{pr.number} ({story_id}). Rework (S08 "
+                           "rework mode) arrives in T4.2; until then only /factory-status "
                            "is available."})
+        if verdict == Verdict.APPROVED.value:
+            return StateResult(GATE_B_APPROVED_UNMERGED, increment, details={
+                **base, "message": f"PR #{pr.number} ({story_id}) is approved. Please merge "
+                                   "it: the factory never merges."})
+        return StateResult(GATE_B_WAITING_REVIEW, increment, details={
+            **base, "message": f"Waiting for you to review PR #{pr.number} ({story_id}): "
+                               "merge it to approve, or comment /changes."})
+
+    merged = _merged_pr(snap, issue)
+    if merged is not None:  # merged, but the merge did not close the issue
+        return _closeout(increment, issue, merged)
+
+    closed = _story_prs(snap, issue, "CLOSED")
+    if closed:
+        pr = closed[-1]
+        return StateResult(NEEDS_HUMAN, increment, details={
+            **base, "pr": pr.number, "items": [f"PR #{pr.number}"],
+            "message": f"PR #{pr.number} ({story_id}) was closed without merging: the story "
+                       "was rejected. Reopen the PR, or set issue "
+                       f"#{issue.number} back to status:ready to build it again."})
+    return StateResult(NEEDS_HUMAN, increment, details={
+        **base, "items": [f"issue #{issue.number}"],
+        "message": f"Story #{issue.number} ({story_id}) is in review but has no PR. Set it "
+                   "back to status:in-progress to finish it, or to status:ready."})
+
+
+def _story_prs(snap: Snapshot, issue: IssueInfo, state: str) -> list[PrInfo]:
+    story_id = issue.story.id if issue.story else None
+    return sorted((p for p in snap.prs if p.story_id == story_id and p.state == state),
+                  key=lambda p: p.number)
+
+
+def _merged_pr(snap: Snapshot, issue: IssueInfo) -> PrInfo | None:
+    merged = _story_prs(snap, issue, "MERGED")
+    return merged[-1] if merged else None
+
+
+def _closeout(increment: str, issue: IssueInfo, pr: PrInfo) -> StateResult:
+    story_id = issue.story.id if issue.story else None
+    return StateResult(CLOSEOUT_PENDING, increment, _CLOSEOUT_STATION, details={
+        "issue": issue.number, "story": story_id, "pr": pr.number, "branch": pr.head_ref,
+        "message": f"PR #{pr.number} ({story_id}) is merged: your approval. Next is "
+                   f"close-out ({_CLOSEOUT_STATION}) of story #{issue.number}."})
 
 
 def check_invariants(snap: Snapshot) -> list[str]:
@@ -325,11 +383,17 @@ def check_invariants(snap: Snapshot) -> list[str]:
         problems.append(f"config is invalid: {snap.config_error}")
 
     open_story_issues = [i for i in snap.issues if i.story is not None and i.state == "OPEN"]
-    # 1. At most one story is in progress or in review (changes requested counts too).
+    # 1. At most one story is in flight: in progress, in review, changes requested, or
+    #    closed by its merge but not yet closed out.
     active = [i for i in open_story_issues if i.labels & _ACTIVE]
-    if len(active) > 1:
-        problems.append("more than one story is in progress or in review: "
-                        + ", ".join(f"#{i.number}" for i in active))
+    awaiting_closeout = [i for i in snap.issues
+                         if i.story is not None and i.state != "OPEN"
+                         and DONE not in i.labels and _merged_pr(snap, i) is not None]
+    in_flight = sorted(active + awaiting_closeout, key=lambda i: i.number)
+    if len(in_flight) > 1:
+        problems.append("more than one story is in flight (in progress, in review, or "
+                        "waiting for close-out): "
+                        + ", ".join(f"#{i.number}" for i in in_flight))
     for issue in open_story_issues:
         if len(issue.status_labels) > 1:
             problems.append(f"issue #{issue.number} has several status labels: "
@@ -366,10 +430,13 @@ def check_invariants(snap: Snapshot) -> list[str]:
         problems.append("several Planning PRs are open: "
                         + ", ".join(f"#{n}" for n in open_planning))
 
-    # 3. The branch named in a checkpoint exists on the remote.
+    # 3. The branch named in a checkpoint exists on the remote. Once the story PR is merged
+    #    (and none is open), GitHub may have deleted the branch: close-out does not need it.
     for issue in active:
         branch = issue.checkpoint_branch
-        if branch and branch not in snap.branches:
+        merged_away = (_merged_pr(snap, issue) is not None
+                       and not _story_prs(snap, issue, "OPEN"))
+        if branch and branch not in snap.branches and not merged_away:
             problems.append(f"issue #{issue.number}'s checkpoint names branch {branch!r}, "
                             "which does not exist on the remote")
         nxt = issue.checkpoint_next
@@ -614,8 +681,8 @@ def collect_snapshot(gh: Gh, repo: str) -> Snapshot:
 
     config, config_error = _parse_config_text(config_text)
     open_planning = [p for p in prs if p.planning_increment == increment and p.state == "OPEN"]
-    in_review = {i.story.id for i in issues
-                 if i.story and i.state == "OPEN" and IN_REVIEW in i.labels}
+    in_review = {i.story.id for i in issues  # verdicts decide the Gate B states
+                 if i.story and i.state == "OPEN" and i.labels & {IN_REVIEW, CHANGES_REQUESTED}}
     open_story = [p for p in prs if p.story_id in in_review and p.state == "OPEN"]
     story_verdicts: dict[int, str] = {}
     if (open_planning or open_story) and config is not None:

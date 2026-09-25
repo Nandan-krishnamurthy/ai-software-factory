@@ -278,6 +278,30 @@ class RouteTest(unittest.TestCase):
         self.assertEqual((decision.action, decision.state), ("stop", st.GATE_B_WAITING_REVIEW))
         self.assertEqual(route("/factory-resume", result(IDLE)).action, "stop")
 
+    def test_closeout_waits_for_s12_and_never_picks_a_story(self):
+        """T4.1: after the human's merge, both commands route to S12 (built in T4.3)."""
+        closeout = snap(**{**MERGED, "prs": (*MERGED["prs"], story_pr(20, 1, "MERGED"))},
+                        issues=(issue(10, 1, labels=labelled("in-review"), state="CLOSED"),
+                                issue(11, 2)))
+        self.assertEqual(result(closeout)["state"], st.CLOSEOUT_PENDING)
+        for command in ("/factory-resume", "/factory-continue"):
+            with self.subTest(command=command):
+                decision = route(command, result(closeout))
+                self.assertEqual(decision.action, "stop")
+                self.assertIn("S12, which is not available yet", decision.message)
+                self.assertIn("S12", COMMANDS[command].stations)
+                self.assertNotIn("S12", COMMANDS[command].through_gate_c)
+
+    def test_changes_requested_waits_for_rework_mode(self):
+        """T4.1: the normal S08 never runs on a reviewed PR; rework mode arrives in T4.2."""
+        changes = dataclasses.replace(GATE_B, story_verdicts={20: "CHANGES_REQUESTED"})
+        self.assertEqual(result(changes)["state"], st.GATE_B_CHANGES_REQUESTED)
+        for command in ("/factory-resume", "/factory-continue"):
+            with self.subTest(command=command):
+                decision = route(command, result(changes))
+                self.assertEqual(decision.action, "stop")
+                self.assertIn("cannot act in state GATE_B_CHANGES_REQUESTED", decision.message)
+
     def test_needs_human_and_inconsistent_stop(self):
         needs = snap(**MERGED, issues=(issue(10, 1), issue(11, 2)), needs_human=("issue #11",))
         broken = snap(**MERGED, issues=(issue(10, 1), issue(11, 1)))  # STORY-001 twice

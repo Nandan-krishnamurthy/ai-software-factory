@@ -26,7 +26,8 @@ from prose:
 * **Gate C.** ``/factory-continue`` *is* the human's answer at Gate C, so it goes on
   through ``IDLE_AT_GATE_C`` when it reaches it right after creating the issues (S05b).
   It never goes through Gate C after a story station, so one ``/factory-continue``
-  starts at most one story and stops at Gate B.
+  starts at most one story and stops at Gate B. Close-out (S12) also stops at Gate C,
+  whichever command ran it (T4.3): the next story needs a fresh ``/factory-continue``.
 * **Progress.** If the state engine names the same station that just ran, that station
   did not complete, so the command stops instead of looping.
 * **Entry station.** Where nothing is in motion yet, the state engine names no station
@@ -56,6 +57,7 @@ class Command:
 
 PLANNING = ("S00", "S01", "S02", "S03", "S04", "S05", "S05b")
 STORY = ("S07", "S08", "S09", "S10", "S11")  # a story already started (S06 = pick)
+CLOSEOUT = ("S12",)  # after the human merged; never goes on through Gate C
 
 # Commands that run stations. /factory-target and /factory-status never do.
 COMMANDS: dict[str, Command] = {
@@ -64,11 +66,11 @@ COMMANDS: dict[str, Command] = {
         "begin a new increment and plan it, up to Gate A",
         entry=((state_mod.UNCONFIGURED, "S00"),)),
     "/factory-resume": Command(
-        "/factory-resume", PLANNING + STORY,
+        "/factory-resume", PLANNING + STORY + CLOSEOUT,
         "finish what is in motion (planning, issue creation, or a story already started) up "
         "to the next gate; never starts a story"),
     "/factory-continue": Command(
-        "/factory-continue", PLANNING + ("S06",) + STORY,
+        "/factory-continue", PLANNING + ("S06",) + STORY + CLOSEOUT,
         "finish anything pending, then start the next story and take it to Gate B",
         through_gate_c=("S05b",)),
 }
