@@ -19,8 +19,14 @@ from prose:
 * **Continuing.** After a station, the command goes on only while the factory is the
   one waiting (``waiting_on == "factory"``). A gate, or anything that needs the human,
   stops it.
-* **Scope.** The next station must be in the command's scope. ``/factory-resume`` never
-  runs S06 (Pick): only ``/factory-continue`` may start a story (D2, rule S2).
+* **Scope.** The next station must be in the command's scope. Only ``/factory-continue``
+  has S06 (Pick) in its scope, and S06 is the only station that runs
+  ``pick --authorized-by-continue``: so only the human's "continue" starts a story (D2,
+  rule S2). ``/factory-resume`` never does.
+* **Gate C.** ``/factory-continue`` *is* the human's answer at Gate C, so it goes on
+  through ``IDLE_AT_GATE_C`` when it reaches it right after creating the issues (S05b).
+  It never goes through Gate C after a story station, so one ``/factory-continue``
+  starts at most one story and stops at Gate B.
 * **Progress.** If the state engine names the same station that just ran, that station
   did not complete, so the command stops instead of looping.
 * **Entry station.** Where nothing is in motion yet, the state engine names no station
@@ -45,20 +51,26 @@ class Command:
     stations: tuple[str, ...]  # the stations this command may run
     purpose: str
     entry: tuple[tuple[str, str], ...] = ()  # (state, station) when state names no station
+    through_gate_c: tuple[str, ...] = ()  # stations after which it goes on past Gate C
 
+
+PLANNING = ("S00", "S01", "S02", "S03", "S04", "S05", "S05b")
+STORY = ("S07", "S08", "S09", "S10", "S11")  # a story already started (S06 = pick)
 
 # Commands that run stations. /factory-target and /factory-status never do.
-# /factory-continue (T3.5), the only command that may run S06, is added later.
 COMMANDS: dict[str, Command] = {
     "/factory-start": Command(
         "/factory-start", ("S00", "S01", "S02", "S03", "S04", "S05"),
         "begin a new increment and plan it, up to Gate A",
         entry=((state_mod.UNCONFIGURED, "S00"),)),
     "/factory-resume": Command(
-        "/factory-resume", ("S00", "S01", "S02", "S03", "S04", "S05", "S05b",
-                            "S07", "S08", "S09", "S10", "S11"),
+        "/factory-resume", PLANNING + STORY,
         "finish what is in motion (planning, issue creation, or a story already started) up "
         "to the next gate; never starts a story"),
+    "/factory-continue": Command(
+        "/factory-continue", PLANNING + ("S06",) + STORY,
+        "finish anything pending, then start the next story and take it to Gate B",
+        through_gate_c=("S05b",)),
 }
 
 
@@ -108,7 +120,8 @@ def route(command: str, result: dict[str, Any], *, continuing: bool = False,
     if not continuing and command not in result["allowed_commands"]:
         return stop(f"{command} cannot act in state {current}. {message} Allowed now: "
                     + ", ".join(result["allowed_commands"]) + ".")
-    if continuing and result["waiting_on"] != "factory":
+    through_gate_c = current == state_mod.IDLE_AT_GATE_C and after in spec.through_gate_c
+    if continuing and result["waiting_on"] != "factory" and not through_gate_c:
         return stop(f"Stopped at {current}. {message}")
     station = result["next_station"]
     if station is None and not continuing:
