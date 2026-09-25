@@ -16,15 +16,23 @@ Output schema (``schema`` 1)::
       "details": {"message": "<one line for humans>", …state-specific keys…}
     }
 
-States derived here (T1.8): UNCONFIGURED, PLANNING, GATE_A_WAITING, GATE_A_CHANGES,
-ISSUES_PENDING, IDLE_AT_GATE_C, NEEDS_HUMAN, INCONSISTENT. Story-phase states
-(STORY_IN_PROGRESS, GATE_B_*, CLOSEOUT_PENDING, INCREMENT_COMPLETE) arrive in T3.2 and
-T4.1; until then such snapshots yield **UNSUPPORTED**, which allows only
+States derived here: UNCONFIGURED, PLANNING, GATE_A_WAITING, GATE_A_CHANGES,
+ISSUES_PENDING, IDLE_AT_GATE_C, NEEDS_HUMAN, INCONSISTENT (T1.8), and STORY_IN_PROGRESS,
+GATE_B_WAITING_REVIEW, INCREMENT_COMPLETE (T3.2). The rest of the story phase
+(GATE_B_CHANGES_REQUESTED, GATE_B_APPROVED_UNMERGED, CLOSEOUT_PENDING, a rejected story
+PR) arrives in T4.1; until then such snapshots yield **UNSUPPORTED**, which allows only
 ``/factory-status``, so the factory never guesses.
 
 Conventions this module relies on (later stations must follow them):
 
 * A planning branch is named ``factory/plan-<increment>``, e.g. ``factory/plan-001-initial``.
+* A story is in flight while its open issue has ``status:in-progress``,
+  ``status:in-review`` or ``status:changes-requested`` (at most one, invariant 1). While
+  it is in progress, the ``next`` of its checkpoint comment is the station to run; with
+  no checkpoint yet, S06 has just picked it and S07 is next. A checkpoint that says
+  ``GATE_B`` while the label still says in progress means S11 stopped between opening
+  the PR and moving the label, so S11 runs again (it must be idempotent).
+* A story is done when its issue is closed **and** labelled ``status:done`` (S12).
 * Every commit the factory makes carries the trailer ``Factory-Station: <Sxx>``. A commit
   on the default branch with that trailer arrived through a merged PR if GitHub's merge
   account (``web-flow``) committed it (a squash or rebase merge), or if a ``web-flow``
@@ -56,11 +64,15 @@ GATE_A_WAITING = "GATE_A_WAITING"
 GATE_A_CHANGES = "GATE_A_CHANGES"
 ISSUES_PENDING = "ISSUES_PENDING"
 IDLE_AT_GATE_C = "IDLE_AT_GATE_C"
+STORY_IN_PROGRESS = "STORY_IN_PROGRESS"
+GATE_B_WAITING_REVIEW = "GATE_B_WAITING_REVIEW"
+INCREMENT_COMPLETE = "INCREMENT_COMPLETE"
 NEEDS_HUMAN = "NEEDS_HUMAN"
 INCONSISTENT = "INCONSISTENT"
 UNSUPPORTED = "UNSUPPORTED"
 STATES = (UNCONFIGURED, PLANNING, GATE_A_WAITING, GATE_A_CHANGES, ISSUES_PENDING,
-          IDLE_AT_GATE_C, NEEDS_HUMAN, INCONSISTENT, UNSUPPORTED)
+          IDLE_AT_GATE_C, STORY_IN_PROGRESS, GATE_B_WAITING_REVIEW, INCREMENT_COMPLETE,
+          NEEDS_HUMAN, INCONSISTENT, UNSUPPORTED)
 
 RESUME, CONTINUE, START, STATUS = ("/factory-resume", "/factory-continue",
                                    "/factory-start", "/factory-status")
@@ -71,6 +83,9 @@ _ALLOWED = {
     GATE_A_CHANGES: [RESUME, CONTINUE, STATUS],
     ISSUES_PENDING: [RESUME, CONTINUE, STATUS],
     IDLE_AT_GATE_C: [CONTINUE, STATUS],
+    STORY_IN_PROGRESS: [RESUME, CONTINUE, STATUS],
+    GATE_B_WAITING_REVIEW: [STATUS],
+    INCREMENT_COMPLETE: [START, STATUS],
     NEEDS_HUMAN: [STATUS],
     INCONSISTENT: [STATUS],
     UNSUPPORTED: [STATUS],
@@ -78,7 +93,9 @@ _ALLOWED = {
 _WAITING = {
     UNCONFIGURED: "human", PLANNING: "factory", GATE_A_WAITING: "human",
     GATE_A_CHANGES: "factory", ISSUES_PENDING: "factory", IDLE_AT_GATE_C: "human",
-    NEEDS_HUMAN: "human", INCONSISTENT: "human", UNSUPPORTED: "nobody",
+    STORY_IN_PROGRESS: "factory", GATE_B_WAITING_REVIEW: "human",
+    INCREMENT_COMPLETE: "human", NEEDS_HUMAN: "human", INCONSISTENT: "human",
+    UNSUPPORTED: "nobody",
 }
 
 # Planning documents in station order (architecture §5.1).
@@ -90,7 +107,11 @@ PLAN_DOCS = (
     ("S04", "04-implementation-plan.md"),
     ("S05", "05-stories.md"),
 )
-_ACTIVE = {"status:in-progress", "status:in-review"}
+IN_PROGRESS, IN_REVIEW, CHANGES_REQUESTED, DONE = (
+    "status:in-progress", "status:in-review", "status:changes-requested", "status:done")
+_ACTIVE = {IN_PROGRESS, IN_REVIEW, CHANGES_REQUESTED}  # the same lock as ``pick``
+_FIRST_STORY_STATION = "S07"  # S06 (pick) sets in-progress before any checkpoint exists
+_STORY_STATION = re.compile(r"S(0[6-9]|1[0-2])")  # S06-S12: the story loop and close-out
 _INCREMENT = re.compile(r"^\d{3}-[a-z0-9]+(?:-[a-z0-9]+)*$")
 _STORY_HEADING = re.compile(r"^###\s+(STORY-\d{3,})\b", re.MULTILINE)
 
@@ -105,6 +126,7 @@ class IssueInfo:
     labels: frozenset[str]
     story: StoryMarker | None
     checkpoint_branch: str | None = None
+    checkpoint_next: str | None = None  # e.g. "S09" or "GATE_B"; read for active stories
 
     @property
     def status_labels(self) -> set[str]:
@@ -134,6 +156,7 @@ class Snapshot:
     plan_config: dict[str, bool] = field(default_factory=dict)  # inc -> config on branch
     prs: tuple[PrInfo, ...] = ()
     planning_verdicts: dict[int, str] = field(default_factory=dict)  # open PR no. -> Verdict
+    story_verdicts: dict[int, str] = field(default_factory=dict)  # open story PR -> Verdict
     issues: tuple[IssueInfo, ...] = ()
     needs_human: tuple[str, ...] = ()  # e.g. ("issue #4", "PR #7")
     stories_on_default: dict[str, frozenset[str]] = field(default_factory=dict)
@@ -224,13 +247,22 @@ def derive_state(snap: Snapshot) -> StateResult:
             "message": f"{len(missing)} story issue(s) to create.", "missing": missing})
 
     open_issues = [i for i in story_issues if i.state == "OPEN"]
-    if any(i.labels & _ACTIVE for i in open_issues):
+    active = [i for i in open_issues if i.labels & _ACTIVE]  # at most one (invariant 1)
+    if active:
+        return _story_state(snap, increment, active[0])
+    unclosed = sorted(i.number for i in story_issues
+                      if i.state != "OPEN" and DONE not in i.labels)
+    if unclosed:
         return StateResult(UNSUPPORTED, increment, details={
-            "message": "A story is in progress or in review; those states arrive in "
-                       "T3.2/T4.1. Only /factory-status is available."})
+            "message": "Story issue(s) " + ", ".join(f"#{n}" for n in unclosed)
+                       + " are closed but not status:done: close-out (CLOSEOUT_PENDING) "
+                       "arrives in T4.1. Only /factory-status is available.",
+            "issues": unclosed})
     if not open_issues:
-        return StateResult(UNSUPPORTED, increment, details={
-            "message": "All stories are closed; INCREMENT_COMPLETE arrives in T3.2."})
+        return StateResult(INCREMENT_COMPLETE, increment, details={
+            "message": f"Increment {increment} is complete: all {len(story_issues)} "
+                       "stories are done. Run /factory-start with new requirements.",
+            "done": sorted(i.number for i in story_issues)})
     ready = sorted(i.number for i in open_issues if "status:ready" in i.labels)
     if not ready:
         return StateResult(NEEDS_HUMAN, increment, details={
@@ -242,6 +274,50 @@ def derive_state(snap: Snapshot) -> StateResult:
         "ready": ready})
 
 
+def _story_state(snap: Snapshot, increment: str, issue: IssueInfo) -> StateResult:
+    """The state while ``issue`` (the one story in flight) is in progress or in review."""
+    story_id = issue.story.id if issue.story else None
+    base = {"issue": issue.number, "story": story_id}
+
+    if IN_PROGRESS in issue.labels:
+        nxt = issue.checkpoint_next
+        if nxt is None:
+            station = _FIRST_STORY_STATION
+        elif nxt == "GATE_B":
+            station = "S11"  # the PR is open, but S11 had not moved the label yet
+        else:
+            station = nxt  # a story station; check_invariants rejected anything else
+        return StateResult(STORY_IN_PROGRESS, increment, station, details={
+            **base, "branch": issue.checkpoint_branch,
+            "message": f"Story #{issue.number} ({story_id}) is in progress: next is "
+                       f"{station}."})
+
+    if IN_REVIEW in issue.labels:
+        prs = sorted((p for p in snap.prs if p.story_id == story_id and p.state == "OPEN"),
+                     key=lambda p: p.number)
+        if prs:
+            pr = prs[0]  # one open PR per story (invariant 2)
+            verdict = snap.story_verdicts.get(pr.number, Verdict.PENDING.value)
+            if verdict == Verdict.PENDING.value:
+                return StateResult(GATE_B_WAITING_REVIEW, increment, details={
+                    **base, "pr": pr.number,
+                    "message": f"Waiting for you to review PR #{pr.number} ({story_id}): "
+                               "merge it to approve, or comment /changes."})
+            return StateResult(UNSUPPORTED, increment, details={
+                **base, "pr": pr.number, "verdict": verdict,
+                "message": f"PR #{pr.number} ({story_id}) is {verdict}; that Gate B state "
+                           "arrives in T4.1. Only /factory-status is available."})
+        return StateResult(UNSUPPORTED, increment, details={
+            **base, "message": f"Story #{issue.number} ({story_id}) is in review but has no "
+                               "open PR (merged or closed): close-out arrives in T4.1. Only "
+                               "/factory-status is available."})
+
+    return StateResult(UNSUPPORTED, increment, details={
+        **base, "message": f"Changes were requested on story #{issue.number} ({story_id}); "
+                           "GATE_B_CHANGES_REQUESTED arrives in T4.1. Only /factory-status "
+                           "is available."})
+
+
 def check_invariants(snap: Snapshot) -> list[str]:
     """Architecture §6 invariants, plus basic data-integrity checks. [] if all hold."""
     problems: list[str] = []
@@ -249,7 +325,7 @@ def check_invariants(snap: Snapshot) -> list[str]:
         problems.append(f"config is invalid: {snap.config_error}")
 
     open_story_issues = [i for i in snap.issues if i.story is not None and i.state == "OPEN"]
-    # 1. At most one story is in progress or in review.
+    # 1. At most one story is in progress or in review (changes requested counts too).
     active = [i for i in open_story_issues if i.labels & _ACTIVE]
     if len(active) > 1:
         problems.append("more than one story is in progress or in review: "
@@ -296,6 +372,11 @@ def check_invariants(snap: Snapshot) -> list[str]:
         if branch and branch not in snap.branches:
             problems.append(f"issue #{issue.number}'s checkpoint names branch {branch!r}, "
                             "which does not exist on the remote")
+        nxt = issue.checkpoint_next
+        if (IN_PROGRESS in issue.labels and nxt is not None
+                and not (nxt == "GATE_B" or _STORY_STATION.fullmatch(nxt))):
+            problems.append(f"issue #{issue.number} is in progress, but its checkpoint "
+                            f"points to {nxt}, which is not a story station")
 
     # 4. No unexpected factory commits on the default branch.
     for sha in snap.direct_factory_commits:
@@ -488,12 +569,13 @@ def collect_snapshot(gh: Gh, repo: str) -> Snapshot:
     for i in gh.json(["issue", "list", "--repo", repo, "--state", "all", "--limit", "500",
                       "--label", "factory:story"], fields=["number", "state", "labels", "body"]):
         labels = frozenset(label["name"] for label in i.get("labels") or [])
-        checkpoint_branch = None
+        checkpoint = None
         if i["state"] == "OPEN" and labels & _ACTIVE:
             found = comments_mod.find_checkpoint(comments_mod.list_comments(gh, repo, i["number"]))
-            checkpoint_branch = found[1].branch if found else None
+            checkpoint = found[1] if found else None
         issues.append(IssueInfo(i["number"], i["state"], labels, find(i.get("body"), StoryMarker),
-                                checkpoint_branch))
+                                checkpoint.branch if checkpoint else None,
+                                checkpoint.next if checkpoint else None))
 
     needs_human = [f"issue #{i['number']}" for i in gh.json(
         ["issue", "list", "--repo", repo, "--state", "open", "--label", "factory:needs-human",
@@ -532,10 +614,16 @@ def collect_snapshot(gh: Gh, repo: str) -> Snapshot:
 
     config, config_error = _parse_config_text(config_text)
     open_planning = [p for p in prs if p.planning_increment == increment and p.state == "OPEN"]
-    if open_planning and config is not None:
+    in_review = {i.story.id for i in issues
+                 if i.story and i.state == "OPEN" and IN_REVIEW in i.labels}
+    open_story = [p for p in prs if p.story_id in in_review and p.state == "OPEN"]
+    story_verdicts: dict[int, str] = {}
+    if (open_planning or open_story) and config is not None:
         signals = signals_for(config)
         for p in open_planning:
             verdicts[p.number] = signals.verdict(fetch_pr(gh, repo, p.number)).value
+        for p in open_story:
+            story_verdicts[p.number] = signals.verdict(fetch_pr(gh, repo, p.number)).value
 
     commits = _get(gh, f"repos/{repo}/commits?sha={default}&per_page=100") or []
     direct = direct_factory_commits(commits)
@@ -544,5 +632,6 @@ def collect_snapshot(gh: Gh, repo: str) -> Snapshot:
         repo=repo, default_branch=default, branches=branches, config_error=config_error,
         config_found=config_text is not None, existing_project=existing,
         plan_files=plan_files, plan_config=plan_config, prs=tuple(prs),
-        planning_verdicts=verdicts, issues=tuple(issues), needs_human=tuple(needs_human),
+        planning_verdicts=verdicts, story_verdicts=story_verdicts, issues=tuple(issues),
+        needs_human=tuple(needs_human),
         stories_on_default=stories, direct_factory_commits=direct)

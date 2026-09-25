@@ -393,7 +393,7 @@ UNCONFIGURED ──/factory-start──► PLANNING(S0…S5) ──► GATE_A_WA
 | INCONSISTENT | Invariants are broken (see below) | Report, change nothing | Same |
 
 **Invariants** (if any is broken, the state is INCONSISTENT and the factory refuses to act):
-- at most one story is `in-progress` or `in-review`,
+- at most one story is `in-progress` or `in-review` (a story with `changes-requested` counts too: it is still in flight),
 - every story PR maps to exactly one issue,
 - the branch named in a checkpoint exists on the remote,
 - the default branch has no unexpected commits authored by the factory.
