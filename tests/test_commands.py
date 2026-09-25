@@ -82,7 +82,25 @@ def after_station(snapshot, station):
         return GATE_A_WAITING
     if station == "S05b":
         return IDLE
+    if station == "S06":  # pick: #10 in progress, no checkpoint yet
+        return story_at(None)
+    if station in ("S07", "S08", "S09", "S10"):
+        return story_at(f"S{int(station[1:]) + 1:02d}")
+    if station == "S11":  # the PR is open and the issue is in review: Gate B
+        return GATE_B
     raise AssertionError(f"no simulation for {station}")
+
+
+def story_at(next_station):
+    """#10 (STORY-001) in progress; its checkpoint (if any) names ``next_station``."""
+    branch = "story/10-first" if next_station else None
+    return snap(**{**MERGED, "branches": frozenset({"main", "story/10-first"})}, issues=(
+        issue(10, 1, labels=labelled("in-progress"), checkpoint_branch=branch,
+              checkpoint_next=next_station), issue(11, 2)))
+
+
+GATE_B = snap(**{**MERGED, "prs": (*MERGED["prs"], story_pr(20, 1))},
+              issues=(issue(10, 1, labels=labelled("in-review")), issue(11, 2)))
 
 
 def drive(command, snapshot, *, stuck=None, limit=20):
@@ -121,6 +139,65 @@ class RouteAcceptanceTest(unittest.TestCase):
         revision = s05[s05.index("### Revision mode"):s05.index("## Outputs")]
         self.assertIn("python scripts/factory.py comment --pr <N> --kind reply", revision)
         self.assertIn("python scripts/factory.py feedback --pr <N>", revision)
+
+
+class ContinueTest(unittest.TestCase):
+    """T3.5: /factory-continue starts one story and stops at Gate B; resume never picks."""
+
+    STORY_LOOP = ["S06", "S07", "S08", "S09", "S10", "S11"]
+
+    def test_continue_from_gate_c_takes_one_story_to_gate_b(self):
+        self.assertIn(st.CONTINUE, result(IDLE)["allowed_commands"])
+        ran, final = drive("/factory-continue", IDLE)
+        self.assertEqual(ran, self.STORY_LOOP)
+        self.assertEqual((final.action, final.state), ("stop", st.GATE_B_WAITING_REVIEW))
+
+    def test_continue_creates_pending_issues_first_then_picks(self):
+        ran, final = drive("/factory-continue", ISSUES_PENDING)
+        self.assertEqual(ran, ["S05b", *self.STORY_LOOP])
+        self.assertEqual(final.state, st.GATE_B_WAITING_REVIEW)
+
+    def test_continue_finishes_a_story_in_progress_without_picking_another(self):
+        ran, final = drive("/factory-continue", story_at("S09"))
+        self.assertEqual(ran, ["S09", "S10", "S11"])
+        self.assertEqual(final.state, st.GATE_B_WAITING_REVIEW)
+        ran, _ = drive("/factory-continue", story_at(None))  # picked, S07 never ran
+        self.assertEqual(ran[0], "S07")
+
+    def test_continue_does_pending_planning_work_but_stops_at_gate_a(self):
+        ran, final = drive("/factory-continue", planning({"00-prd.md"}))
+        self.assertEqual(ran, ["S02", "S03", "S04", "S05"])
+        self.assertEqual((final.action, final.state), ("stop", st.GATE_A_WAITING))
+
+    def test_continue_stops_where_the_human_decides(self):
+        for snapshot in (GATE_A_WAITING, GATE_B):
+            with self.subTest(state=result(snapshot)["state"]):
+                decision = route("/factory-continue", result(snapshot))
+                self.assertEqual(decision.action, "stop")
+
+    def test_one_continue_never_starts_a_second_story(self):
+        # Gate C is passed only right after S05b, never after a story station.
+        self.assertEqual(route("/factory-continue", result(IDLE), continuing=True,
+                               after="S05b").station, "S06")
+        for after in self.STORY_LOOP:
+            with self.subTest(after=after):
+                decision = route("/factory-continue", result(IDLE), continuing=True,
+                                 after=after)
+                self.assertEqual((decision.action, decision.state),
+                                 ("stop", st.IDLE_AT_GATE_C))
+
+    def test_resume_at_gate_c_never_picks_a_story(self):
+        # The T3.5 acceptance criterion, through the real route (the demo repeats it).
+        decision = route("/factory-resume", result(IDLE))
+        self.assertEqual((decision.action, decision.station), ("stop", None))
+        ran, final = drive("/factory-resume", ISSUES_PENDING)
+        self.assertEqual(ran, ["S05b"])
+        self.assertEqual(final.state, st.IDLE_AT_GATE_C)
+        self.assertNotIn("S06", COMMANDS["/factory-resume"].stations)
+
+    def test_only_continue_may_run_the_pick_station(self):
+        self.assertEqual([c for c, spec in COMMANDS.items() if "S06" in spec.stations],
+                         ["/factory-continue"])
 
 
 class DriveTest(unittest.TestCase):
@@ -228,7 +305,8 @@ class RouteTest(unittest.TestCase):
         for spec in COMMANDS.values():
             with self.subTest(command=spec.name):
                 self.assertLessEqual(set(spec.stations), ids | set(PENDING))
-                self.assertNotIn("S06", spec.stations)
+                if spec.name != "/factory-continue":
+                    self.assertNotIn("S06", spec.stations)
         self.assertEqual(COMMANDS["/factory-start"].stations[0], "S00")
         self.assertNotIn("S05b", COMMANDS["/factory-start"].stations)  # start stops at Gate A
         # /factory-resume can run every station the state engine names in its states.
@@ -267,7 +345,8 @@ class RouteCliTest(unittest.TestCase):
         err = io.StringIO()
         with contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
             cli.build_parser().parse_args(["route", "--command", "factory-status"])
-        self.assertIn("is not one of: factory-resume, factory-start", err.getvalue())
+        self.assertIn("is not one of: factory-continue, factory-resume, factory-start",
+                      err.getvalue())
 
     def test_text_and_continuing(self):
         code, out = self.run_cli(IDLE, "--command", "/factory-resume", "--continuing",
