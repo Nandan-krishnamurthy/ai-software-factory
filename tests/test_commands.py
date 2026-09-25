@@ -21,7 +21,16 @@ from factory import cli, commands, target
 from factory import state as st
 from factory.commands import COMMANDS, route
 from tests import REPO_ROOT
-from tests.test_state import ALL_DOCS, INC, PLAN_BRANCH, issue, planning_pr, snap
+from tests.test_state import (
+    ALL_DOCS,
+    INC,
+    PLAN_BRANCH,
+    issue,
+    labelled,
+    planning_pr,
+    snap,
+    story_pr,
+)
 from tests.test_stations import (
     FORBIDDEN,
     PENDING,
@@ -175,6 +184,22 @@ class RouteTest(unittest.TestCase):
             self.assertEqual(decision.action, "stop")
             self.assertIn("Only /factory-continue may start a story", decision.message)
         self.assertNotIn("S06", COMMANDS["/factory-resume"].stations)
+
+    def test_resume_finishes_a_story_already_in_progress(self):
+        # T3.3: /factory-resume continues a story from its checkpoint, through S11, and
+        # stops at Gate B; it runs none of this from IDLE (no story picked).
+        in_progress = snap(**{**MERGED, "branches": frozenset({"main", "story/10-x"})},
+                           issues=(issue(10, 1, labels=labelled("in-progress"),
+                                         checkpoint_branch="story/10-x",
+                                         checkpoint_next="S09"), issue(11, 2)))
+        decision = route("/factory-resume", result(in_progress))
+        self.assertEqual((decision.action, decision.station, decision.station_file),
+                         ("run", "S09", "stations/S09-test.md"))
+        gate_b = snap(**{**MERGED, "prs": (*MERGED["prs"], story_pr(20, 1))},
+                      issues=(issue(10, 1, labels=labelled("in-review")), issue(11, 2)))
+        decision = route("/factory-resume", result(gate_b), continuing=True, after="S11")
+        self.assertEqual((decision.action, decision.state), ("stop", st.GATE_B_WAITING_REVIEW))
+        self.assertEqual(route("/factory-resume", result(IDLE)).action, "stop")
 
     def test_needs_human_and_inconsistent_stop(self):
         needs = snap(**MERGED, issues=(issue(10, 1), issue(11, 2)), needs_human=("issue #11",))

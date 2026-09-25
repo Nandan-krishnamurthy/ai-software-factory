@@ -58,16 +58,23 @@ FORBIDDEN = [
     (r"--auto\b", "enables auto-merge (D1)"),
     (r"\bgit\b[^`\n]*\bmerge\b", "runs git merge"),
     (r"--force\b|--force-with-lease\b|\bpush\s+-f\b", "force-pushes (rule S4)"),
-    (r"--authorized-by-continue", "picks a story; only /factory-continue may (rule S2)"),
+    (r"--authorized-by-continue", "picks a story; only S06, run by /factory-continue, may "
+                                  "(rule S2)"),
     (r"\bgit\b[^`\n]*\breset\s+--hard\b", "discards work"),
 ]
 GH_APPROVED = {  # .claude/settings.json permissions.allow
     ("issue", "create"), ("issue", "view"), ("issue", "edit"), ("issue", "list"),
     ("pr", "create"), ("pr", "view"), ("pr", "edit"), ("pr", "list"),
 }
-GH_READ_ONLY = {("repo", "view"), ("api", "user"), ("auth", "status")}
+GH_READ_ONLY = {("repo", "view"), ("api", "user"), ("auth", "status"), ("pr", "checks")}
+# S06 is the one station that starts a story, and only /factory-continue runs it
+# (test_commands checks that no other command has S06 in its scope).
+PICK_STATION = "S06"
 PLACEHOLDERS = {"<T>": "/work/target", "<R>": "owner/app", "<D>": "main",
-                "<INC>": "001-initial", "<N>": "7", "<k>": "1", "<SCRATCH>": "/tmp/factory"}
+                "<INC>": "001-initial", "<N>": "7", "<k>": "1", "<SCRATCH>": "/tmp/factory",
+                "<I>": "12", "<B>": "story/12-add-task", "<P>": "21"}
+# The story loop built by T3.3, S06 (pick) to S11 (PR), ending at Gate B.
+STORY_STATIONS = ("S06", "S07", "S08", "S09", "S10", "S11")
 _SPAN = re.compile(r"`([^`\n]+)`")
 
 
@@ -244,6 +251,8 @@ def lint_station(station: Station, ctx: guard.GuardContext) -> list[str]:
                             "architecture §5.1")
 
     for pattern, why in FORBIDDEN:
+        if pattern == "--authorized-by-continue" and station.id == PICK_STATION:
+            continue
         for found in re.finditer(pattern, station.text):
             line = station.text[:found.start()].count("\n") + 1
             problems.append(f"{name}:{line}: {why}: {found.group(0)!r}")
@@ -373,6 +382,114 @@ class StationFilesTest(unittest.TestCase):
         steps = s05.sections["Steps"]
         self.assertIn("python scripts/factory.py feedback --pr <N>", steps)
         self.assertIn("python scripts/factory.py comment --pr <N> --kind reply", steps)
+
+
+class StoryStationsTest(unittest.TestCase):
+    """T3.3: the story loop S06-S11, as in architecture §7.1."""
+
+    def setUp(self):
+        self.by_id = {s.id: s for s in load_stations()}
+
+    def section(self, station_id, name):
+        return self.by_id[station_id].sections[name]
+
+    def test_flow_from_gate_c_to_gate_b(self):
+        self.assertEqual([self.by_id[i].next for i in STORY_STATIONS],
+                         ["S07", "S08", "S09", "S10", "S11", "GATE_B"])
+        self.assertEqual(self.by_id["S06"].allowed_from, ["GATE_C"])
+        self.assertEqual(self.by_id["S05b"].next, "GATE_C")
+
+    def test_only_s06_picks_a_story(self):
+        for station in self.by_id.values():
+            with self.subTest(station=station.id):
+                if station.id == PICK_STATION:
+                    self.assertIn("python scripts/factory.py pick --authorized-by-continue",
+                                  station.sections["Steps"])
+                else:
+                    self.assertNotIn("pick --authorized-by-continue", station.text)
+
+    def test_s06_writes_no_checkpoint_so_the_state_engine_names_s07(self):
+        s06 = self.by_id["S06"].text
+        self.assertNotIn("--kind checkpoint", s06)
+        self.assertIn("reports `STORY_IN_PROGRESS` with `next_station` `S07`",
+                      self.section("S06", "Done check"))
+
+    def test_every_station_pushes_and_checkpoints(self):
+        # A push and a checkpoint after every station (architecture §7.1): at most one
+        # station's work is lost if the session dies.
+        for sid, nxt in (("S07", "S08"), ("S08", "S09"), ("S09", "S10"), ("S10", "S11"),
+                         ("S11", "GATE_B")):
+            with self.subTest(station=sid):
+                checkpoint = self.section(sid, "Checkpoint")
+                self.assertIn(f"python scripts/factory.py comment --issue <I> --kind checkpoint "
+                              f"--station {sid} --next {nxt} --branch <B>", checkpoint)
+                if sid != "S10":  # S10 changes no code
+                    self.assertIn("git -C <T> push", checkpoint)
+                    self.assertIn(f'-m "{state.FACTORY_COMMIT_TRAILER}: {sid}"', checkpoint)
+
+    def test_done_checks_match_the_state_engine(self):
+        for sid, nxt in (("S07", "S08"), ("S08", "S09"), ("S09", "S10"), ("S10", "S11")):
+            with self.subTest(station=sid):
+                self.assertIn(f"reports `STORY_IN_PROGRESS` with `next_station` `{nxt}`",
+                              self.section(sid, "Done check"))
+        self.assertIn("reports `GATE_B_WAITING_REVIEW`", self.section("S11", "Done check"))
+
+    def test_story_stations_read_the_state_and_the_targets_claude_md(self):
+        for sid in STORY_STATIONS[1:]:
+            with self.subTest(station=sid):
+                self.assertIn("`STORY_IN_PROGRESS` with `next_station` `" + sid + "`",
+                              self.section(sid, "Preconditions"))
+        for sid in ("S08", "S09"):
+            self.assertIn("<T>/CLAUDE.md", self.section(sid, "Inputs"))
+
+    def test_fix_attempts_then_a_draft_pr_and_needs_human(self):
+        s09 = self.by_id["S09"].text
+        self.assertIn("limits.max_fix_attempts", s09)
+        self.assertIn("--fix-attempts <k>", s09)
+        stuck = self.section("S09", "Stop conditions")
+        self.assertIn("gh pr create --draft", stuck)
+        self.assertIn("gh issue edit <I> --repo <R> --add-label factory:needs-human", stuck)
+        self.assertLess(stuck.index("gh pr list --repo <R> --head <B>"),
+                        stuck.index("gh pr create --draft"))
+        self.assertIn("Stuck", self.section("S10", "Steps"))  # a failed AC counts too
+
+    def test_s11_brings_the_branch_up_to_date_and_re_tests_before_the_pr(self):
+        steps = self.section("S11", "Steps")
+        self.assertIn("git -C <T> rev-list --count <B>..origin/<D>", steps)
+        self.assertIn("git -C <T> pull --no-rebase --no-edit origin <D>", steps)
+        self.assertIn("run the full commands again", steps)
+        self.assertLess(steps.index("pull --no-rebase"), steps.index("gh pr create"))
+
+    def test_s11_pr_follows_the_template_and_copies_the_verdict_unchanged(self):
+        steps = self.section("S11", "Steps")
+        self.assertIn("templates/pr.md", steps)
+        self.assertIn("**copied unchanged** (rule H5)", steps)
+        self.assertIn("`<!-- factory:pr story=<STORY-###> -->`", steps)
+        self.assertLess(steps.index("gh pr list --repo <R> --head <B>"),
+                        steps.index("gh pr create"))
+        self.assertIn('--title "[#<I>] <story title>"', steps)
+        self.assertIn("every heading of `templates/pr.md` in order, no `{{`",
+                      self.section("S11", "Done check"))
+        # The verdict S10 stored is what S11 copies: it is on GitHub, not in the session.
+        self.assertIn("--body-file <SCRATCH>/verdict-<I>.md", self.section("S10", "Checkpoint"))
+
+    def test_skipped_gate_wording_matches_the_template_contract(self):
+        readme = (REPO_ROOT / "templates" / "README.md").read_text(encoding="utf-8")
+        self.assertIn("`Skipped: commands.<name> is null`", readme)
+        for sid in ("S09", "S11"):
+            with self.subTest(station=sid):
+                self.assertIn("`Skipped: commands.<name> is null`", self.by_id[sid].text)
+
+    def test_s11_updates_traceability_and_moves_the_label(self):
+        self.assertIn("docs/factory/traceability.md", self.section("S11", "Outputs"))
+        self.assertIn("python scripts/factory.py label --issue <I> --status in-review",
+                      self.section("S11", "Steps"))
+
+    def test_s10_uses_the_ac_verifier_and_never_self_verifies(self):
+        s10 = self.by_id["S10"].text
+        self.assertIn("`ac-verifier` subagent", s10)
+        self.assertIn(".claude/agents/ac-verifier.md", s10)
+        self.assertIn("never verify your own work", self.section("S10", "Preconditions"))
 
 
 class LintCatchesProblemsTest(unittest.TestCase):

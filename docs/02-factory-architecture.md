@@ -416,8 +416,9 @@ S09  write tests (named "#14 AC1…"); run lint/typecheck/full suite
      checkpoint S09→S10
 S10  ac-verifier subagent → per-AC verdict + evidence
      checkpoint S10→S11
-S11  rebase on origin/main, re-run suite; update traceability.md rows; push
-     gh pr create (templates/pr.md); label in-review
+S11  if origin/main moved: git pull --no-rebase origin main (no force-push), re-run suite
+     gh pr create (templates/pr.md); update traceability.md rows (with the PR number); push
+     label in-review
      checkpoint S11→GATE_B
 STOP  "PR #21 ready for review: <url>"
 ```
