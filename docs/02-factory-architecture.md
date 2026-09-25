@@ -212,6 +212,7 @@ Written in Python 3.11+ using only the standard library. It calls `git` and `gh`
 | `issues sync [--dry-run]` | Parses `05-stories.md` (§5.4), then creates only the issues that are missing, matched by their `STORY-###` marker. Refuses before Gate A, except with `--dry-run`. | ✔ |
 | `pick --authorized-by-continue` | Applies the unblocked rule (§4 of the requirements): open, `status:ready`, not `factory:needs-human`, every "Blocked by" issue closed (an issue it cannot see counts as open). Picks the oldest increment, then the lowest milestone, then the lowest issue number. Assigns the issue, then sets `status:in-progress` last, because that label is the lock. | ✔ (refuses without the flag, and while a story is `in-progress`, `in-review` or `changes-requested`) |
 | `checkpoint --issue N --station S09 --next S10 [--note …]` | Adds or updates the single machine-readable checkpoint comment | ✔ |
+| `closeout --issue N [--finish] [--json]` | S12's gate. It confirms that the story's PR is merged (a `factory:pr` marker naming the story) and refuses otherwise, and it never merges. It reports the PR, its branch and final head commit, the merge commit, and the stories this close-out unblocks. `--finish` checks the merge again, closes the issue if the merge did not, and sets `status:done` last. | ✔ (read-only without `--finish`) |
 | `feedback --pr N [--json]` | Lists the PR's verdict and the human feedback items of the current review round (§9.2). Rework stations answer each item with `comment`. | ✔ (read-only) |
 | `verdict check --issue N [--file F]` | Checks the AC verifier's verdict (§4.5) against the issue's ACs: one line per AC, each with evidence, plus a `Suite:` line. Exits 1 if it is invalid or anything failed | ✔ (read-only) |
 | `label --issue N --status in-review` | Moves the status label on a story issue: adds the new one, then removes the other `status:*` labels, so the issue always has a status. It changes nothing when the label is already right. | ✔ |
@@ -441,7 +442,15 @@ A push happens after every station, so if the session dies, at most one station'
    The push and the marked replies start a new review round, so the same `/changes` never triggers rework twice.
 
 ### 7.3 Close-out (after you merge)
-S12 checks that the PR is merged, sets `status:done`, runs `git -C T switch main && git pull`, deletes the local story branch, and posts a summary listing the stories that are now unblocked. The station itself only closes out the merged story: it ends at Gate C and **never picks the next story**. What happens next depends on the command that ran it:
+S12 runs these steps in order:
+1. Checks that the PR is merged (`factory.py closeout`, which refuses without a merge).
+2. Runs `git -C T switch main && git pull`.
+3. Deletes the local story branch, but only if its tip is the PR's final head commit, i.e. the work you merged. Otherwise it keeps the branch and says so.
+4. Posts a summary listing the stories that are now unblocked.
+5. Sets `status:done` (`closeout --finish`, which also closes the issue if the merge did not).
+6. Records the checkpoint `S12` → `GATE_C`.
+
+The station itself only closes out the merged story: it ends at Gate C and **never picks the next story**. What happens next depends on the command that ran it:
 - `/factory-resume` **stops at Gate C**. It never starts a story (D2).
 - `/factory-continue` goes on through Gate C to S6 and takes **exactly one** next story through S11, stopping at Gate B. Running `/factory-continue` after the merge *is* the human's continue (D2). One continue therefore closes out the previous story and starts at most one new one. This is the same rule as after S5b (`ISSUES_PENDING`). If nothing can start (the increment is complete, or every remaining story is blocked), it stops and reports.
 

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from factory import (
     __version__,
+    closeout,
     commands,
     comments,
     doctor,
@@ -113,6 +114,19 @@ def build_parser() -> argparse.ArgumentParser:
     label_parser.add_argument("--issue", type=_positive_int, required=True, metavar="N")
     label_parser.add_argument("--status", required=True, choices=pick.STATUSES)
     label_parser.set_defaults(handler=_label, needs_target=True)
+
+    closeout_parser = subparsers.add_parser(
+        "closeout", help="close out a story whose PR the human merged (station S12)",
+        description="Confirms that the story's PR is merged (the human's approval) and "
+                    "refuses otherwise; it never merges. Without --finish it changes "
+                    "nothing and reports the PR, its branch and head commit, the merge "
+                    "commit, and the stories that close-out unblocks. With --finish it "
+                    "closes the issue if the merge did not, then sets status:done last.")
+    closeout_parser.add_argument("--issue", type=_positive_int, required=True, metavar="N")
+    closeout_parser.add_argument("--finish", action="store_true",
+                                 help="close the issue if needed and set status:done")
+    closeout_parser.add_argument("--json", action="store_true", help="machine-readable output")
+    closeout_parser.set_defaults(handler=_closeout, needs_target=True)
 
     verdict_parser = subparsers.add_parser(
         "verdict", help="check the AC verifier's per-AC verdict for a story")
@@ -320,6 +334,24 @@ def _label(args: argparse.Namespace) -> int:
     else:
         changes = [f"+{name}" for name in add] + [f"-{name}" for name in remove]
         print(f"#{args.issue}: " + ", ".join(changes))
+    return 0
+
+
+def _closeout(args: argparse.Namespace) -> int:
+    if args.finish:
+        result, changes = closeout.finish(Gh(), args.target.repo, args.issue)
+    else:
+        result, changes = closeout.inspect(Gh(), args.target.repo, args.issue), None
+    if args.json:
+        data = result.to_dict()
+        if changes is not None:
+            data["changes"] = changes
+        print(json.dumps(data, indent=2))
+        return 0
+    print(closeout.render(result))
+    if changes is not None:
+        print(f"#{args.issue}: " + (", ".join(changes) if changes else "already closed and "
+                                    "status:done; nothing changed"))
     return 0
 
 
