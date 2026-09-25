@@ -80,8 +80,8 @@ Each attempt was deliberately written so that it does **not** match a `permissio
 | **Demo run** | 2026-09-25 |
 | **Target** | `Nandan-krishnamurthy/task-tracker-factory-test` (fresh repo; prerequisite P3), cloned at `C:\Projects\task-tracker-factory-test` |
 | **Input** | The Task Tracker PRD, supplied as `Task Tracker.pdf` (5 pages) |
-| **Factory code** | `main` at d8d55b0 (T2.1–T2.5 merged) |
-| **Result** | ⏸ **Partly run, up to Gate A as requested.** `/factory-target` → `/factory-start` → S00 → S02 → S03 → S04 → S05 → **Planning PR [#1](https://github.com/Nandan-krishnamurthy/task-tracker-factory-test/pull/1)**, state `GATE_A_WAITING`. The rest of the plan's demo (a `/changes` revision, the human merge, then `/factory-resume` creating the issues and stopping at "say continue") waits on the human's Gate A review. Four factory problems were found (below); none is fixed yet. |
+| **Factory code** | `main` at d8d55b0 (T2.1–T2.5 merged) through Gate A; `main` at d7b8a3f (plus the fix in PR #17) for issue creation |
+| **Result** | ✅ **Run end to end, except the `/changes` revision step.** `/factory-target` → `/factory-start` → S00 → S02 → S03 → S04 → S05 → **Planning PR [#1](https://github.com/Nandan-krishnamurthy/task-tracker-factory-test/pull/1)** → human merge → `/factory-resume` → S05b → **12 issues (#2–#13)** → stop at **`IDLE_AT_GATE_C`** ("say continue"). The human accepted the plan without feedback, so the plan's "comment `/changes` → `/factory-resume` revises the PR" step (`GATE_A_CHANGES`, S05 revision mode) was **not exercised** and is still unproven. Five factory problems were found: one is fixed (PR #17) and four are open (below). |
 
 ### Tasks
 | Task | PR | Status |
@@ -128,17 +128,44 @@ Each attempt was deliberately written so that it does **not** match a `permissio
 
 Every factory commit carries its `Factory-Station:` trailer (S00, S02, S03, S04, S04, S05). The guard also blocked a `$VAR` path in a shell command (`cannot tell where '$T/.factory/log.md' points`). That is working as designed; the command was re-run with a literal path.
 
-### Problems found (not fixed; candidates for follow-up tasks)
+**4. Gate A: the human reviewed Planning PR #1, accepted the assumptions, and merged it** with a normal merge commit (2a5a64e). No `/changes` round was held.
+
+| Step | Result |
+|---|---|
+| `/factory-target` → `state` | ❌ **`INCONSISTENT`**: "commit e2babf0 … c6b13c2 on 'main' was made by the factory but did not arrive through a merged PR" (all 6 planning commits). `route` → `stop`, so nothing was changed. *Problem 5.* |
+| Fix | Factory PR **#17** (merged): invariant 4 now accepts commits on the branch side of a `web-flow` merge commit. It includes a regression test built from this exact history, which fails without the fix. |
+| `/factory-target` → `state` again | ✅ `ISSUES_PENDING` (increment `001-initial`), next station S05b, "12 story issue(s) to create." Doctor passed with 1 warning (branch protection). |
+
+**5. `/factory-resume`: S05b Create issues**
+
+| Step | Result |
+|---|---|
+| Preconditions | ✅ merged Planning PR `[{"number":1}]`; clean working tree; `switch main` + `pull --ff-only` fast-forwarded to 2a5a64e |
+| `issues sync --dry-run` | ✅ `12 to create, 0 already exist`, identical to the dry run approved in PR #1 |
+| `issues sync` | ✅ `Done: 12 created, 0 already existed.` Issues #2–#13 were created in dependency order, labelled `factory:story` + `status:ready`, with the `factory:story` marker, and `Blocked by` translated (for example, STORY-009 → `#7, #9`) |
+| Local planning branch | ✅ `Deleted branch factory/plan-001-initial (was e2babf0).` |
+| Summary reply | ✅ posted with `factory.py comment --pr 1 --kind reply` ([comment](https://github.com/Nandan-krishnamurthy/task-tracker-factory-test/pull/1#issuecomment-5830878223)); only #2 (STORY-001) is unblocked |
+| Done check | ✅ dry run `0 to create, 12 already exist`; `state` → **`IDLE_AT_GATE_C`**, "12 story(ies) ready. Say continue (/factory-continue) to start the next one."; `route` → `stop` |
+
+No story was started (rule S2).
+
+### Problems found
 1. **S00 cannot pass on a brand-new repo.** Step 1 stops on any `doctor` FAIL, but step 2 (`labels ensure`) is what fixes the `labels` FAIL. *Fix:* run `labels ensure` before `doctor` in S00, or make `labels` a WARN in `doctor` until S00 has run.
 2. **A PDF counts as existing code.** `collect_snapshot` in `state.py` treats every file on the default branch outside `docs/factory/`, `.factory/` and README/LICENSE/.gitignore as code, so a repo holding only a README and a PDF is routed to S01. *Fix* (fits T5.2's existing-project detection): only count source or build files, or ignore documents (`*.md`, `*.pdf`, `docs/**`).
 3. **S00 assumes a Markdown requirements file.** "Copy unchanged to `00-prd.md`" has no rule for PDF or other formats. *Fix:* S00 converts non-Markdown input to faithful Markdown with a source header (as done here), or asks for Markdown.
 4. **Forward references use up IDs.** `scan_layout` in `increments.py` counts every `STORY-###`/`REQ-###` mentioned in any file under `docs/factory/`. S04's plan mentioned "STORY-001" before S05 had allocated it, so `next_story` became STORY-002. It was caught before any story was written, and the plan was reworded. *Fix:* S04 (and S02/S03) must not name STORY IDs, or the scanner counts only story headings, issue markers and PR bodies.
+5. **✅ Fixed (PR #17): a normal merge commit broke invariant 4.** The check trusted a `Factory-Station:` commit on `main` only if `web-flow` committed it. That is true for squash and rebase merges, but a merge commit keeps the branch commits' own committer. `state.direct_factory_commits()` now also accepts commits brought in by a `web-flow` merge commit, and still flags local merges and direct pushes.
+
+Problems 1–4 are still open and are candidates for follow-up tasks.
 
 ### Observations
 - The `Target: <local path>` banner is part of `issues sync` stdout, so the dry-run block in the (public) Planning PR shows the local path `C:\Projects\…`. Harmless, but the banner could go to stderr for this command, as `state --json` already does.
 - No page renderer (`pdftoppm`) is installed, so the PDF was checked through two text extractions, not visually.
+- At `IDLE_AT_GATE_C`, `state --json` lists all 12 issues under `details.ready`, because they all carry `status:ready`. Only #2 is actually unblocked. S06's pick (T3.1) must apply the unblocked rule rather than trust this list.
+- Deactivating the target to write in the factory repo means `/factory-target` must be run again before the next factory command. This happened twice during the demo. It follows from rule S3 and is expected, but a runbook note (T5.4) would help.
 
 ### Cleanup and hand-off
-- The target was deactivated to write this record (rule S3): the gitignored `.factory-local/target.json` and `.claude/settings.local.json` were removed. Run `/factory-target C:\Projects\task-tracker-factory-test` before the next `/factory-resume`.
-- Nothing was merged, and nothing was pushed to `main` in any repo. No issues have been created.
-- **Next (human):** review Planning PR #1. Either comment `/changes` with feedback and run `/factory-resume` (the revision step of the demo), or merge it and run `/factory-resume` (issue creation, then a stop at "say continue"). Record those steps here to complete the M2 demo.
+- The target was deactivated to write this record (rule S3): the gitignored `.factory-local/target.json` and `.claude/settings.local.json` were removed.
+- The factory never merged anything or pushed to `main` in any repo. The target's history was not rewritten. Its `main` changed only through the human's commits and the human's merge of PR #1.
+- The factory is stopped at **Gate C**. M3 (the story loop) was not started.
+- **Still to prove from the M2 demo:** the `/changes` → `/factory-resume` revision round (S05 revision mode). It can be exercised on the next Planning PR, in M5's increment 002, or on a throwaway planning increment.
