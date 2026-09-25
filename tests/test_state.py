@@ -19,6 +19,7 @@ from factory.git import Git
 from factory.markers import (
     CheckpointMarker,
     PlanningMarker,
+    PrMarker,
     ReplyMarker,
     StoryMarker,
     build,
@@ -36,8 +37,17 @@ def story(n, inc=INC):
 
 
 def issue(number, n, labels=("factory:story", "status:ready"), state="OPEN", inc=INC,
-          checkpoint_branch=None):
-    return IssueInfo(number, state, frozenset(labels), story(n, inc), checkpoint_branch)
+          checkpoint_branch=None, checkpoint_next=None):
+    return IssueInfo(number, state, frozenset(labels), story(n, inc), checkpoint_branch,
+                     checkpoint_next)
+
+
+def labelled(status):
+    return ("factory:story", f"status:{status}")
+
+
+def story_pr(number, n, state="OPEN"):
+    return PrInfo(number, state, f"story/{n}-x", frozenset(), story_id=f"STORY-{n:03d}")
 
 
 def planning_pr(number, state="OPEN", inc=INC):
@@ -106,11 +116,49 @@ STATE_FIXTURES = [
     ("two stories in progress", snap(**MERGED_PLANNING, issues=(
         issue(10, 1, labels=("factory:story", "status:in-progress")),
         issue(11, 2, labels=("factory:story", "status:in-review")))), st.INCONSISTENT, None),
-    ("story in progress (T3.2 territory)", snap(**MERGED_PLANNING, issues=(
-        issue(10, 1, labels=("factory:story", "status:in-progress")), issue(11, 2))),
+    # T3.2: story states.
+    ("story just picked, no checkpoint yet", snap(**MERGED_PLANNING, issues=(
+        issue(10, 1, labels=labelled("in-progress")), issue(11, 2))),
+     st.STORY_IN_PROGRESS, "S07"),
+    ("story in progress: resume from checkpoint.next", merged_snap(
+        branches=frozenset({"main", "story/10-x"}), issues=(
+            issue(10, 1, labels=labelled("in-progress"), checkpoint_branch="story/10-x",
+                  checkpoint_next="S09"), issue(11, 2))),
+     st.STORY_IN_PROGRESS, "S09"),
+    ("story PR opened, label not yet moved: S11 again", merged_snap(
+        branches=frozenset({"main", "story/10-x"}), issues=(
+            issue(10, 1, labels=labelled("in-progress"), checkpoint_branch="story/10-x",
+                  checkpoint_next="GATE_B"), issue(11, 2))),
+     st.STORY_IN_PROGRESS, "S11"),
+    ("story PR open, waiting for review", merged_snap(
+        issues=(issue(10, 1, labels=labelled("in-review")), issue(11, 2)),
+        prs=(planning_pr(5, "MERGED"), story_pr(20, 1)), story_verdicts={20: "PENDING"}),
+     st.GATE_B_WAITING_REVIEW, None),
+    ("story PR open, no verdict recorded", merged_snap(
+        issues=(issue(10, 1, labels=labelled("in-review")), issue(11, 2)),
+        prs=(planning_pr(5, "MERGED"), story_pr(20, 1))),
+     st.GATE_B_WAITING_REVIEW, None),
+    ("all stories done", snap(**MERGED_PLANNING, issues=(
+        issue(10, 1, labels=labelled("done"), state="CLOSED"),
+        issue(11, 2, labels=labelled("done"), state="CLOSED"))),
+     st.INCREMENT_COMPLETE, None),
+    # Story states that arrive in T4.1: UNSUPPORTED until then, never a guess.
+    ("story PR /changes (T4.1)", merged_snap(
+        issues=(issue(10, 1, labels=labelled("in-review")), issue(11, 2)),
+        prs=(planning_pr(5, "MERGED"), story_pr(20, 1)),
+        story_verdicts={20: "CHANGES_REQUESTED"}), st.UNSUPPORTED, None),
+    ("in review, PR merged: close-out (T4.1)", merged_snap(
+        issues=(issue(10, 1, labels=labelled("in-review")), issue(11, 2)),
+        prs=(planning_pr(5, "MERGED"), story_pr(20, 1, "MERGED"))), st.UNSUPPORTED, None),
+    ("changes-requested label (T4.1)", snap(**MERGED_PLANNING, issues=(
+        issue(10, 1, labels=labelled("changes-requested")), issue(11, 2))),
      st.UNSUPPORTED, None),
-    ("all stories closed (T3.2 territory)", snap(**MERGED_PLANNING, issues=(
-        issue(10, 1, state="CLOSED"), issue(11, 2, state="CLOSED"))), st.UNSUPPORTED, None),
+    ("story closed but not done: close-out (T4.1)", snap(**MERGED_PLANNING, issues=(
+        issue(10, 1, labels=labelled("in-review"), state="CLOSED"), issue(11, 2))),
+     st.UNSUPPORTED, None),
+    ("all closed, one not done (T4.1)", snap(**MERGED_PLANNING, issues=(
+        issue(10, 1, labels=labelled("done"), state="CLOSED"),
+        issue(11, 2, state="CLOSED"))), st.UNSUPPORTED, None),
 ]
 
 
@@ -122,12 +170,40 @@ class DeriveStateTest(unittest.TestCase):
                 self.assertEqual(result.state, expected, result.details)
                 self.assertEqual(result.next_station, station)
 
-    def test_every_planning_state_has_a_fixture(self):
+    def test_every_state_has_a_fixture(self):
         covered = {expected for _, _, expected, _ in STATE_FIXTURES}
-        for required in (st.UNCONFIGURED, st.PLANNING, st.GATE_A_WAITING, st.GATE_A_CHANGES,
-                         st.ISSUES_PENDING, st.IDLE_AT_GATE_C, st.NEEDS_HUMAN,
-                         st.INCONSISTENT):
-            self.assertIn(required, covered)
+        self.assertEqual(set(st.STATES) - covered, set())
+
+    def test_story_state_details(self):
+        result = derive_state(merged_snap(
+            branches=frozenset({"main", "story/10-x"}), issues=(
+                issue(10, 1, labels=labelled("in-progress"), checkpoint_branch="story/10-x",
+                      checkpoint_next="S09"), issue(11, 2))))
+        self.assertEqual((result.details["issue"], result.details["story"],
+                          result.details["branch"]), (10, "STORY-001", "story/10-x"))
+        self.assertIn("Story #10 (STORY-001) is in progress: next is S09.",
+                      result.details["message"])
+        data = result.to_dict()
+        self.assertEqual((data["waiting_on"], data["allowed_commands"]),
+                         ("factory", [st.RESUME, st.CONTINUE, st.STATUS]))
+
+        data = derive_state(merged_snap(
+            issues=(issue(10, 1, labels=labelled("in-review")), issue(11, 2)),
+            prs=(planning_pr(5, "MERGED"), story_pr(20, 1)))).to_dict()
+        self.assertEqual((data["details"]["pr"], data["waiting_on"], data["allowed_commands"]),
+                         (20, "human", [st.STATUS]))
+        self.assertIn("review PR #20 (STORY-001)", data["details"]["message"])
+
+        data = derive_state(snap(**MERGED_PLANNING, issues=(
+            issue(10, 1, labels=labelled("done"), state="CLOSED"),
+            issue(11, 2, labels=labelled("done"), state="CLOSED")))).to_dict()
+        self.assertEqual((data["details"]["done"], data["allowed_commands"]),
+                         ([10, 11], [st.START, st.STATUS]))
+
+    def test_every_state_output_matches_the_schema(self):
+        for name, snapshot, _, _ in STATE_FIXTURES:
+            with self.subTest(name):
+                self.assertEqual(validate_output(derive_state(snapshot).to_dict()), [])
 
     def test_details_are_informative(self):
         result = derive_state(snap(**MERGED_PLANNING, issues=(issue(10, 1),)))
@@ -184,6 +260,28 @@ class InvariantTest(unittest.TestCase):
             issue(10, 1, labels=("factory:story", "status:in-progress"),
                   checkpoint_branch="story/10-gone"), issue(11, 2))),
          "does not exist on the remote"),
+        ("checkpoint branch missing, story resuming at S09", snap(**MERGED_PLANNING, issues=(
+            issue(10, 1, labels=labelled("in-progress"), checkpoint_branch="story/10-gone",
+                  checkpoint_next="S09"), issue(11, 2))),
+         "names branch 'story/10-gone', which does not exist on the remote"),
+        ("checkpoint branch missing while in review", snap(**MERGED_PLANNING, issues=(
+            issue(10, 1, labels=labelled("in-review"), checkpoint_branch="story/10-gone"),
+            issue(11, 2))),
+         "does not exist on the remote"),
+        ("in progress, checkpoint points to a planning station", merged_snap(
+            branches=frozenset({"main", "story/10-x"}), issues=(
+                issue(10, 1, labels=labelled("in-progress"), checkpoint_branch="story/10-x",
+                      checkpoint_next="S03"), issue(11, 2))),
+         "points to S03, which is not a story station"),
+        ("in progress, checkpoint points to Gate C", merged_snap(
+            branches=frozenset({"main", "story/10-x"}), issues=(
+                issue(10, 1, labels=labelled("in-progress"), checkpoint_branch="story/10-x",
+                      checkpoint_next="GATE_C"), issue(11, 2))),
+         "points to GATE_C"),
+        ("one story in progress, another with changes requested", snap(
+            **MERGED_PLANNING, issues=(issue(10, 1, labels=labelled("in-progress")),
+                                       issue(11, 2, labels=labelled("changes-requested")))),
+         "more than one story"),
         ("direct factory commit on main", snap(**MERGED_PLANNING,
                                                direct_factory_commits=("abcdef1234",)),
          "did not arrive through a merged PR"),
@@ -458,6 +556,55 @@ class CollectSnapshotTest(unittest.TestCase):
         snapshot = collect(fake)
         self.assertEqual(snapshot.issues[0].checkpoint_branch, "story/10-gone")
         self.assertEqual(derive_state(snapshot).state, st.INCONSISTENT)
+
+    def test_story_in_progress_resumes_from_the_checkpoint(self):
+        fake = self.merged()
+        fake.branches.add("story/10-first")
+        fake.issues = [self.story_issue(10, 1, ("factory:story", "status:in-progress")),
+                       self.story_issue(11, 2)]
+        checkpoint = build(CheckpointMarker("S08", "S09", "story/10-first", "a" * 40, 0, 0,
+                                            "2026-09-25T10:00:00+00:00"))
+        fake.issue_comments[10] = [{"id": 1, "body": checkpoint}]
+        snapshot = collect(fake)
+        self.assertEqual((snapshot.issues[0].checkpoint_branch,
+                          snapshot.issues[0].checkpoint_next), ("story/10-first", "S09"))
+        result = derive_state(snapshot)
+        self.assertEqual((result.state, result.next_station),
+                         (st.STORY_IN_PROGRESS, "S09"))
+
+    def story_in_review(self, comments):
+        fake = self.merged()
+        fake.issues = [self.story_issue(10, 1, ("factory:story", "status:in-review")),
+                       self.story_issue(11, 2)]
+        fake.prs.append({"number": 20, "state": "OPEN", "headRefName": "story/10-first",
+                         "labels": [], "body": build(PrMarker("STORY-001")) + "\nCloses #10"})
+        fake.pr_views[20] = {"number": 20, "state": "OPEN", "mergedAt": None,
+                             "headRefName": "story/10-first", "reviews": [],
+                             "commits": [{"oid": "b" * 40, "committedDate": ts(0)}],
+                             "comments": comments}
+        return fake
+
+    def test_gate_b_waiting_review(self):
+        fake = self.story_in_review([{"id": "1", "author": {"login": "me"},
+                                      "body": "Reading it now", "createdAt": ts(5)}])
+        snapshot = collect(fake)
+        self.assertEqual(snapshot.story_verdicts, {20: "PENDING"})
+        result = derive_state(snapshot)
+        self.assertEqual((result.state, result.details["pr"]), (st.GATE_B_WAITING_REVIEW, 20))
+
+    def test_gate_b_changes_is_not_guessed_before_t41(self):
+        fake = self.story_in_review([{"id": "1", "author": {"login": "me"},
+                                      "body": "/changes rename it", "createdAt": ts(5)}])
+        snapshot = collect(fake)
+        self.assertEqual(snapshot.story_verdicts, {20: "CHANGES_REQUESTED"})
+        self.assertEqual(derive_state(snapshot).state, st.UNSUPPORTED)
+
+    def test_increment_complete(self):
+        fake = self.merged()
+        done = ("factory:story", "status:done")
+        fake.issues = [dict(self.story_issue(10, 1, done), state="CLOSED"),
+                       dict(self.story_issue(11, 2, done), state="CLOSED")]
+        self.assertEqual(derive_state(collect(fake)).state, st.INCREMENT_COMPLETE)
 
     def test_direct_factory_commit_detected(self):
         fake = self.merged()
