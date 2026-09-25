@@ -213,6 +213,7 @@ Written in Python 3.11+ using only the standard library. It calls `git` and `gh`
 | `pick --authorized-by-continue` | Applies the unblocked rule (§4 of the requirements): open, `status:ready`, not `factory:needs-human`, every "Blocked by" issue closed (an issue it cannot see counts as open). Picks the oldest increment, then the lowest milestone, then the lowest issue number. Assigns the issue, then sets `status:in-progress` last, because that label is the lock. | ✔ (refuses without the flag, and while a story is `in-progress`, `in-review` or `changes-requested`) |
 | `checkpoint --issue N --station S09 --next S10 [--note …]` | Adds or updates the single machine-readable checkpoint comment | ✔ |
 | `feedback --pr N [--json]` | Lists the PR's verdict and the human feedback items of the current review round (§9.2). Rework stations answer each item with `comment`. | ✔ (read-only) |
+| `verdict check --issue N [--file F]` | Checks the AC verifier's verdict (§4.5) against the issue's ACs: one line per AC, each with evidence, plus a `Suite:` line. Exits 1 if it is invalid or anything failed | ✔ (read-only) |
 | `label --issue N --status in-review` | Moves the status label on a story issue: adds the new one, then removes the other `status:*` labels, so the issue always has a status. It changes nothing when the label is already right. | ✔ |
 | `guard` | PreToolUse hook entry point. Reads the tool call from stdin and exits with code 2 to block it (§8) | ✔ |
 
@@ -220,7 +221,7 @@ Keeping these operations in code gives three things. The operations the requirem
 
 ### 4.5 AC-verifier subagent
 
-`.claude/agents/ac-verifier.md` is a subagent that runs S10. It gets **only** the issue's acceptance criteria, the diff, and the test commands. It does not see the implementer's reasoning. It re-runs the tests and, for each AC, returns `pass | fail | not-verifiable` along with its evidence. S11 copies that verdict into the PR as it is.
+`.claude/agents/ac-verifier.md` is a subagent that runs S10. It gets **only** the issue's acceptance criteria, the diff, and the test commands. It does not see the implementer's reasoning. It re-runs the tests and, for each AC, returns `pass | fail | not-verifiable` along with its evidence. S11 copies that verdict into the PR as it is. Its answer has a fixed shape (one line per AC, then a `Suite:` line), and `factory.py verdict check` enforces the rules on it: every AC covered, in order, each with evidence, and nothing failing. S10 checks the answer before storing it in the checkpoint note; S11 refuses to open a ready PR unless the stored verdict passes the check.
 
 This targets the top requirements risk: a model marking its own work as passed. A fresh context has no stake in the implementation being right.
 

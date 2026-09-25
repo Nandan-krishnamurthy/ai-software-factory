@@ -22,6 +22,7 @@ Write the code for the story, and nothing more: the smallest change that meets i
 - `<T>/CLAUDE.md`, if it exists: the project's conventions (rules precedence, level 4). It is not loaded automatically, so read it explicitly.
 - The existing code, and `.factory/config.json`: `commands` and `limits.max_diff_lines`.
 - `git -C <T> log origin/<D>..HEAD --format=%B`: earlier commits on `<B>`, if a previous run of this station was interrupted. Continue from them; do not start again.
+- After a failed verification (the checkpoint says `S10` → `S08`): its note, from `gh issue view <I> --repo <R> --json comments`, is the AC verifier's verdict. Fix what it reports as `fail`.
 
 ## Steps
 1. Read the inputs. List the files you expect to change. If the story cannot be built without an answer from the human, stop (see Stop conditions).

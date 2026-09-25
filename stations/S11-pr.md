@@ -14,7 +14,7 @@ Bring the story branch up to date with `<D>` and re-test it, update the story's 
 ## Preconditions
 - `python scripts/factory.py state --json` reports `STORY_IN_PROGRESS` with `next_station` `S11`. Use `details.issue` as `<I>`, `details.branch` as `<B>` and `increment` as `<INC>`.
 - `git -C <T> switch <B>` and `git -C <T> pull --ff-only` succeed, and `git -C <T> status --porcelain` prints nothing.
-- The checkpoint comment on issue `<I>` holds the AC verifier's verdict from S10, with no `fail`.
+- `python scripts/factory.py verdict check --issue <I>` exits 0: the checkpoint comment holds the AC verifier's verdict from S10, complete, with evidence, and with no `fail` on any criterion or the suite. A failing verdict stops this station.
 
 ## Inputs
 - `gh issue view <I> --repo <R> --json title,body,comments`: the story (its **Traces to** REQs and ACs) and the checkpoint comment whose note is the S10 verdict.
@@ -30,7 +30,7 @@ Bring the story branch up to date with `<D>` and re-test it, update the story's 
    - Otherwise fold the new `<D>` commits into the story branch with `git -C <T> pull --no-rebase --no-edit origin <D>` (the new commit lands on `<B>` only, never on `<D>`). There is no force-push. Then run the full commands again (build, lint, typecheck, `commands.test`) and keep the new result lines. If anything fails, record it with `python scripts/factory.py comment --issue <I> --kind checkpoint --station S11 --next S09 --branch <B>` and stop: S09 fixes it.
 2. **Find the PR.** Run `gh pr list --repo <R> --head <B> --state open --json number,url,isDraft`. If one exists, it is `<P>` and this run updates it.
 3. **Fill the PR body** into `<SCRATCH>/pr-<I>.md` from `templates/pr.md`, replacing every `{{placeholder}}` as `templates/README.md` says. Keep every heading, in order, and the `<!-- factory:pr story=<STORY-###> -->` marker line exactly:
-   - `{{ac_verification}}`: the verdict lines from the S10 checkpoint note, **copied unchanged** (rule H5). Never edit, reorder or improve them.
+   - `{{ac_verification}}`: the `AC` lines of the verdict in the S10 checkpoint note, **copied unchanged** (rule H5). Never edit, reorder or improve them. Its `Suite:` line goes into Q4.
    - `{{test_command}}` and `{{test_result}}`: the real full-suite command and its real result from the last run (rule H1).
    - Quality gates Q1–Q8: each is the command and its real outcome. A gate whose command is `null` says `Skipped: commands.<name> is null` (rule H4). Q8 is `Not configured` unless `ci.required` is true.
    - `{{new_dependencies}}` and `{{tests_changed}}`: every `New dependency:` and `Changed test:` line from the commit bodies, or `None`.
@@ -63,7 +63,7 @@ If this station stops after opening the PR but before moving the label, the stat
 ## Stop conditions
 - The pull in step 1 reports conflicts: do not resolve them by guessing. Write what conflicts to `<SCRATCH>/question-<I>.md`, run `python scripts/factory.py comment --issue <I> --kind reply --body-file <SCRATCH>/question-<I>.md` and `gh issue edit <I> --repo <R> --add-label factory:needs-human`, and stop. Tell the human the target clone is mid-way through the pull and needs their decision.
 - Re-tested commands fail after the update from `<D>`: back to S09 (step 1).
-- The S10 verdict is missing from the checkpoint, or contains a `fail`: stop; S10 must run again.
+- `python scripts/factory.py verdict check --issue <I>` exits 1 (the verdict is missing, invalid, or an AC or the suite failed): stop; S10 must run again.
 - A required CI check fails (step 7).
 - `git -C <T> status --porcelain` shows changes that this station did not make.
 

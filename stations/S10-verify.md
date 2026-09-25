@@ -24,9 +24,12 @@ Have every acceptance criterion checked by someone other than the implementer: t
 
 ## Steps
 1. Start the `ac-verifier` subagent with **only** the inputs above: the acceptance criteria, the diff, the commands and `<T>`. Do not give it your reasoning, your own verdict or the conversation (architecture §4.5).
-2. Check that its answer has one line per acceptance criterion, in order, each with a verdict and concrete evidence: a test name that passed, a command and its output, or manual steps. A verdict without evidence is not accepted; ask the verifier again once, and otherwise treat that criterion as `not-verifiable`.
-3. Write its answer, **unchanged**, to `<SCRATCH>/verdict-<I>.md`, one line per criterion in the PR form: `- [x] AC<n> — pass — evidence: …` for `pass`; `- [ ] AC<n> — fail — evidence: …` or `- [ ] AC<n> — not-verifiable — …` otherwise.
-4. **If any criterion is `fail`**, or the verifier reports a test failure: this counts as a failed attempt. Let `k` be the checkpoint's `fix_attempts` plus 1.
+2. Write its answer, **unchanged**, to `<SCRATCH>/verdict-<I>.md`: one line per criterion (`- [x] AC<n> — pass — evidence: …`, `- [ ] AC<n> — fail — evidence: …`, `- [ ] AC<n> — not-verifiable — manual steps: …`), then its `Suite:` line. Never edit, complete or soften it.
+3. Run `python scripts/factory.py verdict check --issue <I> --file <SCRATCH>/verdict-<I>.md`.
+   - `INVALID` (a criterion missing, out of order, or without evidence; no `Suite` line): start the verifier again once with the same inputs, asking for the exact format. If the second answer is still invalid, stop and ask the human (see Stop conditions). Never fix the verdict yourself.
+   - `FAILING` (exit 1): go to step 4.
+   - `OK` (exit 0): go to step 5.
+4. **If any criterion is `fail`, or `Suite: fail`**: this counts as a failed attempt. Let `k` be the checkpoint's `fix_attempts` plus 1.
    - If `k` ≤ `limits.max_fix_attempts`: record it with `python scripts/factory.py comment --issue <I> --kind checkpoint --station S10 --next S08 --branch <B> --fix-attempts <k> --body-file <SCRATCH>/verdict-<I>.md`, and stop this station. S08 fixes the code, with the verdict as its input, and S09 and S10 run again.
    - Otherwise follow **Stuck** in [S09](S09-test.md) (Stop conditions), including the verdict in the draft PR.
 5. `not-verifiable` is allowed only where S09 wrote the reason and manual steps; the PR states it and leaves the box unchecked.
@@ -41,10 +44,10 @@ Nothing is committed: the code has not changed since S09. The verdict is kept on
 
 ## Stop conditions
 - The `ac-verifier` subagent is not available: report it and stop. Self-verification is not a substitute.
+- The verifier's answer is still `INVALID` after one retry: write the problems `verdict check` printed to `<SCRATCH>/question-<I>.md`, run `python scripts/factory.py comment --issue <I> --kind reply --body-file <SCRATCH>/question-<I>.md` and `gh issue edit <I> --repo <R> --add-label factory:needs-human`, and stop.
 - A criterion fails after `limits.max_fix_attempts` attempts: **Stuck**, as in S09.
 - `git -C <T> status --porcelain` shows changes that this station did not make.
 
 ## Done check
-- [ ] The checkpoint comment on issue `<I>` (`gh issue view <I> --repo <R> --json comments`) contains one verdict line per acceptance criterion, each with evidence.
-- [ ] No criterion is `fail`.
+- [ ] `python scripts/factory.py verdict check --issue <I>` (which reads the verdict from the checkpoint comment) prints `OK` and exits 0: one line per criterion, each with evidence, and nothing failed.
 - [ ] `python scripts/factory.py state --json` reports `STORY_IN_PROGRESS` with `next_station` `S11`.
