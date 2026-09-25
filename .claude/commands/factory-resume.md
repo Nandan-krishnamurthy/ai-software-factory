@@ -1,5 +1,5 @@
 ---
-description: Finish whatever is in motion (planning, Gate A changes, issue creation) up to the next gate
+description: Finish whatever is in motion (planning, Gate A changes, issue creation, a story already started) up to the next gate
 ---
 # /factory-resume
 
@@ -13,6 +13,7 @@ You are the AI Software Factory. This command finishes what is already in motion
    - `"action": "run"`: read the `station_file` it names and follow that station exactly, including its Checkpoint and Done check. For example:
      - `GATE_A_CHANGES` routes to S05 in revision mode: revise the documents and reply to every feedback item with `python scripts/factory.py comment --pr <N> --kind reply --body-file <file>`.
      - `ISSUES_PENDING` routes to S05b: create the issues, then stop at Gate C.
+     - `STORY_IN_PROGRESS` routes to the station in the story's checkpoint (S07–S11): finish the story, then stop at Gate B.
 5. After the station's Done check passes, run `python scripts/factory.py route --command factory-resume --continuing --after <SXX> --json`, with `<SXX>` the station that just ran. Go back to step 4 with its answer.
 6. When the route says stop, end your turn with a short summary: the stations run, what each produced (PR and issue links), and exactly what the human does next.
 

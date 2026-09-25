@@ -48,15 +48,17 @@ class Command:
 
 
 # Commands that run stations. /factory-target and /factory-status never do.
-# /factory-continue (T3.5) and the story stations (M3/M4) are added later.
+# /factory-continue (T3.5), the only command that may run S06, is added later.
 COMMANDS: dict[str, Command] = {
     "/factory-start": Command(
         "/factory-start", ("S00", "S01", "S02", "S03", "S04", "S05"),
         "begin a new increment and plan it, up to Gate A",
         entry=((state_mod.UNCONFIGURED, "S00"),)),
     "/factory-resume": Command(
-        "/factory-resume", ("S00", "S01", "S02", "S03", "S04", "S05", "S05b"),
-        "finish what is in motion, up to the next gate; never starts a story"),
+        "/factory-resume", ("S00", "S01", "S02", "S03", "S04", "S05", "S05b",
+                            "S07", "S08", "S09", "S10", "S11"),
+        "finish what is in motion (planning, issue creation, or a story already started) up "
+        "to the next gate; never starts a story"),
 }
 
 
