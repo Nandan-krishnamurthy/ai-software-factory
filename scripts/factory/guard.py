@@ -20,8 +20,15 @@ returns allow or block. It enforces rules that must never depend on the model be
 Commands are taken apart by small bash and PowerShell tokenizers, so chained commands
 (``&&``, ``;``, ``|``), ``bash -c``/``pwsh -Command``/``eval``, env-var prefixes,
 heredocs and ``$(…)`` substitutions are all inspected. Where a command cannot be
-inspected (for example ``-EncodedCommand``, or an executable name built at run time),
-the guard blocks it and says why.
+inspected (for example ``-EncodedCommand``, an executable name built at run time, or
+code piped into ``iex``, a shell or an interpreter), the guard blocks it and says why.
+
+PowerShell statements that start with a variable are expressions (``if ($?)``) or
+assignments (``$T = "C:\\path"``), not command calls: an assignment's right-hand side is
+checked as the command it is, and a quoted value is substituted wherever the variable is
+used later in the same script, so ``git -C $T push`` is checked against the right repo.
+The write cmdlets' named parameters (``-Encoding utf8``, ``-Value x``) are told apart
+from the file they write to.
 """
 
 import os
@@ -105,6 +112,7 @@ _WORD = "word"
 _REDIR_OUT = "redir_out"
 _REDIR_IN = "redir_in"
 _DYNAMIC = "\x00"  # marks a word that contains a run-time substitution
+_QUOTE = "\x01"  # marks where a quoted part of a word begins; _parse removes it
 
 
 @dataclass
@@ -112,6 +120,8 @@ class _Command:
     words: list[str] = field(default_factory=list)
     writes: list[str] = field(default_factory=list)       # output-redirect targets
     heredocs: list[str] = field(default_factory=list)     # bodies fed to this command
+    after: str = ""  # the separator before it: "|" when piped into, "&" after a call operator
+    raw: list[str] = field(default_factory=list)  # the words with their _QUOTE marks
 
 
 @dataclass
@@ -228,7 +238,7 @@ def _tokenize(text: str, dialect: str) -> tuple[list[tuple[str, str]], list[str]
             closer = "\n" + nxt + "@"
             end = text.find(closer, i + 2)
             end = n if end < 0 else end
-            add(text[i + 2:end].lstrip("\r\n"))
+            add(_QUOTE + text[i + 2:end].lstrip("\r\n"))
             i = n if end >= n else end + len(closer)
         elif ch == "'":
             end = text.find("'", i + 1)
@@ -236,12 +246,12 @@ def _tokenize(text: str, dialect: str) -> tuple[list[tuple[str, str]], list[str]
                 while end >= 0 and text[end + 1:end + 2] == "'":  # '' escape
                     end = text.find("'", end + 2)
             end = n if end < 0 else end
-            add(text[i + 1:end].replace("''", "'") if dialect == "powershell"
-                else text[i + 1:end])
+            add(_QUOTE + (text[i + 1:end].replace("''", "'") if dialect == "powershell"
+                          else text[i + 1:end]))
             i = end + 1
         elif ch == '"':
             i += 1
-            add("")
+            add(_QUOTE)
             while i < n and text[i] != '"':
                 c = text[i]
                 if c == escape and i + 1 < n:
@@ -333,11 +343,11 @@ def _parse(text: str, dialect: str) -> _Parsed:
         if kind == _SEP:
             if current.words or current.writes:
                 commands.append(current)
-            current, expect = _Command(), None
+            current, expect = _Command(after=value), None
         elif kind in (_REDIR_OUT, _REDIR_IN):
             expect = kind
         elif expect == _REDIR_OUT:
-            current.writes.append(value)
+            current.writes.append(value.replace(_QUOTE, ""))
             expect = None
         elif expect == _REDIR_IN:
             expect = None
@@ -346,7 +356,8 @@ def _parse(text: str, dialect: str) -> _Parsed:
             if match and int(match[1]) < len(bodies):
                 current.heredocs.append(bodies[int(match[1])])
             else:
-                current.words.append(value)
+                current.words.append(value.replace(_QUOTE, ""))
+                current.raw.append(value)
     if current.words or current.writes:
         commands.append(current)
     return _Parsed(commands, subs)
@@ -378,8 +389,9 @@ def _check_script(text: str, dialect: str, ctx: GuardContext, cwd: Path, depth: 
     parsed = _parse(text, dialect)
     for inner in parsed.substitutions:
         _check_script(inner, dialect, ctx, cwd, depth + 1)
+    variables: dict[str, str | None] = {}  # PowerShell: assigned in this script
     for command in parsed.commands:
-        cwd = _check_command(command, dialect, ctx, cwd, depth)
+        cwd = _check_command(command, dialect, ctx, cwd, depth, variables)
     return cwd
 
 
@@ -417,18 +429,44 @@ def _strip_wrappers(words: list[str]) -> list[str]:
 
 
 def _check_command(cmd: _Command, dialect: str, ctx: GuardContext, cwd: Path,
-                   depth: int) -> Path:
-    for target in cmd.writes:
+                   depth: int, variables: dict[str, str | None] | None = None) -> Path:
+    variables = {} if variables is None else variables
+    words, writes = cmd.words, cmd.writes
+    if dialect == "powershell":
+        assignment = _pwsh_assignment(cmd.raw or words)
+        if assignment is not None:  # `$x = <pipeline>`: the right-hand side runs
+            name, rhs_raw = assignment
+            rhs = _pwsh_substitute([w.replace(_QUOTE, "") for w in rhs_raw], variables)
+            for target in _pwsh_substitute(writes, variables):
+                _check_redirect_target(target, ctx, cwd)
+            # Only a quoted string is a known value: `$x = gh …` or `$x = Get-Thing` runs a
+            # command, and `$x = 5` or `$x = "…$(…)"` is not worth tracking.
+            literal = len(rhs_raw) == 1 and rhs_raw[0].startswith(_QUOTE) \
+                and _DYNAMIC not in rhs[0] and not _PWSH_VAR.search(rhs[0])
+            if rhs and not literal:
+                cwd = _check_command(_Command(rhs, [], cmd.heredocs, "=", rhs_raw), dialect,
+                                     ctx, cwd, depth, variables)
+            if name not in _PWSH_AUTOMATIC:  # `$null = …` discards; `$null` stays $null
+                variables[name] = rhs[0] if literal else None  # None: computed at run time
+            return cwd
+        words, writes = _pwsh_substitute(words, variables), _pwsh_substitute(writes, variables)
+    for target in writes:
         _check_redirect_target(target, ctx, cwd)
-    words = _strip_wrappers(cmd.words)
+    words = _strip_wrappers(words)
     if not words:
         return cwd
     exe = words[0]
     if _DYNAMIC in exe or (exe.startswith("$") and not exe.startswith("$null")):
+        if _pwsh_expression(exe, cmd, dialect, depth):
+            return cwd  # e.g. `if ($?)` or `$LASTEXITCODE -ne 0`: it runs no command
         _block(f"the command name {exe.replace(_DYNAMIC, '$(...)')!r} is computed at run "
                "time, so the guard cannot check it; run the command directly")
     name = _exe_name(exe)
     args = [w.replace(_DYNAMIC, "") for w in words[1:]]
+
+    if cmd.after in ("|", "|&") and not cmd.heredocs and _runs_piped_code(name, args):
+        _block(f"`{name}` would run code piped into it, which the guard cannot inspect; "
+               "pass the code as an argument or a heredoc instead")
 
     if name in ("cd", "pushd", "set-location", "sl", "chdir"):
         dest = next((a for a in args if not a.startswith("-")), None)
@@ -481,6 +519,92 @@ def _check_command(cmd: _Command, dialect: str, ctx: GuardContext, cwd: Path,
         for target in _write_command_targets(name, args):
             _check_redirect_target(target, ctx, cwd)
     return cwd
+
+
+# ----------------------------------------------------------------------------- PowerShell
+# In PowerShell a statement that starts with a variable is an expression or an assignment,
+# never a command call (that needs `&` or a bare command name). A value assigned in the
+# same script is substituted wherever the variable is used later, so a variable cannot
+# hide a merge or a push from the guard; a value computed by a command is treated like a
+# `$(...)` substitution.
+
+_PWSH_VAR = re.compile(r"\$(?:\{(?P<braced>[^}]+)\}|(?P<name>[A-Za-z_]\w*(?::[A-Za-z_]\w*)?))")
+_PWSH_PLAIN = re.compile(r"\$(?:[?^$]|\{[^}]+\}|[A-Za-z_]\w*(?::[A-Za-z_]\w*)?)")
+_PWSH_ASSIGN_OPS = ("??=", "+=", "-=", "*=", "/=", "%=", "=")
+_PWSH_AUTOMATIC = frozenset({"null", "true", "false", "_", "psitem", "this", "input", "args"})
+
+
+def _pwsh_var_key(match: re.Match) -> str:
+    return (match["braced"] or match["name"]).lower()
+
+
+def _pwsh_assignment(words: list[str]) -> tuple[str, list[str]] | None:
+    """``(variable, right-hand side words)`` for ``$x = …`` (in any spacing), else None."""
+    match = _PWSH_VAR.match(words[0]) if words else None
+    if match is None:
+        return None
+    rest, tail = words[0][match.end():], words[1:]
+    if not rest and tail:
+        rest, tail = tail[0], tail[1:]
+    op = next((o for o in _PWSH_ASSIGN_OPS if rest.startswith(o)), None)
+    if op is None or rest.startswith("=="):
+        return None
+    value = rest[len(op):]
+    return _pwsh_var_key(match), ([value] if value else []) + tail
+
+
+def _pwsh_substitute(words: list[str], variables: dict[str, str | None]) -> list[str]:
+    """Replace the variables assigned earlier in this script: a literal by its value, a
+    computed one by the run-time marker. Other variables (``$?``, ``$env:X``) stay."""
+    if not variables:
+        return words
+
+    def value(match: re.Match) -> str:
+        key = _pwsh_var_key(match)
+        if key not in variables:
+            return match[0]
+        known = variables[key]
+        return _DYNAMIC if known is None else known
+
+    return [_PWSH_VAR.sub(value, w) for w in words]
+
+
+def _pwsh_expression(exe: str, cmd: _Command, dialect: str, depth: int) -> bool:
+    """True for a top-level PowerShell statement that only evaluates a variable, such as
+    ``$?`` or ``$LASTEXITCODE -ne 0``. Not after the call operator ``&`` (which runs it),
+    not with member access (``$x.Invoke()``), and not inside a nested script, whose text
+    may itself have been computed at run time."""
+    return (dialect == "powershell" and depth == 0 and cmd.after != "&"
+            and _DYNAMIC not in exe and _PWSH_PLAIN.fullmatch(exe) is not None)
+
+
+def _runs_piped_code(name: str, args: list[str]) -> bool:
+    """True if the command would execute what is piped into it, which the guard cannot
+    see (e.g. ``… | iex``, ``… | bash``, ``… | python``, ``… | gh api graphql --input -``)."""
+    lowered = [a.lower() for a in args]
+    if name in ("invoke-expression", "iex"):
+        return not args
+    if name in _SHELLS:
+        if any(re.fullmatch(r"-[a-z]*c[a-z]*", a) for a in args):
+            return False
+        return "-s" in args or not any(not a.startswith("-") for a in args)
+    if name in _POWERSHELLS or name == "cmd":
+        for flag in ("-command", "-c", "-file", "-f", "/c", "/k"):
+            if flag in lowered:
+                index = lowered.index(flag)
+                return index + 1 >= len(args) or args[index + 1] == "-"
+        return not any(not a.startswith(("-", "/")) for a in args)
+    if name in _INTERPRETERS:
+        for a in args:
+            if a in ("-c", "-e", "--eval", "-p", "--print", "-r", "-m"):
+                return False
+            if a == "-" or not a.startswith("-"):
+                return a == "-"
+        return True
+    if name == "gh" and "--input" in args:
+        index = args.index("--input")
+        return index + 1 < len(args) and args[index + 1] == "-"
+    return False
 
 
 def _interpreter_code(args: list[str], heredocs: list[str]) -> list[str]:
@@ -799,24 +923,57 @@ def _scan_code(text: str) -> None:
 # ----------------------------------------------------------------------------- paths
 
 
+# Parameters of Out-File, Set-Content, Add-Content and Tee-Object (and the common ones):
+# the ones naming the file, the ones that take a value (e.g. `-Encoding utf8`), and the
+# switches. PowerShell accepts any unambiguous prefix (`-Enc`) and `-Name:value`.
+_PS_PATH_PARAMS = ("filepath", "literalpath", "path", "pspath", "lp")
+_PS_VALUE_PARAMS = (
+    "encoding", "width", "inputobject", "value", "filter", "include", "exclude",
+    "credential", "stream", "variable", "erroraction", "warningaction", "informationaction",
+    "progressaction", "errorvariable", "warningvariable", "informationvariable",
+    "outvariable", "outbuffer", "pipelinevariable")
+_PS_SWITCH_PARAMS = ("append", "force", "noclobber", "nonewline", "passthru", "asbytestream",
+                     "whatif", "confirm", "verbose", "debug")
+
+
+def _ps_param_kind(name: str) -> str | None:
+    """"path", "value" or "switch" for a parameter name or unambiguous prefix; else None."""
+    kinds = {p: "path" for p in _PS_PATH_PARAMS} | {p: "value" for p in _PS_VALUE_PARAMS} \
+        | {p: "switch" for p in _PS_SWITCH_PARAMS}
+    if name in kinds:
+        return kinds[name]
+    matches = {kind for param, kind in kinds.items() if param.startswith(name)}
+    return matches.pop() if name and len(matches) == 1 else None
+
+
 def _write_command_targets(name: str, args: list[str]) -> list[str]:
-    if name in ("tee", "tee-object"):
-        out, skip = [], False
-        for index, a in enumerate(args):
-            if skip:
-                skip = False
-            elif a.lower() in ("-filepath", "-literalpath", "-path", "-variable"):
-                if a.lower() != "-variable":
-                    out.append(args[index + 1] if index + 1 < len(args) else "")
-                skip = True
-            elif not a.startswith("-"):
-                out.append(a)
-        return out
-    for index, a in enumerate(args):  # Out-File / Set-Content / Add-Content
-        if a.lower() in ("-filepath", "-path", "-literalpath") and index + 1 < len(args):
-            return [args[index + 1]]
-    positional = [a for a in args if not a.startswith("-")]
-    return positional[:1]
+    # Out-File / Set-Content / Add-Content / Tee-Object: the file is the -Path-like
+    # parameter or the first positional argument. After a parameter the guard does not
+    # know, every positional argument might be the file, so all are checked. `tee` (bash,
+    # or PowerShell's alias of Tee-Object) writes to every positional argument.
+    targets: list[str] = []
+    positional: list[str] = []
+    unknown = False
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a.startswith("-") and len(a) > 1:
+            param, colon, inline = a[1:].partition(":")
+            kind = _ps_param_kind(param.lower())
+            takes_value = kind in ("path", "value") and not colon
+            if kind == "path":
+                targets.append(inline if colon else (args[i + 1] if i + 1 < len(args) else ""))
+            elif kind is None:
+                unknown = True
+            i += 2 if takes_value else 1
+            continue
+        positional.append(a)
+        i += 1
+    if name == "tee":
+        return targets + positional
+    if not targets:
+        targets = positional if unknown else positional[:1]
+    return targets
 
 
 def _check_redirect_target(target: str, ctx: GuardContext, cwd: Path) -> None:
