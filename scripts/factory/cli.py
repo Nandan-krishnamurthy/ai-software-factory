@@ -17,6 +17,7 @@ from factory import (
     signals,
     state,
     target,
+    verdict,
 )
 from factory.config import load_config
 from factory.errors import FactoryError
@@ -112,6 +113,22 @@ def build_parser() -> argparse.ArgumentParser:
     label_parser.add_argument("--issue", type=_positive_int, required=True, metavar="N")
     label_parser.add_argument("--status", required=True, choices=pick.STATUSES)
     label_parser.set_defaults(handler=_label, needs_target=True)
+
+    verdict_parser = subparsers.add_parser(
+        "verdict", help="check the AC verifier's per-AC verdict for a story")
+    verdict_sub = verdict_parser.add_subparsers(dest="verdict_command", metavar="<action>")
+    verdict_sub.required = True
+    vcheck = verdict_sub.add_parser(
+        "check", help="validate a verdict against the story's acceptance criteria",
+        description="Checks that the verdict has one line per acceptance criterion of the "
+                    "issue, each with evidence, and a Suite line. Exit 0: valid and nothing "
+                    "failed. Exit 1: invalid, or an AC or the suite failed (S11 must not "
+                    "open a ready PR). Reads --file, or else the note of the issue's "
+                    "checkpoint comment, where S10 stores the verdict. Read-only.")
+    vcheck.add_argument("--issue", type=_positive_int, required=True, metavar="N")
+    vcheck.add_argument("--file", metavar="F", help="UTF-8 file with the verdict (default: "
+                                                   "the checkpoint comment's note)")
+    vcheck.set_defaults(handler=_verdict_check, needs_target=True)
 
     comment_parser = subparsers.add_parser(
         "comment", help="post a marked factory comment on an issue or PR (rule S14)",
@@ -294,6 +311,21 @@ def _label(args: argparse.Namespace) -> int:
         changes = [f"+{name}" for name in add] + [f"-{name}" for name in remove]
         print(f"#{args.issue}: " + ", ".join(changes))
     return 0
+
+
+def _verdict_check(args: argparse.Namespace) -> int:
+    gh = Gh()
+    issue = gh.api(f"repos/{args.target.repo}/issues/{args.issue}")
+    if args.file:
+        try:
+            text = Path(args.file).read_text(encoding="utf-8")
+        except OSError as err:
+            raise verdict.VerdictError(f"cannot read --file {args.file}: {err}") from None
+    else:
+        text = verdict.checkpoint_note(gh, args.target.repo, args.issue)
+    result = verdict.parse(text, verdict.issue_acs(issue.get("body") or ""))
+    print(verdict.render(result))
+    return 0 if result.ok else 1
 
 
 def _route(args: argparse.Namespace) -> int:
