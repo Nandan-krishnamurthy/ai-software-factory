@@ -37,12 +37,18 @@ from prose:
   ``/factory-start`` begins with S00.
 * **Availability.** A station whose file does not exist yet (e.g. S01 before M5) stops
   the command with an explanation.
+* **Uncommitted changes** (T4.4). If the target's working tree has uncommitted changes,
+  for example from a session that ended in the middle of S08, no station runs: the
+  command stops and lists them. The factory cannot tell its own unfinished work from
+  the human's, so it never discards either; the human commits or stashes them.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from factory import ensure as ensure_mod
 from factory import state as state_mod
 
 STATIONS_DIR = Path(__file__).resolve().parents[2] / "stations"
@@ -106,10 +112,12 @@ def station_file(station: str, stations_dir: Path = STATIONS_DIR) -> str | None:
 
 
 def route(command: str, result: dict[str, Any], *, continuing: bool = False,
-          after: str | None = None, stations_dir: Path = STATIONS_DIR) -> Route:
+          after: str | None = None, stations_dir: Path = STATIONS_DIR,
+          dirty: Sequence[str] = ()) -> Route:
     """Pure (apart from checking which station files exist): run the next station, or stop.
 
-    ``result`` is the ``state --json`` object.
+    ``result`` is the ``state --json`` object; ``dirty`` the target's
+    ``git status --porcelain`` lines.
     """
     spec = COMMANDS.get(command)
     current = result["state"]
@@ -142,6 +150,9 @@ def route(command: str, result: dict[str, Any], *, continuing: bool = False,
         return stop(f"{station} ran but the state engine still names it as the next "
                     f"station, so it did not complete. {message} Check its Done check, "
                     "fix the cause, then run the command again.")
+    if dirty:
+        return stop(f"{current}: the next station is {station}, but "
+                    + ensure_mod.uncommitted_message(list(dirty)) + ".")
     path = station_file(station, stations_dir)
     if path is None:
         return stop(f"{current}: the next station is {station}, which is not available "

@@ -31,10 +31,7 @@ Start a new increment. Validate the target, create the labels, choose the increm
 4. Choose the increment:
    - If `state --json` has an `increment`, this is a resumed run: use it as `<INC>`.
    - Otherwise run `python scripts/factory.py increment next --json`, adding `--slug <slug>` (a few words from the requirements, e.g. `add-due-dates`) unless this is the first increment. If it exits 1, report its `reasons` and stop. Use `next_increment` as `<INC>`.
-5. Run `git -C <T> fetch origin`, then get onto the planning branch:
-   - If `git -C <T> ls-remote --heads origin factory/plan-<INC>` finds it, run `git -C <T> switch factory/plan-<INC>` and `git -C <T> pull --ff-only`.
-   - Else, if `git -C <T> branch --list factory/plan-<INC>` finds a local branch (an earlier run was interrupted before its push), run `git -C <T> switch factory/plan-<INC>`.
-   - Otherwise run `git -C <T> switch -c factory/plan-<INC> origin/<D>`.
+5. Get onto the planning branch: `python scripts/factory.py branch --name factory/plan-<INC> --base <D>`. It reuses the branch if an earlier run left it on `origin` (and pulls it) or only locally, and creates it from `origin/<D>` only when neither exists, so an interrupted run never makes a second one. If it refuses (uncommitted changes, which it never discards), report its message exactly and stop.
 6. Config:
    - If `<T>/.factory/config.json` exists, keep it and leave it unchanged.
    - Otherwise fill `templates/config.json`: `{{project}}` = the repo name, `{{repo}}` = `<R>`, `{{default_branch}}` = `<D>`, `{{reviewer}}` = the login from `gh api user --jq .login`. Write it to `<T>/.factory/config.json`.

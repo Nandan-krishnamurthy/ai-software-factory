@@ -11,6 +11,7 @@ from factory import (
     commands,
     comments,
     doctor,
+    ensure,
     increments,
     issues,
     labels,
@@ -114,6 +115,37 @@ def build_parser() -> argparse.ArgumentParser:
     label_parser.add_argument("--issue", type=_positive_int, required=True, metavar="N")
     label_parser.add_argument("--status", required=True, choices=pick.STATUSES)
     label_parser.set_defaults(handler=_label, needs_target=True)
+
+    branch_parser = subparsers.add_parser(
+        "branch", help="switch the target to a factory branch, creating it only if needed",
+        description="Idempotent (T4.4): reuses the branch if it is on origin (and pulls it) "
+                    "or only local, and otherwise creates it from origin/<base>. A story "
+                    "branch story/<I>-<slug> is matched by its issue number, so an earlier "
+                    "run's branch is found whatever its slug. Refuses when the working tree "
+                    "has uncommitted changes, and never discards them.")
+    branch_parser.add_argument("--name", required=True, metavar="BRANCH",
+                               help="e.g. story/12-add-task or factory/plan-001-initial")
+    branch_parser.add_argument("--base", metavar="BRANCH",
+                               help="default: default_branch from .factory/config.json")
+    branch_parser.add_argument("--json", action="store_true", help="machine-readable output")
+    branch_parser.set_defaults(handler=_branch, needs_target=True)
+
+    pr_parser = subparsers.add_parser(
+        "pr", help="open or update the PR of a factory branch (never a second one)",
+        description="Idempotent (T4.4): edits the open PR whose head is --head, or creates "
+                    "it if there is none. The body must carry its factory:pr or "
+                    "factory:planning marker. Never merges.")
+    pr_parser.add_argument("--head", required=True, metavar="BRANCH")
+    pr_parser.add_argument("--title", required=True)
+    pr_parser.add_argument("--body-file", required=True, metavar="F",
+                           help="UTF-8 file with the PR body")
+    pr_parser.add_argument("--base", metavar="BRANCH",
+                           help="default: default_branch from .factory/config.json")
+    pr_parser.add_argument("--draft", action="store_true",
+                           help="create it as a draft (an existing PR keeps its state)")
+    pr_parser.add_argument("--label", action="append", default=[], metavar="LABEL")
+    pr_parser.add_argument("--json", action="store_true", help="machine-readable output")
+    pr_parser.set_defaults(handler=_pr, needs_target=True)
 
     closeout_parser = subparsers.add_parser(
         "closeout", help="close out a story whose PR the human merged (station S12)",
@@ -337,6 +369,41 @@ def _label(args: argparse.Namespace) -> int:
     return 0
 
 
+def _base_branch(args: argparse.Namespace) -> str:
+    if args.base:
+        return args.base
+    try:
+        return load_config(args.target.path).default_branch
+    except FactoryError as err:
+        raise ensure.EnsureError(f"pass --base: {err}") from None
+
+
+def _branch(args: argparse.Namespace) -> int:
+    result = ensure.ensure_branch(Git(args.target.path), args.name, _base_branch(args))
+    if args.json:
+        print(json.dumps({"branch": result.name, "action": result.action}))
+    else:
+        print(f"{result.action}: {result.name}")
+    return 0
+
+
+def _pr(args: argparse.Namespace) -> int:
+    try:
+        body = Path(args.body_file).read_text(encoding="utf-8")
+    except OSError as err:
+        raise ensure.EnsureError(f"cannot read --body-file {args.body_file}: {err}") from None
+    result = ensure.ensure_pr(Gh(), args.target.repo, head=args.head, base=_base_branch(args),
+                              title=args.title, body=body, draft=args.draft,
+                              labels=tuple(args.label))
+    if args.json:
+        print(json.dumps({"number": result.number, "url": result.url, "action": result.action,
+                          "is_draft": result.is_draft}))
+    else:
+        draft = " (draft)" if result.is_draft else ""
+        print(f"{result.action} PR #{result.number}{draft}: {result.url}")
+    return 0
+
+
 def _closeout(args: argparse.Namespace) -> int:
     if args.finish:
         result, changes = closeout.finish(Gh(), args.target.repo, args.issue)
@@ -372,8 +439,9 @@ def _verdict_check(args: argparse.Namespace) -> int:
 
 def _route(args: argparse.Namespace) -> int:
     result = state.derive_state(state.collect_snapshot(Gh(), args.target.repo)).to_dict()
+    dirty = ensure.dirty_files(Git(args.target.path))
     decision = commands.route(args.command, result, continuing=args.continuing,
-                              after=args.after)
+                              after=args.after, dirty=dirty)
     print(json.dumps(decision.to_dict(), indent=2) if args.json else commands.render(decision))
     return 0
 

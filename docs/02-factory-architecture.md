@@ -160,6 +160,7 @@ As built (T2.5), steps 4–6 are decided in code by `python scripts/factory.py r
 - **Scope:** only the stations that command may run. `/factory-resume` never runs S06.
 - **Progress:** a station that is still named after it ran stops the loop.
 - **Availability:** a station file that doesn't exist yet (S01) stops the command with an explanation.
+- **Uncommitted changes** (T4.4): if the target's working tree has uncommitted changes, for example from a session that ended in the middle of S08, no station runs. The command lists the files and stops. The factory cannot tell its own unfinished work from yours, so it never discards either: you commit them on their branch or set them aside with `git stash`, then run the command again.
 
 `/factory-start` enters at S00 from `UNCONFIGURED`, where the state engine names no station. Command names are passed without their slash, e.g. `--command factory-start`, because Git Bash on Windows rewrites `/…` arguments into paths. `/factory-target` and `/factory-status` run no station.
 
@@ -213,10 +214,14 @@ Written in Python 3.11+ using only the standard library. It calls `git` and `gh`
 | `pick --authorized-by-continue` | Applies the unblocked rule (§4 of the requirements): open, `status:ready`, not `factory:needs-human`, every "Blocked by" issue closed (an issue it cannot see counts as open). Picks the oldest increment, then the lowest milestone, then the lowest issue number. Assigns the issue, then sets `status:in-progress` last, because that label is the lock. | ✔ (refuses without the flag, and while a story is `in-progress`, `in-review` or `changes-requested`) |
 | `checkpoint --issue N --station S09 --next S10 [--note …]` | Adds or updates the single machine-readable checkpoint comment | ✔ |
 | `closeout --issue N [--finish] [--json]` | S12's gate. It confirms that the story's PR is merged (a `factory:pr` marker naming the story) and refuses otherwise, and it never merges. It reports the PR, its branch and final head commit, the merge commit, and the stories this close-out unblocks. `--finish` checks the merge again, closes the issue if the merge did not, and sets `status:done` last. | ✔ (read-only without `--finish`) |
+| `branch --name B [--base D]` | Switches the target to a factory branch, creating it only if needed. It reuses the branch if it is on `origin` (and pulls it) or only local; a story branch is matched by its issue number (`story/<I>-*`), so an earlier run's branch is found whatever its slug. It refuses on uncommitted changes, which it never discards, and when two branches match. | ✔ |
+| `pr --head B --title T --body-file F [--draft] [--label L]` | Edits the open PR of `B` if there is one and creates it only otherwise. The body must carry its `factory:pr` or `factory:planning` marker. Never merges. | ✔ |
 | `feedback --pr N [--json]` | Lists the PR's verdict and the human feedback items of the current review round (§9.2). Rework stations answer each item with `comment`. | ✔ (read-only) |
 | `verdict check --issue N [--file F]` | Checks the AC verifier's verdict (§4.5) against the issue's ACs: one line per AC, each with evidence, plus a `Suite:` line. Exits 1 if it is invalid or anything failed | ✔ (read-only) |
 | `label --issue N --status in-review` | Moves the status label on a story issue: adds the new one, then removes the other `status:*` labels, so the issue always has a status. It changes nothing when the label is already right. | ✔ |
 | `guard` | PreToolUse hook entry point. Reads the tool call from stdin and exits with code 2 to block it (§8) | ✔ |
+
+Every create-type action (branch, PR, issue, checkpoint) looks for the item before creating it, so a station that runs again after an interruption never makes a second one (T4.4). Stations never create a branch, PR or issue directly; the station lint enforces this.
 
 Keeping these operations in code gives three things. The operations the requirements need to be idempotent (issues, labels, checkpoints, picking a story) are idempotent by construction. They can be unit-tested. And a headless runner can call exactly the same code later.
 

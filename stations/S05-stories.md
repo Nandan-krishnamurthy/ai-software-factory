@@ -44,10 +44,7 @@ Break the plan into small stories that meet the Story Contract, start the tracea
 6. Write the Planning PR body to `<SCRATCH>/planning-pr-<INC>.md` by filling `templates/planning-pr.md`:
    - Embed the dry-run output from step 2 **unedited**.
    - Keep the `<!-- factory:planning increment=<INC> -->` marker line exactly as it is.
-7. Open the Planning PR, or update it if it already exists:
-   - Run `gh pr list --repo <R> --head factory/plan-<INC> --state open --json number`.
-   - If it lists a PR, run `gh pr edit <N> --repo <R> --body-file <SCRATCH>/planning-pr-<INC>.md`.
-   - Otherwise run `gh pr create --repo <R> --base <D> --head factory/plan-<INC> --title "[Planning] <INC>: <one-line description>" --body-file <SCRATCH>/planning-pr-<INC>.md --label factory:planning`.
+7. Open the Planning PR, or update it if it already exists: `python scripts/factory.py pr --head factory/plan-<INC> --title "[Planning] <INC>: <one-line description>" --body-file <SCRATCH>/planning-pr-<INC>.md --label factory:planning`. It edits the open PR of that branch if there is one and creates it only otherwise, so an interrupted run never opens a second PR. Note its number as `<N>`.
 8. Stop at **Gate A**. Tell the human the PR URL, and that they either merge it (approval) or comment `/changes` with their feedback, then run `/factory-resume`.
 
 ### Revision mode (Gate A changes)
