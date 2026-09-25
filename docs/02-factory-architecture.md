@@ -140,7 +140,7 @@ ai-software-factory/
 | `/factory-target <path>` | Select and validate the target | None (runs `factory.py doctor`) | Immediately |
 | `/factory-start [requirements-file]` | Begin a new **increment** (§5.2): new project or new requirements for an existing project | S0 → S1 (if existing) → S2 → S3 → S4 → S5 | **Gate A** (Planning PR open) |
 | `/factory-resume` | Finish whatever is already in motion, or whatever your last action on GitHub unlocked | Planning revisions, S5b, the in-progress story station, S8 rework, S12 | The next gate. **Never runs S6.** |
-| `/factory-continue` | Your Gate C "continue" | Anything `/factory-resume` would do first, then S6 → S7 → … → S11 | **Gate B** (PR open) |
+| `/factory-continue` | Your Gate C "continue" | Anything `/factory-resume` would do first (including S12 close-out of a story you merged), then S6 → S7 → … → S11 for exactly one story | **Gate B** (PR open) |
 | `/factory-status` | Read-only report: state, what is waiting on you, story progress | None | Immediately |
 
 Each command file follows the same pattern:
@@ -433,7 +433,9 @@ A push happens after every station, so if the session dies, at most one station'
 4. `review_round += 1` in the checkpoint. If it goes over `max_review_rounds` → `factory:needs-human`.
 
 ### 7.3 Close-out (after you merge)
-S12 checks that the PR is merged, sets `status:done`, runs `git -C T switch main && git pull`, deletes the local story branch, and posts a summary listing the stories that are now unblocked. It then **stops at Gate C**, whichever command ran it. `/factory-continue` then moves on to S6. `/factory-resume` does not.
+S12 checks that the PR is merged, sets `status:done`, runs `git -C T switch main && git pull`, deletes the local story branch, and posts a summary listing the stories that are now unblocked. The station itself only closes out the merged story: it ends at Gate C and **never picks the next story**. What happens next depends on the command that ran it:
+- `/factory-resume` **stops at Gate C**. It never starts a story (D2).
+- `/factory-continue` goes on through Gate C to S6 and takes **exactly one** next story through S11, stopping at Gate B. Running `/factory-continue` after the merge *is* the human's continue (D2). One continue therefore closes out the previous story and starts at most one new one. This is the same rule as after S5b (`ISSUES_PENDING`). If nothing can start (the increment is complete, or every remaining story is blocked), it stops and reports.
 
 ---
 

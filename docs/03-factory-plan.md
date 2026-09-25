@@ -233,8 +233,8 @@ The milestones run strictly in order. Within a milestone, tasks can be done in a
 
 ### T4.3 Station S12 close-out · S
 - **Depends:** T4.1
-- **Build:** confirms the merge, sets `status:done`, switches the local clone to `main` and pulls, deletes the local branch, posts a summary of the stories that are now unblocked, and **stops at Gate C** whichever command ran it.
-- **Acceptance criteria:** S12 only runs after it has observed a merge; it performs no merge itself.
+- **Build:** confirms the merge, sets `status:done`, switches the local clone to `main` and pulls, deletes the local branch, posts a summary of the stories that are now unblocked, and ends at Gate C. The station only closes out the story and **never picks the next one**. The routing is already in place (T4.1): after S12, `/factory-resume` stops at Gate C, and `/factory-continue` goes on to S06 and takes exactly one next story to Gate B (architecture §7.3).
+- **Acceptance criteria:** S12 only runs after it has observed a merge; it performs no merge itself, and it never runs `pick`.
 - **Tests:** station lint; demo.
 
 ### T4.4 Resume robustness · M
@@ -253,7 +253,7 @@ The milestones run strictly in order. Within a milestone, tasks can be done in a
 1. Kill the session during S08. `/factory-resume` finishes the story without duplicates.
 2. Kill it at Gate B. `/factory-resume` reports "waiting for review".
 3. Comment `/changes` with two points → `/factory-resume` → rework on the same PR, and both points get replies.
-4. Merge → `/factory-resume` → close-out, then a stop at Gate C. `/factory-continue` → next story.
+4. Merge → `/factory-resume` → close-out, then a stop at Gate C. `/factory-continue` → next story. Then merge that story → `/factory-continue` → close-out **and** the next story in one run, stopping at Gate B.
 5. Close a PR without merging → NEEDS_HUMAN.
 6. Repeat until **3 stories** are merged. This completes success criterion 1.
 
