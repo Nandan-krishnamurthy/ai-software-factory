@@ -24,10 +24,12 @@ from prose:
   ``pick --authorized-by-continue``: so only the human's "continue" starts a story (D2,
   rule S2). ``/factory-resume`` never does.
 * **Gate C.** ``/factory-continue`` *is* the human's answer at Gate C, so it goes on
-  through ``IDLE_AT_GATE_C`` when it reaches it right after creating the issues (S05b).
-  It never goes through Gate C after a story station, so one ``/factory-continue``
-  starts at most one story and stops at Gate B. Close-out (S12) also stops at Gate C,
-  whichever command ran it (T4.3): the next story needs a fresh ``/factory-continue``.
+  through ``IDLE_AT_GATE_C`` when it reaches it right after creating the issues (S05b)
+  or right after closing out the previous story (S12), both of which end at Gate C. It
+  never goes through Gate C after a story station (S06–S11), so one
+  ``/factory-continue`` starts at most one story and stops at Gate B. ``/factory-resume``
+  stops at Gate C after S05b and after S12. The S12 station itself only closes out the
+  merged story: it never picks the next one (architecture §7.3).
 * **Progress.** If the state engine names the same station that just ran, that station
   did not complete, so the command stops instead of looping.
 * **Entry station.** Where nothing is in motion yet, the state engine names no station
@@ -57,7 +59,7 @@ class Command:
 
 PLANNING = ("S00", "S01", "S02", "S03", "S04", "S05", "S05b")
 STORY = ("S07", "S08", "S09", "S10", "S11")  # a story already started (S06 = pick)
-CLOSEOUT = ("S12",)  # after the human merged; never goes on through Gate C
+CLOSEOUT = ("S12",)  # after the human merged; ends at Gate C and never picks a story
 
 # Commands that run stations. /factory-target and /factory-status never do.
 COMMANDS: dict[str, Command] = {
@@ -67,12 +69,13 @@ COMMANDS: dict[str, Command] = {
         entry=((state_mod.UNCONFIGURED, "S00"),)),
     "/factory-resume": Command(
         "/factory-resume", PLANNING + STORY + CLOSEOUT,
-        "finish what is in motion (planning, issue creation, or a story already started) up "
-        "to the next gate; never starts a story"),
+        "finish what is in motion (planning, issue creation, a story already started, or the "
+        "close-out of a merged story) up to the next gate; never starts a story"),
     "/factory-continue": Command(
         "/factory-continue", PLANNING + ("S06",) + STORY + CLOSEOUT,
-        "finish anything pending, then start the next story and take it to Gate B",
-        through_gate_c=("S05b",)),
+        "finish anything pending (including the close-out of a merged story), then start "
+        "the next story and take it to Gate B",
+        through_gate_c=("S05b", "S12")),
 }
 
 

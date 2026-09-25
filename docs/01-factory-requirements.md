@@ -247,7 +247,7 @@ The MVP has three mandatory gates. At each one the factory **stops and ends its 
 |---|---|---|---|
 | **A — Plan approval** | After S5, before any issue is created or any code is written | Review the Planning PR. Comment `/changes`, or approve by **merging** it (D5) | Stops. On requested changes, revises the docs on `factory/plan` and asks again. Once the PR is merged, the next run starts at S5b. |
 | **B — PR review** | After S11, for every story | Comment `/changes`, or approve by **merging** (D5) | Stops. On `/changes`, the next run goes back to S8 rework. Closing the PR without merging marks the story as needing a human decision. The factory never merges (D1). |
-| **C — Continue** | After S12 close-out | Say `continue` (e.g. run `/factory-next`) | Stops and shows which stories are now unblocked. Does not pick a new story until told to (D2). |
+| **C — Continue** | After S12 close-out | Say `continue` (run `/factory-continue`) | Shows which stories are now unblocked. Does not pick a new story until told to (D2): `/factory-resume` stops here. `/factory-continue` run after the merge is that instruction, so it closes out the story and then starts exactly one next story. |
 
 **Other stop conditions.** The factory stops and asks when:
 - a requirement is ambiguous or conflicts with another,

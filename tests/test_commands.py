@@ -88,6 +88,9 @@ def after_station(snapshot, station):
         return story_at(f"S{int(station[1:]) + 1:02d}")
     if station == "S11":  # the PR is open and the issue is in review: Gate B
         return GATE_B
+    if station == "S12":  # #10 closed out (done); #11 is ready: Gate C
+        return snap(**MERGED, issues=(issue(10, 1, labels=labelled("done"), state="CLOSED"),
+                                      issue(11, 2)))
     raise AssertionError(f"no simulation for {station}")
 
 
@@ -101,18 +104,34 @@ def story_at(next_station):
 
 GATE_B = snap(**{**MERGED, "prs": (*MERGED["prs"], story_pr(20, 1))},
               issues=(issue(10, 1, labels=labelled("in-review")), issue(11, 2)))
+# The human merged #10's PR, and the merge closed the issue: close-out is next.
+CLOSEOUT = snap(**{**MERGED, "prs": (*MERGED["prs"], story_pr(20, 1, "MERGED"))},
+                issues=(issue(10, 1, labels=labelled("in-review"), state="CLOSED"),
+                        issue(11, 2)))
 
 
-def drive(command, snapshot, *, stuck=None, limit=20):
+def drive(command, snapshot, *, stuck=None, limit=20, stations_dir=commands.STATIONS_DIR):
     """Run a command's loop as its file describes. Returns (stations run, final route)."""
     ran = []
-    decision = route(command, result(snapshot))
+    decision = route(command, result(snapshot), stations_dir=stations_dir)
     while decision.action == "run" and len(ran) < limit:
         ran.append(decision.station)
         if decision.station != stuck:
             snapshot = after_station(snapshot, decision.station)
-        decision = route(command, result(snapshot), continuing=True, after=decision.station)
+        decision = route(command, result(snapshot), continuing=True, after=decision.station,
+                         stations_dir=stations_dir)
     return ran, decision
+
+
+def stations_with_s12(test):
+    """The real station files plus a stand-in S12, until T4.3 writes the real one."""
+    tmp = tempfile.TemporaryDirectory()
+    test.addCleanup(tmp.cleanup)
+    folder = Path(tmp.name)
+    for path in commands.STATIONS_DIR.glob("*.md"):
+        (folder / path.name).write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+    (folder / "S12-closeout.md").write_text("stand-in for T4.3", encoding="utf-8")
+    return folder
 
 
 class RouteAcceptanceTest(unittest.TestCase):
@@ -176,9 +195,11 @@ class ContinueTest(unittest.TestCase):
                 self.assertEqual(decision.action, "stop")
 
     def test_one_continue_never_starts_a_second_story(self):
-        # Gate C is passed only right after S05b, never after a story station.
-        self.assertEqual(route("/factory-continue", result(IDLE), continuing=True,
-                               after="S05b").station, "S06")
+        # Gate C is passed only right after S05b or S12, never after a story station.
+        for after in ("S05b", "S12"):
+            with self.subTest(after=after):
+                self.assertEqual(route("/factory-continue", result(IDLE), continuing=True,
+                                       after=after).station, "S06")
         for after in self.STORY_LOOP:
             with self.subTest(after=after):
                 decision = route("/factory-continue", result(IDLE), continuing=True,
@@ -278,19 +299,50 @@ class RouteTest(unittest.TestCase):
         self.assertEqual((decision.action, decision.state), ("stop", st.GATE_B_WAITING_REVIEW))
         self.assertEqual(route("/factory-resume", result(IDLE)).action, "stop")
 
-    def test_closeout_waits_for_s12_and_never_picks_a_story(self):
+    def test_closeout_routes_to_s12_which_is_not_built_yet(self):
         """T4.1: after the human's merge, both commands route to S12 (built in T4.3)."""
-        closeout = snap(**{**MERGED, "prs": (*MERGED["prs"], story_pr(20, 1, "MERGED"))},
-                        issues=(issue(10, 1, labels=labelled("in-review"), state="CLOSED"),
-                                issue(11, 2)))
-        self.assertEqual(result(closeout)["state"], st.CLOSEOUT_PENDING)
+        self.assertEqual(result(CLOSEOUT)["state"], st.CLOSEOUT_PENDING)
         for command in ("/factory-resume", "/factory-continue"):
             with self.subTest(command=command):
-                decision = route(command, result(closeout))
+                decision = route(command, result(CLOSEOUT))
                 self.assertEqual(decision.action, "stop")
                 self.assertIn("S12, which is not available yet", decision.message)
                 self.assertIn("S12", COMMANDS[command].stations)
-                self.assertNotIn("S12", COMMANDS[command].through_gate_c)
+
+    def test_resume_closes_out_then_stops_at_gate_c(self):
+        ran, final = drive("/factory-resume", CLOSEOUT, stations_dir=stations_with_s12(self))
+        self.assertEqual(ran, ["S12"])
+        self.assertEqual((final.action, final.state), ("stop", st.IDLE_AT_GATE_C))
+        self.assertNotIn("S12", COMMANDS["/factory-resume"].through_gate_c)
+
+    def test_continue_closes_out_then_takes_exactly_one_story_to_gate_b(self):
+        ran, final = drive("/factory-continue", CLOSEOUT,
+                           stations_dir=stations_with_s12(self))
+        self.assertEqual(ran, ["S12", "S06", "S07", "S08", "S09", "S10", "S11"])
+        self.assertEqual((final.action, final.state), ("stop", st.GATE_B_WAITING_REVIEW))
+        self.assertEqual(ran.count("S06"), 1)
+
+    def test_continue_after_closeout_stops_when_nothing_can_start(self):
+        folder = stations_with_s12(self)
+        last_done = snap(**MERGED, issues=(
+            issue(10, 1, labels=labelled("done"), state="CLOSED"),
+            issue(11, 2, labels=labelled("done"), state="CLOSED")))
+        all_blocked = snap(**MERGED, issues=(
+            issue(10, 1, labels=labelled("done"), state="CLOSED"),
+            issue(11, 2, labels=labelled("blocked"))))
+        for snapshot, state in ((last_done, st.INCREMENT_COMPLETE),
+                                (all_blocked, st.NEEDS_HUMAN)):
+            with self.subTest(state=state):
+                decision = route("/factory-continue", result(snapshot), continuing=True,
+                                 after="S12", stations_dir=folder)
+                self.assertEqual((decision.action, decision.state), ("stop", state))
+
+    def test_an_incomplete_closeout_stops_continue(self):
+        ran, final = drive("/factory-continue", CLOSEOUT, stuck="S12",
+                           stations_dir=stations_with_s12(self))
+        self.assertEqual(ran, ["S12"])
+        self.assertEqual((final.action, final.state), ("stop", st.CLOSEOUT_PENDING))
+        self.assertIn("did not complete", final.message)
 
     def test_changes_requested_waits_for_rework_mode(self):
         """T4.1: the normal S08 never runs on a reviewed PR; rework mode arrives in T4.2."""
