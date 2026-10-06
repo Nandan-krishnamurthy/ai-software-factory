@@ -387,6 +387,9 @@ _HTTP_CLIENTS = {"curl", "wget", "http", "https", "invoke-webrequest", "invoke-r
 _WRAPPERS = {"command", "builtin", "exec", "nohup", "time", "sudo", "doas", "winpty",
              "stdbuf"}
 _NULL_TARGETS = {"/dev/null", "/dev/stdout", "/dev/stderr", "nul", "$null", "con", "-"}
+# Shell keywords that come before the command they run: `if gh …`, `then gh …`, `do gh …`,
+# `! gh …`, `coproc gh …`. The command after them is checked like any other.
+_KEYWORDS = {"if", "then", "elif", "else", "do", "while", "until", "!", "coproc"}
 
 
 def _exe_name(word: str) -> str:
@@ -414,7 +417,7 @@ def _strip_wrappers(words: list[str]) -> list[str]:
     i = 0
     while i < len(words):
         w, name = words[i], _exe_name(words[i])
-        if _ASSIGNMENT.match(w):
+        if _ASSIGNMENT.match(w) or name in _KEYWORDS:
             i += 1
         elif name == "env":
             i += 1
@@ -551,7 +554,6 @@ def _check_command(cmd: _Command, dialect: str, ctx: GuardContext, cwd: Path,
 
 _BASH_VAR = re.compile(r"\$(?:\{(?P<braced>[A-Za-z_]\w*)\}|(?P<name>[A-Za-z_]\w*))")
 _BASH_ASSIGNMENT = re.compile(r"^(?P<name>[A-Za-z_]\w*)(?P<op>\+?=)")
-_BASH_KEYWORDS = {"if", "then", "elif", "else", "do", "while", "until", "!", "time"}
 _BASH_VAR_SETTERS = {"declare", "typeset", "local", "readonly", "export", "unset", "read",
                      "mapfile", "readarray", "getopts", "let", "source", ".", "eval", "for",
                      "select", "while", "until"}
@@ -588,8 +590,7 @@ def _bash_assignments(words: list[str], cmd: _Command, variables: dict[str, str 
     # (`export T=x`, `let T=1`) may change the variable: it is unknown from now on.
     for match in filter(None, matches):
         variables[match["name"]] = None
-    lead = next((w for w in words if w not in _BASH_KEYWORDS), "")
-    name = _exe_name(lead)
+    name = _exe_name(next(iter(_strip_wrappers(words)), ""))
     if name in _BASH_VAR_SETTERS or (name == "printf" and "-v" in words):
         for key in variables:
             variables[key] = None
