@@ -427,6 +427,104 @@ class PowerShellGuardTest(unittest.TestCase):
         self.assertTrue(decide(*pwsh("$?"), ctx()).allowed)
 
 
+# Bash spellings seen in the M2–M4 sessions (T4.5), run from the factory repo with a target
+# active, exactly as the model sent them apart from the paths. The guard used to block the
+# allowed ones: a variable assigned a literal path earlier in the same command was taken
+# for an unknown one.
+T, S = TARGET.as_posix(), SCRATCH.as_posix()
+DEMO_BASH_ALLOW = [
+    ("demo: log line through $T",
+     bash(f'T="{T}"; echo "2026-09-30T12:36:50Z S07 001-initial #7 branch story/7-x" >> '
+          '"$T/.factory/log.md" && git -C "$T" add .factory/log.md && git -C "$T" commit -q '
+          '-m "chore: start story #7" -m "Factory-Station: S07" && git -C "$T" push -u origin '
+          "story/12-add-due-date 2>&1 | tail -2")),
+    ("demo: printf into $T",
+     bash(f'T="{T}"; printf \'%s S00 001-initial intake\\n\' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
+          '>> "$T/.factory/log.md"; cat "$T/.factory/log.md"; git -C "$T" status --porcelain')),
+    ("demo: scratch dir in $S, chained with &&",
+     bash(f"S={S} && mkdir -p $S/oldguard/factory && git show main:scripts/factory/guard.py "
+          "> $S/oldguard/factory/guard_old.py")),
+    ("demo: $T and $B for the story branch",
+     bash(f"T={T}; B=story/12-add-due-date; git -C $T switch -c $B origin/main && echo "
+          '"$(date -u +%Y-%m-%dT%H:%M:%SZ) S07 001-initial #2 branch $B" >> $T/.factory/log.md '
+          "&& git -C $T add .factory/log.md && git -C $T push -u origin $B")),
+    ("demo: brace group redirected into $P",
+     bash(f"P={S}; {{ cat <<'EOF'\n## Summary\nEOF\ngrep -E '^- \\[' $P/verdict-2.md\n}} "
+          "> $P/pr-2.md; grep -c '{{' $P/pr-2.md; gh pr create --title x --body-file $P/pr-2.md")),
+]
+
+# Blocked during the sessions, and rightly so.
+DEMO_BASH_BLOCK = [
+    ("demo: path from $(...)",
+     bash('S=$(python -c "import tempfile;print(tempfile.gettempdir())"); echo "$S"\n'
+          "cat > \"$S/closeout-6.md\" <<'EOF'\nx\nEOF"), "cannot tell where '$(...)"),
+    ("demo: python script quoting a merge mutation",
+     bash("python - <<'PYEOF'\nfrom pathlib import Path\nblock = r\"\"\"\n"
+          "pwsh(\"$q = 'mutation { mergePullRequest(input: {}) { id } }'; gh api graphql\")\n"
+          "\"\"\"\nPath('x').write_text(block)\nPYEOF"), "GraphQL merge"),
+    ("demo: python script quoting gh pr merge",
+     bash(f'F="{S}/pr-t1.8.md" && python - "$F" <<\'EOF\'\nimport sys\n'
+          "text = '`gh pr merge` was blocked by the live guard hook'\nEOF"), "gh pr merge"),
+    ("demo: build output into /tmp",
+     bash('for c in "npm run build" "npm test"; do echo "### $c"; $c > /tmp/out.txt 2>&1; '
+          'e=$?; tail -12 /tmp/out.txt; echo "### $c EXIT=$e"; done'), "only inside"),
+]
+
+BASH_VAR_ALLOW = [
+    ("bash: branch in a variable", bash("B=story/12-add-due-date; git push -u origin $B")),
+    ("bash: cd into a known variable", bash(f'T="{T}"; cd "$T" && echo x > notes.txt')),
+    ("bash: ${T} braces", bash(f'T="{T}" N=out; echo "${{T}}" > "${{T}}/${{N}}.txt"')),
+    ("bash: single-quoted value", bash(f"S='{S}'; echo '$HOME' > \"$S/x\"")),
+    ("bash: reassigned to another literal", bash(f'T="{OUTSIDE}"; T="{T}"; echo x > "$T/f"')),
+]
+
+# A variable must not hide a merge, a push or a write from the guard.
+BASH_VAR_BLOCK = [
+    ("bash: branch in a variable", bash("B=main; git push origin $B"), "default branch"),
+    ("bash: verb in a variable", bash("V=merge; gh pr $V 5"), "gh pr merge"),
+    ("bash: exe in a variable", bash("G=gh; $G pr merge 5"), "gh pr merge"),
+    ("bash: write outside", bash(f'D="{OUTSIDE.as_posix()}"; echo x > "$D/x"'), "only inside"),
+    ("bash: cd into the factory", bash(f'F="{FACTORY.as_posix()}"; cd $F; echo x > n.txt'),
+     "read-only"),
+    ("bash: double-quoted bash -c", bash(f'D="{OUTSIDE.as_posix()}"; bash -c "echo x > $D/x"'),
+     "only inside"),
+    # Anything the guard cannot follow leaves the variable unknown.
+    ("bash: appended to", bash(f'T="{T}"; T+=/../elsewhere; echo x > "$T/f"'), "cannot tell"),
+    ("bash: assigned in a subshell", bash(f'(T="{T}"); echo x > "$T/f"'), "cannot tell"),
+    ("bash: assigned in a group", bash(f'{{ T="{T}"; }}; echo x > "$T/f"'), "cannot tell"),
+    ("bash: assigned in a pipeline", bash(f'T="{T}" | true; echo x > "$T/f"'), "cannot tell"),
+    ("bash: assigned in the background", bash(f'T="{T}" & echo x > "$T/f"'), "cannot tell"),
+    ("bash: assigned after &&", bash(f'false && T="{T}"; echo x > "$T/f"'), "cannot tell"),
+    ("bash: assigned after a keyword",
+     bash(f'T="{T}"; if true; then T=/elsewhere; fi; echo x > "$T/f"'), "cannot tell"),
+    ("bash: export", bash(f'T="{T}"; export T=/elsewhere; echo x > "$T/f"'), "cannot tell"),
+    ("bash: read", bash(f'T="{T}"; read T < in.txt; echo x > "$T/f"'), "cannot tell"),
+    ("bash: for loop", bash(f'T="{T}"; for T in /e; do echo x > "$T/f"; done'), "cannot tell"),
+    ("bash: printf -v", bash(f'T="{T}"; printf -v T /e; echo x > "$T/f"'), "cannot tell"),
+    ("bash: computed", bash('T=$(pwd); echo x > "$T/f"'), "cannot tell where '$(...)"),
+    ("bash: from an unknown variable", bash('T="$NO_SUCH_FACTORY_VAR_2/x"; echo y > "$T/f"'),
+     "cannot tell"),
+    ("bash: single quotes keep $T literal", bash(f"T=\"{T}\"; echo x > '$T/f'"),
+     "cannot tell"),
+]
+
+
+class BashVariableGuardTest(unittest.TestCase):
+    """Bash variables assigned in the same command (T4.5 hardening)."""
+
+    check = GuardTableTest.check
+
+    def test_demo_commands(self):
+        self.check(DEMO_BASH_ALLOW, ctx(cwd=FACTORY), expect_allowed=True)
+        self.check(DEMO_BASH_BLOCK, ctx(cwd=FACTORY), expect_allowed=False)
+
+    def test_allowed(self):
+        self.check(BASH_VAR_ALLOW, ctx(), expect_allowed=True)
+
+    def test_blocked(self):
+        self.check(BASH_VAR_BLOCK, ctx(), expect_allowed=False)
+
+
 # Commands inside bash compound commands. The guard used to take the keyword in front of
 # them (`then`, `do`, `!` …) for the command name, so the real command was never checked.
 KEYWORD_BLOCK = [

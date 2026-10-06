@@ -29,6 +29,11 @@ checked as the command it is, and a quoted value is substituted wherever the var
 used later in the same script, so ``git -C $T push`` is checked against the right repo.
 The write cmdlets' named parameters (``-Encoding utf8``, ``-Value x``) are told apart
 from the file they write to.
+
+Bash works the same way for a variable assigned a literal value at the top level of the
+same command (``T="C:/path"; echo x >> "$T/log.md"``). Anything the guard cannot follow
+(an assignment in a group, a pipeline or after ``&&``, a value from ``$(…)``, ``read``,
+``export``, a loop) makes the variable unknown again, so its use is blocked as before.
 """
 
 import os
@@ -113,6 +118,7 @@ _REDIR_OUT = "redir_out"
 _REDIR_IN = "redir_in"
 _DYNAMIC = "\x00"  # marks a word that contains a run-time substitution
 _QUOTE = "\x01"  # marks where a quoted part of a word begins; _parse removes it
+_LITERAL_DOLLAR = "\x02"  # a `$` inside bash single quotes: never a variable
 
 
 @dataclass
@@ -122,6 +128,7 @@ class _Command:
     heredocs: list[str] = field(default_factory=list)     # bodies fed to this command
     after: str = ""  # the separator before it: "|" when piped into, "&" after a call operator
     raw: list[str] = field(default_factory=list)  # the words with their _QUOTE marks
+    group: int = 0  # bash: how many ( ) or { } groups it is inside
 
 
 @dataclass
@@ -247,7 +254,7 @@ def _tokenize(text: str, dialect: str) -> tuple[list[tuple[str, str]], list[str]
                     end = text.find("'", end + 2)
             end = n if end < 0 else end
             add(_QUOTE + (text[i + 1:end].replace("''", "'") if dialect == "powershell"
-                          else text[i + 1:end]))
+                          else text[i + 1:end].replace("$", _LITERAL_DOLLAR)))
             i = end + 1
         elif ch == '"':
             i += 1
@@ -339,11 +346,16 @@ def _parse(text: str, dialect: str) -> _Parsed:
     commands: list[_Command] = []
     current = _Command()
     expect: str | None = None
+    group = 0
     for kind, value in tokens:
         if kind == _SEP:
             if current.words or current.writes:
                 commands.append(current)
-            current, expect = _Command(after=value), None
+            if value in ("(", "((", "{"):
+                group += 1
+            elif value in (")", "))", "}"):
+                group = max(0, group - 1)
+            current, expect = _Command(after=value, group=group), None
         elif kind in (_REDIR_OUT, _REDIR_IN):
             expect = kind
         elif expect == _REDIR_OUT:
@@ -392,9 +404,12 @@ def _check_script(text: str, dialect: str, ctx: GuardContext, cwd: Path, depth: 
     parsed = _parse(text, dialect)
     for inner in parsed.substitutions:
         _check_script(inner, dialect, ctx, cwd, depth + 1)
-    variables: dict[str, str | None] = {}  # PowerShell: assigned in this script
-    for command in parsed.commands:
-        cwd = _check_command(command, dialect, ctx, cwd, depth, variables)
+    variables: dict[str, str | None] = {}  # assigned earlier in this script
+    for i, command in enumerate(parsed.commands):
+        # bash runs each side of a pipe, and anything sent to the background, in a subshell.
+        later = parsed.commands[i + 1].after if i + 1 < len(parsed.commands) else ""
+        subshell = command.after in ("|", "|&") or later in ("|", "|&", "&")
+        cwd = _check_command(command, dialect, ctx, cwd, depth, variables, subshell)
     return cwd
 
 
@@ -432,10 +447,17 @@ def _strip_wrappers(words: list[str]) -> list[str]:
 
 
 def _check_command(cmd: _Command, dialect: str, ctx: GuardContext, cwd: Path,
-                   depth: int, variables: dict[str, str | None] | None = None) -> Path:
+                   depth: int, variables: dict[str, str | None] | None = None,
+                   subshell: bool = False) -> Path:
     variables = {} if variables is None else variables
     words, writes = cmd.words, cmd.writes
-    if dialect == "powershell":
+    if dialect == "bash":
+        words, writes = _bash_substitute(words, variables), _bash_substitute(writes, variables)
+        if _bash_assignments(words, cmd, variables, subshell):
+            for target in writes:
+                _check_redirect_target(target, ctx, cwd)
+            return cwd
+    elif dialect == "powershell":
         assignment = _pwsh_assignment(cmd.raw or words)
         if assignment is not None:  # `$x = <pipeline>`: the right-hand side runs
             name, rhs_raw = assignment
@@ -522,6 +544,57 @@ def _check_command(cmd: _Command, dialect: str, ctx: GuardContext, cwd: Path,
         for target in _write_command_targets(name, args):
             _check_redirect_target(target, ctx, cwd)
     return cwd
+
+
+# ----------------------------------------------------------------------------- bash
+# A variable assigned a literal value at the top level of the script is substituted where
+# it is used later, like PowerShell's. Only an unconditional assignment in the current
+# shell counts: in a group, a pipeline, the background or after `&&`/`||` it may not
+# happen, or not stick. Any other way to change a variable makes it unknown again.
+
+_BASH_VAR = re.compile(r"\$(?:\{(?P<braced>[A-Za-z_]\w*)\}|(?P<name>[A-Za-z_]\w*))")
+_BASH_ASSIGNMENT = re.compile(r"^(?P<name>[A-Za-z_]\w*)(?P<op>\+?=)")
+_BASH_VAR_SETTERS = {"declare", "typeset", "local", "readonly", "export", "unset", "read",
+                     "mapfile", "readarray", "getopts", "let", "source", ".", "eval", "for",
+                     "select", "while", "until"}
+
+
+def _bash_substitute(words: list[str], variables: dict[str, str | None]) -> list[str]:
+    """Replace the variables assigned earlier in this script: a literal by its value, an
+    unknown one by the run-time marker. Others (``$HOME``, ``$?``) stay as they are."""
+
+    def value(match: re.Match) -> str:
+        key = match["braced"] or match["name"]
+        if key not in variables:
+            return match[0]
+        known = variables[key]
+        return _DYNAMIC if known is None else known
+
+    return [_BASH_VAR.sub(value, w).replace(_LITERAL_DOLLAR, "$") for w in words]
+
+
+def _bash_assignments(words: list[str], cmd: _Command, variables: dict[str, str | None],
+                      subshell: bool) -> bool:
+    """Track what ``words`` (already substituted) do to the script's variables. True when
+    the command is only assignments (``T=x B=y``), which runs nothing."""
+    matches = [_BASH_ASSIGNMENT.match(w) for w in words]
+    if words and all(matches):
+        sticks = cmd.group == 0 and cmd.after in ("", ";", "\n") and not subshell
+        for word, match in zip(words, matches, strict=True):
+            value = word[match.end():]
+            literal = (sticks and match["op"] == "=" and value and _DYNAMIC not in value
+                       and "$" not in value)
+            variables[match["name"]] = value if literal else None
+        return True
+    # An assignment after a keyword (`then T=x`), as a prefix (`T=x cmd`) or as an argument
+    # (`export T=x`, `let T=1`) may change the variable: it is unknown from now on.
+    for match in filter(None, matches):
+        variables[match["name"]] = None
+    name = _exe_name(next(iter(_strip_wrappers(words)), ""))
+    if name in _BASH_VAR_SETTERS or (name == "printf" and "-v" in words):
+        for key in variables:
+            variables[key] = None
+    return False
 
 
 # ----------------------------------------------------------------------------- PowerShell
@@ -988,7 +1061,8 @@ def _check_redirect_target(target: str, ctx: GuardContext, cwd: Path) -> None:
 def _normalize(path: str, cwd: Path) -> str:
     expanded = os.path.expandvars(os.path.expanduser(path.replace(_DYNAMIC, "")))
     if "$" in expanded or "%" in expanded or _DYNAMIC in path:
-        _block(f"cannot tell where {path!r} points (unexpanded variable or substitution); "
+        shown = path.replace(_DYNAMIC, "$(...)")
+        _block(f"cannot tell where {shown!r} points (unexpanded variable or substitution); "
                "use a literal path")
     match = re.match(r"^/([a-zA-Z])(/|$)", expanded)  # Git Bash /c/Users → C:/Users
     if match and os.name == "nt":
