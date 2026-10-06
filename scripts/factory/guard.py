@@ -375,6 +375,9 @@ _HTTP_CLIENTS = {"curl", "wget", "http", "https", "invoke-webrequest", "invoke-r
 _WRAPPERS = {"command", "builtin", "exec", "nohup", "time", "sudo", "doas", "winpty",
              "stdbuf"}
 _NULL_TARGETS = {"/dev/null", "/dev/stdout", "/dev/stderr", "nul", "$null", "con", "-"}
+# Shell keywords that come before the command they run: `if gh …`, `then gh …`, `do gh …`,
+# `! gh …`, `coproc gh …`. The command after them is checked like any other.
+_KEYWORDS = {"if", "then", "elif", "else", "do", "while", "until", "!", "coproc"}
 
 
 def _exe_name(word: str) -> str:
@@ -399,7 +402,7 @@ def _strip_wrappers(words: list[str]) -> list[str]:
     i = 0
     while i < len(words):
         w, name = words[i], _exe_name(words[i])
-        if _ASSIGNMENT.match(w):
+        if _ASSIGNMENT.match(w) or name in _KEYWORDS:
             i += 1
         elif name == "env":
             i += 1

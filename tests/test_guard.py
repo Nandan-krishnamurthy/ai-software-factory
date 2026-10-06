@@ -427,6 +427,61 @@ class PowerShellGuardTest(unittest.TestCase):
         self.assertTrue(decide(*pwsh("$?"), ctx()).allowed)
 
 
+# Commands inside bash compound commands. The guard used to take the keyword in front of
+# them (`then`, `do`, `!` …) for the command name, so the real command was never checked.
+KEYWORD_BLOCK = [
+    ("then", bash("if true; then gh pr merge 5; fi"), "gh pr merge"),
+    ("for … do", bash("for i in 1; do gh pr merge 5; done"), "gh pr merge"),
+    ("while … do", bash("while true; do git push origin main; done"), "default branch"),
+    ("until … do", bash("until false; do gh pr merge 5; done"), "gh pr merge"),
+    ("if condition", bash("if gh pr merge 5; then :; fi"), "gh pr merge"),
+    ("while condition", bash("while gh pr merge 5; do :; done"), "gh pr merge"),
+    ("else", bash("if false; then :; else gh pr merge 5; fi"), "gh pr merge"),
+    ("elif condition", bash("if false; then :; elif gh pr merge 5; then :; fi"),
+     "gh pr merge"),
+    ("negation", bash("! gh pr merge 5"), "gh pr merge"),
+    ("if !", bash("if ! gh pr merge 5; then :; fi"), "gh pr merge"),
+    ("coproc", bash("coproc gh pr merge 5"), "gh pr merge"),
+    ("nested if", bash("if true; then if true; then gh pr merge 5; fi; fi"), "gh pr merge"),
+    ("multi-line", bash("if true\nthen\n  gh pr merge 5\nfi"), "gh pr merge"),
+    ("keyword then env prefix", bash("if true; then GH_TOKEN=x gh pr merge 5; fi"),
+     "gh pr merge"),
+    ("keyword then wrapper", bash("for i in 1; do timeout 9 gh pr merge 5; done"),
+     "gh pr merge"),
+    ("inside bash -c", bash("bash -c 'if true; then gh pr merge 5; fi'"), "gh pr merge"),
+    ("force push in a loop",
+     bash("for b in x; do git push --force origin story/12-add-due-date; done"),
+     "under review"),
+    ("direct comment after then", bash("if true; then gh pr comment 5 --body x; fi"),
+     "factory.py comment"),
+    ("GraphQL merge after do",
+     bash("for i in 1; do gh api graphql -f query='mutation { mergePullRequest(input: {}) "
+          "{ x } }'; done"), "GraphQL merge"),
+]
+
+KEYWORD_ALLOW = [
+    ("if/else on git", bash("if git diff --quiet; then echo clean; else echo dirty; fi")),
+    ("for loop", bash('for f in a b; do echo "$f"; done')),
+    ("while read", bash('while read line; do echo "$line"; done < in.txt')),
+    ("push story branch in if",
+     bash("if [ -f x ]; then git push -u origin story/12-add-due-date; fi")),
+    ("negated test", bash("! git diff --quiet")),
+    ("multi-line loop", bash("for t in unit e2e; do\n  npm run test:$t\ndone")),
+]
+
+
+class KeywordGuardTest(unittest.TestCase):
+    """Commands after bash keywords are checked like any other command."""
+
+    check = GuardTableTest.check
+
+    def test_blocked(self):
+        self.check(KEYWORD_BLOCK, ctx(), expect_allowed=False)
+
+    def test_allowed(self):
+        self.check(KEYWORD_ALLOW, ctx(), expect_allowed=True)
+
+
 class HookAdapterTest(unittest.TestCase):
     def run_hook(self, payload):
         raw = payload if isinstance(payload, bytes) else json.dumps(payload).encode("utf-8")
