@@ -136,6 +136,22 @@ class NextIncrementTest(unittest.TestCase):
         self.assertEqual(result.next_increment, "002-due-dates")
         self.assertEqual((result.next_req, result.next_story), ("REQ-004", "STORY-003"))
 
+    def test_second_increment_of_an_existing_project_continues_the_numbering(self):
+        """T5.2 acceptance criterion, on the shape of Task Tracker after increment 001:
+        21 requirements and 12 stories, all done. The next increment is 002-<slug>, and
+        its REQ and STORY numbers continue from 001's (they are never reused)."""
+        t = TargetDir(self)
+        t.increment("001-initial", range(1, 22), range(1, 13))
+        t.write("docs/factory/traceability.md", "| REQ-021 | STORY-012 (#13) | #25 | x | "
+                                                "Implemented |\n")
+        done = [issue(n + 1, f"STORY-{n:03d}", open=False, labels={"status:done"})
+                for n in range(1, 13)]
+        result = assess(scan_layout(t.root), merged("001-initial", issues_=done), "Due dates")
+        self.assertEqual(result.reasons, ())
+        self.assertEqual(result.current, "001-initial")
+        self.assertEqual(result.next_increment, "002-due-dates")
+        self.assertEqual((result.next_req, result.next_story), ("REQ-022", "STORY-013"))
+
     def test_without_a_slug_only_numbering_is_reported(self):
         result = assess(self.layout, merged("001-initial", issues_=self.done))
         self.assertEqual((result.next_increment, result.reasons), (None, ()))

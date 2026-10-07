@@ -33,8 +33,9 @@ from prose:
 * **Progress.** If the state engine names the same station that just ran, that station
   did not complete, so the command stops instead of looping.
 * **Entry station.** Where nothing is in motion yet, the state engine names no station
-  (e.g. ``UNCONFIGURED``). A command may then name its own first station:
-  ``/factory-start`` begins with S00.
+  (``UNCONFIGURED``, or ``INCREMENT_COMPLETE`` once every story is done). A command may
+  then name its own first station: ``/factory-start`` begins with S00, which starts the
+  first increment or the next one (T5.2).
 * **Availability.** A station whose file does not exist yet stops
   the command with an explanation.
 * **Uncommitted changes** (T4.4). If the target's working tree has uncommitted changes,
@@ -72,7 +73,8 @@ COMMANDS: dict[str, Command] = {
     "/factory-start": Command(
         "/factory-start", ("S00", "S01", "S02", "S03", "S04", "S05"),
         "begin a new increment and plan it, up to Gate A",
-        entry=((state_mod.UNCONFIGURED, "S00"),)),
+        # A new project, or the next increment once the current one is complete (T5.2).
+        entry=((state_mod.UNCONFIGURED, "S00"), (state_mod.INCREMENT_COMPLETE, "S00"))),
     "/factory-resume": Command(
         "/factory-resume", PLANNING + STORY + CLOSEOUT,
         "finish what is in motion (planning, issue creation, a story already started, or the "

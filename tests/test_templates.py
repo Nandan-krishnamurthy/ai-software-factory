@@ -17,7 +17,8 @@ from factory.config import COMMAND_NAMES, DEFAULT_LIMITS, ConfigError, parse_con
 from tests import REPO_ROOT
 
 TEMPLATES_DIR = REPO_ROOT / "templates"
-TEMPLATES = ("config.json", "story.md", "pr.md", "planning-pr.md", "traceability.md")
+TEMPLATES = ("config.json", "story.md", "pr.md", "planning-pr.md", "traceability.md",
+             "requirements-delta.md", "architecture-delta.md")
 MARKDOWN_TEMPLATES = tuple(name for name in TEMPLATES if name.endswith(".md"))
 PLACEHOLDER = re.compile(r"\{\{([a-z_]+)\}\}")
 
@@ -34,6 +35,16 @@ PLANNING_PR_SECTIONS = [
     "Summary", "Planning documents", "Requirements coverage", "Stories",
     "Issues to be created", "Assumptions and open questions", "Risks / notes for reviewer",
     "How to review (Gate A)",
+]
+# The delta documents of an existing project (T5.2, requirements §2.2).
+REQUIREMENTS_DELTA_SECTIONS = [
+    "Current system", "Functional", "Non-functional", "Changed or retired requirements",
+    "Unchanged behaviour to protect", "Assumptions", "Out of scope", "Open questions",
+    "PRD coverage",
+]
+ARCHITECTURE_DELTA_SECTIONS = [
+    "Overview", "Current architecture", "Changes", "Data model", "Key decisions",
+    "Technology choices", "Compatibility and migration", "Requirement mapping",
 ]
 QUALITY_GATES = [
     "Q1 Build", "Q2 Lint & types", "Q3 New tests", "Q4 Full suite", "Q5 AC evidence",
@@ -145,6 +156,30 @@ TRACEABILITY_VALUES = {
     "rows": "| REQ-001 | STORY-001 (#3) | #21 | `tasks.test.ts › create` | Implemented |\n"
             "| REQ-002 | STORY-002 | — | — | Not started |",
 }
+REQUIREMENTS_DELTA_VALUES = {
+    "increment": "002-due-dates",
+    "current_system": "Tasks have a title only (REQ-001, REQ-002); see 01-codebase-analysis.md.",
+    "functional": "- **REQ-022** (PRD §Due dates): A task can have a due date.\n"
+                  "- **REQ-023** (PRD §Due dates): Overdue tasks are shown in red.",
+    "non_functional": "None",
+    "changed_requirements": "- REQ-005: changed by REQ-022 (the list is sorted by due date)",
+    "unchanged_behaviour": "- REQ-001 adding a task (`add-task.spec.ts`) keeps working",
+    "assumptions": "None",
+    "out_of_scope": "None",
+    "open_questions": "None",
+    "prd_coverage": "| Due dates | REQ-022, REQ-023 |",
+}
+ARCHITECTURE_DELTA_VALUES = {
+    "increment": "002-due-dates",
+    "overview": "Adds a due date to the task model and the list.",
+    "current_architecture": "`src/domain/task.ts` holds the task model.",
+    "changes": "| domain/task | Changed | adds `dueDate` |",
+    "data_model": "Task gains `dueDate`.",
+    "key_decisions": "- Store dates as `YYYY-MM-DD`: no time zone shifts.",
+    "technology_choices": "None",
+    "compatibility": "Stored tasks without `dueDate` load with `null`.",
+    "requirement_mapping": "| REQ-022 | domain/task, ui/render |\n| REQ-023 | ui/render |",
+}
 CONFIG_VALUES = {
     "project": "sandbox",
     "repo": "owner/sandbox",
@@ -156,6 +191,8 @@ SAMPLE_VALUES = {
     "pr.md": PR_VALUES,
     "planning-pr.md": PLANNING_PR_VALUES,
     "traceability.md": TRACEABILITY_VALUES,
+    "requirements-delta.md": REQUIREMENTS_DELTA_VALUES,
+    "architecture-delta.md": ARCHITECTURE_DELTA_VALUES,
     "config.json": CONFIG_VALUES,
 }
 
@@ -320,6 +357,56 @@ class TraceabilityTemplateTest(unittest.TestCase):
 
     def test_is_a_repo_file_without_markers(self):
         self.assertFalse(markers.has_factory_marker(self.filled))
+
+
+def station_sections(station: str) -> list[str]:
+    """The ``## Heading`` names a planning station lists for a new project's document."""
+    path = next((REPO_ROOT / "stations").glob(f"{station}-*.md"))
+    return re.findall(r"^\s+- `## ([^`]+)`", path.read_text(encoding="utf-8"), re.MULTILINE)
+
+
+class DeltaTemplatesTest(unittest.TestCase):
+    """T5.2: an existing project's requirements and architecture describe the change."""
+
+    def test_requirements_sections(self):
+        text = read("requirements-delta.md")
+        self.assertEqual(sections(text), REQUIREMENTS_DELTA_SECTIONS)
+        self.assertTrue(text.startswith("# Requirements: {{increment}}\n"))
+        self.assertIn("the **change** (the delta)", text)
+
+    def test_architecture_sections(self):
+        text = read("architecture-delta.md")
+        self.assertEqual(sections(text), ARCHITECTURE_DELTA_SECTIONS)
+        self.assertTrue(text.startswith("# Architecture: {{increment}}\n"))
+        self.assertEqual(section_body(text, "Requirement mapping").splitlines(),
+                         ["| Requirement | Component(s) |", "|---|---|",
+                          "{{requirement_mapping}}"])
+
+    def test_they_keep_the_sections_the_stations_check(self):
+        """A delta document still passes S02's and S03's Done checks: the sections of a new
+        project's document are there, in the same order. (A delta architecture describes
+        its components under "Current architecture" and "Changes".)"""
+        for station, name, delta in (
+                ("S02", "requirements-delta.md", REQUIREMENTS_DELTA_SECTIONS),
+                ("S03", "architecture-delta.md", ARCHITECTURE_DELTA_SECTIONS)):
+            with self.subTest(template=name):
+                required = [s for s in station_sections(station) if s != "Components"]
+                self.assertGreater(len(required), 4)
+                self.assertEqual([s for s in delta if s in required], required)
+
+    def test_filled_requirements_use_the_s02_bullet_form(self):
+        filled = render(read("requirements-delta.md"), REQUIREMENTS_DELTA_VALUES)
+        new = re.findall(r"^- \*\*(REQ-\d{3,})\*\* \(PRD §[^)]+\): ", filled, re.MULTILINE)
+        self.assertEqual(new, ["REQ-022", "REQ-023"])
+        # Earlier requirements are cited by plain ID, so they never count as new ones.
+        self.assertNotIn("**REQ-005**", filled)
+        self.assertIn("| Due dates | REQ-022, REQ-023 |", filled)
+
+    def test_repo_files_without_markers(self):
+        for name, values in (("requirements-delta.md", REQUIREMENTS_DELTA_VALUES),
+                             ("architecture-delta.md", ARCHITECTURE_DELTA_VALUES)):
+            with self.subTest(template=name):
+                self.assertFalse(markers.has_factory_marker(render(read(name), values)))
 
 
 class ConfigTemplateTest(unittest.TestCase):

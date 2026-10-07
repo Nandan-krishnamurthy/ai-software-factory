@@ -60,6 +60,7 @@ Conventions this module relies on (later stations must follow them):
 import base64
 import json
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -617,6 +618,36 @@ def _parse_config_text(text: str | None) -> tuple[Config | None, str | None]:
 
 
 _BASE_FILES = {"readme.md", "readme", "license", "license.md", ".gitignore", ".gitattributes"}
+# Folders and file types that are never the project's code: a repo holding only these (for
+# example a README and the requirements as a PDF) is a new project (T5.2).
+_NON_CODE_DIRS = ("docs/", ".factory/", ".github/")
+_DOCUMENT_SUFFIXES = {".md", ".markdown", ".rst", ".txt", ".adoc", ".pdf", ".doc", ".docx",
+                      ".odt", ".rtf", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"}
+_INCREMENT_DOC = re.compile(r"^docs/factory/increments/(?P<inc>[^/]+)/")
+
+
+def is_existing_project(paths: Iterable[str], increment: str | None = None) -> bool:
+    """Pure: does the default branch hold an existing project (T5.2, architecture §5.2)?
+
+    Yes if it has code: a file outside ``docs/``, ``.factory/`` and ``.github/`` that is
+    not a README, licence or ``.git*`` file, and not a document or an image. Also yes if
+    it holds the planning documents of an **earlier** increment (one other than
+    ``increment``, the one being planned): its Planning PR was merged, so this is the
+    project's second or later increment.
+    """
+    for path in paths:
+        name = path.rsplit("/", 1)[-1].lower()
+        earlier = _INCREMENT_DOC.match(path)
+        if earlier and earlier["inc"] != increment:
+            return True
+        if path.lower().startswith(_NON_CODE_DIRS) or name in _BASE_FILES:
+            continue
+        suffix = name[name.rfind("."):] if "." in name[1:] else ""
+        if suffix not in _DOCUMENT_SUFFIXES:
+            return True
+    return False
+
+
 _TRAILER = re.compile(rf"^{FACTORY_COMMIT_TRAILER}:", re.MULTILINE | re.IGNORECASE)
 
 
@@ -712,15 +743,13 @@ def collect_snapshot(gh: Gh, repo: str) -> Snapshot:
 
     tree = _get(gh, f"repos/{repo}/git/trees/{default}?recursive=1") or {}
     paths = [e["path"] for e in tree.get("tree", []) if e.get("type") == "blob"]
-    existing = any(not (p.startswith(("docs/factory/", ".factory/")) or p.lower() in _BASE_FILES)
-                   for p in paths)
 
     config_text = _file_text(gh, repo, ".factory/config.json", default)
     snapshot = Snapshot(repo=repo, default_branch=default, branches=branches, prs=tuple(prs),
                         issues=tuple(issues), other_blockers=other_blockers,
-                        needs_human=tuple(needs_human),
-                        existing_project=existing)
+                        needs_human=tuple(needs_human))
     increment = current_increment(snapshot)
+    existing = is_existing_project(paths, increment)
 
     plan_files: dict[str, frozenset[str]] = {}
     plan_config: dict[str, bool] = {}

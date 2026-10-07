@@ -666,6 +666,38 @@ class CollectSnapshotTest(unittest.TestCase):
         fake.put(PLAN, f"{DOCS}/00-prd.md", "PRD")
         self.assertEqual(derive_state(collect(fake)).next_station, "S01")
 
+    def test_requirements_documents_do_not_make_an_existing_project(self):
+        """T5.2, regression for M2 problem 2 (and the M4 sandbox run): a repo holding only
+        a README and its requirements (a PDF, or Markdown under docs/) is a new project, so
+        S00 is followed by S02, not by Codebase Discovery."""
+        fake = FakeRepo()
+        fake.put("main", "README.md", "# app")
+        fake.put("main", "docs/requirements.md", "# PRD")
+        fake.put("main", "Task Tracker.pdf", "%PDF")
+        fake.put(PLAN, ".factory/config.json", CONFIG)
+        fake.put(PLAN, f"{DOCS}/00-prd.md", "PRD")
+        snapshot = collect(fake)
+        self.assertFalse(snapshot.existing_project)
+        self.assertEqual(derive_state(snapshot).next_station, "S02")
+
+    def test_second_increment_of_a_factory_built_project_needs_discovery(self):
+        """T5.2: Task Tracker after increment 001: its code and the merged 001 documents
+        are on main, and increment 002 is being planned."""
+        second = "002-due-dates"
+        plan = f"factory/plan-{second}"
+        fake = FakeRepo()
+        fake.put("main", "package.json", "{}")
+        fake.put("main", "src/main.ts", "")
+        fake.put("main", f"{DOCS}/05-stories.md", "")
+        fake.put("main", ".factory/config.json", CONFIG)
+        fake.put(plan, ".factory/config.json", CONFIG)
+        fake.put(plan, f"docs/factory/increments/{second}/00-prd.md", "change request")
+        snapshot = collect(fake)
+        self.assertTrue(snapshot.existing_project)
+        result = derive_state(snapshot)
+        self.assertEqual((result.state, result.increment, result.next_station),
+                         (st.PLANNING, second, "S01"))
+
     def open_planning_pr(self, comments):
         fake = FakeRepo()
         fake.put(PLAN, ".factory/config.json", CONFIG)
@@ -1076,6 +1108,46 @@ class CollectBlockersTest(unittest.TestCase):
         self.assertEqual(derive_state(snapshot).details["blocked"], {"10": [51]})
         fake.rest_issues[51] = {"number": 51, "state": "closed"}
         self.assertEqual(derive_state(collect(fake)).details["ready"], [10])
+
+
+class ExistingProjectTest(unittest.TestCase):
+    """T5.2: which default-branch trees are existing projects (``is_existing_project``)."""
+
+    def test_new_projects(self):
+        cases = {
+            "empty": [],
+            "README only": ["README.md"],
+            "requirements as a PDF and docs": ["README.md", "Task Tracker.pdf",
+                                               "docs/prd.md", "docs/images/flow.png"],
+            "anything under docs/": ["docs/build.py"],
+            "factory files of the increment being planned": [
+                ".factory/config.json", ".factory/log.md",
+                "docs/factory/increments/002-x/00-prd.md", "docs/factory/traceability.md"],
+            "CI configuration only": [".github/workflows/ci.yml", ".gitignore", "LICENSE"],
+            "notes and images at the root": ["NOTES.txt", "logo.svg", "spec.docx"],
+        }
+        for why, paths in cases.items():
+            with self.subTest(why=why):
+                self.assertFalse(st.is_existing_project(paths, "002-x"))
+
+    def test_existing_projects(self):
+        cases = {
+            "source code": ["README.md", "src/app.ts"],
+            "a manifest": ["package.json"],
+            "a file without a suffix": ["Makefile"],
+            "a dotfile that is not a git file": [".eslintrc.json"],
+            "an earlier increment's documents": [
+                "README.md", "docs/factory/increments/001-initial/02-requirements.md"],
+        }
+        for why, paths in cases.items():
+            with self.subTest(why=why):
+                self.assertTrue(st.is_existing_project(paths, "002-x"))
+
+    def test_an_earlier_increment_is_any_other_than_the_one_being_planned(self):
+        paths = ["docs/factory/increments/001-initial/00-prd.md"]
+        self.assertFalse(st.is_existing_project(paths, "001-initial"))
+        self.assertTrue(st.is_existing_project(paths, "002-x"))
+        self.assertTrue(st.is_existing_project(paths, None))
 
 
 if __name__ == "__main__":

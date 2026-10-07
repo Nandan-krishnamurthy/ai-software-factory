@@ -411,6 +411,37 @@ class StationFilesTest(unittest.TestCase):
         self.assertIn("python scripts/factory.py comment --pr <N> --kind reply", steps)
 
 
+class ExistingProjectPlanningTest(unittest.TestCase):
+    """T5.2: /factory-start for an existing project and for the next increment."""
+
+    def setUp(self):
+        self.by_id = {s.id: s for s in load_stations()}
+
+    def section(self, station_id, name):
+        return self.by_id[station_id].sections[name]
+
+    def test_s00_starts_the_next_increment_after_a_complete_one(self):
+        self.assertIn("`INCREMENT_COMPLETE`", self.section("S00", "Preconditions"))
+        steps = self.section("S00", "Steps")
+        # INCREMENT_COMPLETE's state names the finished increment: S00 must not reuse it.
+        self.assertIn("**Resumed run** (`state --json` reports `PLANNING`)", steps)
+        self.assertIn("**New increment** (`UNCONFIGURED` or `INCREMENT_COMPLETE`)", steps)
+        new = steps[steps.index("**New increment**"):]
+        self.assertLess(new.index("`git -C <T> pull --ff-only`"),
+                        new.index("`python scripts/factory.py increment next --json`"))
+        self.assertIn("`002-<slug>` after `001-initial`", steps)
+
+    def test_existing_projects_use_the_delta_templates(self):
+        for station_id, template in (("S02", "requirements-delta.md"),
+                                     ("S03", "architecture-delta.md")):
+            with self.subTest(station=station_id):
+                self.assertIn(f"templates/{template}", self.section(station_id, "Inputs"))
+                steps = self.section(station_id, "Steps")
+                self.assertIn(f"**Existing project** (`01-codebase-analysis.md` exists): "
+                              f"fill `templates/{template}`", steps)
+                self.assertIn("**New project**: use these sections, in this order:", steps)
+
+
 class DiscoveryStationTest(unittest.TestCase):
     """T5.1: S01 never guesses a command, and stops on a red baseline."""
 
