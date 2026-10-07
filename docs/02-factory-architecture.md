@@ -159,7 +159,7 @@ As built (T2.5), steps 4–6 are decided in code by `python scripts/factory.py r
 - **Continuing:** only while `waiting_on` is `factory`.
 - **Scope:** only the stations that command may run. `/factory-resume` never runs S06.
 - **Progress:** a station that is still named after it ran stops the loop.
-- **Availability:** a station file that doesn't exist yet (S01) stops the command with an explanation.
+- **Availability:** a station file that doesn't exist yet stops the command with an explanation.
 - **Uncommitted changes** (T4.4): if the target's working tree has uncommitted changes, for example from a session that ended in the middle of S08, no station runs. The command lists the files and stops. The factory cannot tell its own unfinished work from yours, so it never discards either: you commit them on their branch or set them aside with `git stash`, then run the command again.
 
 `/factory-start` enters at S00 from `UNCONFIGURED`, where the state engine names no station. Command names are passed without their slash, e.g. `--command factory-start`, because Git Bash on Windows rewrites `/…` arguments into paths. `/factory-target` and `/factory-status` run no station.
@@ -306,7 +306,7 @@ An **increment** is one pass through planning: one PRD or change request → one
 }
 ```
 `identity.mode` is `single-account` for the MVP. `bot` is recognised in the schema but rejected by `doctor` with "not implemented yet" until the bot adapter exists (§9.4). The factory's token is **never** stored in config. `bot_token_env` names an environment variable that holds it.
-S0 creates this file. S1 fills in `commands` by discovering them. A missing command is set to `null`, which means the gate is skipped and the PR says so. The factory never guesses a command.
+S0 creates this file. S1 fills in `commands` by discovering them. A missing command is set to `null`, which means the gate is skipped and the PR says so. The factory never guesses a command. `factory.py discover` proposes only the commands the repository declares (a `package.json` script, a Makefile target, a configured Python tool, `go.mod` or `Cargo.toml`), each with the file that declares it; S1 may also copy a command verbatim from the project's docs or CI, quoting where. S1 runs every command (the **baseline**) before writing it. On a red baseline it commits nothing and asks on a `factory:needs-human` issue (`factory.py question ask`); it plans on top of the failures only after a reviewer replies `/accept-baseline` there (requirements §2.2).
 
 ### 5.4 `05-stories.md` format (parsed by `issues sync`)
 
@@ -342,6 +342,7 @@ Each story becomes an issue titled `STORY-###: <title>`, with the body from `tem
 | Checkpoint comment (one per issue, edited in place) | `<!-- factory:checkpoint {"station":"S09","next":"S10","branch":"story/14-…","sha":"abc123","fix_attempts":1,"review_round":0,"ts":"…"} -->` followed by a human-readable line |
 | **Every other comment or reply the factory posts** | `<!-- factory:reply -->` (or a more specific `factory:*` marker) |
 | Rework reply to one feedback item (§7.2) | `<!-- factory:reply to=<comment id> -->`: the id of the human comment it answers |
+| Body of a question issue labelled `factory:needs-human` (S1 red baseline) | `<!-- factory:question key=baseline-002-due-dates -->`: `factory.py question ask` finds it by this key, so it never opens a second issue for an open question |
 
 The reconciler finds everything by these markers, not by titles, which a human may edit.
 

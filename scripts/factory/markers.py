@@ -10,6 +10,7 @@ the human's in single-account mode (D5).
     <!-- factory:checkpoint {"station":"S09","next":"S10",...} -->
     <!-- factory:reply -->
     <!-- factory:reply to=IC_kwDOabc -->     (answers one feedback item, T4.2)
+    <!-- factory:question key=baseline-002-due-dates -->   (a question issue, T5.1)
 
 ``build`` is strict and raises ``ValueError`` on bad input (that is a factory bug).
 ``parse_all`` / ``find`` are tolerant of whitespace, line breaks and CRLF, and silently
@@ -29,6 +30,7 @@ _STATION = re.compile(r"^S\d{2}b?$")
 _NEXT = re.compile(r"^(?:S\d{2}b?|GATE_[ABC])$")
 _SHA = re.compile(r"^[0-9a-f]{7,40}$")
 _COMMENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,100}$")  # REST ids are numbers, GraphQL ids not
+_QUESTION_KEY = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 # One marker: "<!--", optional whitespace, "factory:<kind>", a body that never contains
 # another comment opener or closer, then "-->". Excluding "<!--" from the body means an
@@ -129,8 +131,23 @@ class ReplyMarker:
             _check(_COMMENT_ID, self.to, "comment id")
 
 
-Marker = StoryMarker | PlanningMarker | PrMarker | CheckpointMarker | ReplyMarker
-_ATTR_KINDS = {cls.KIND: cls for cls in (StoryMarker, PlanningMarker, PrMarker, ReplyMarker)}
+@dataclass(frozen=True)
+class QuestionMarker:
+    """In the body of an issue that asks the human a question (``factory.py question``)."""
+
+    KIND: ClassVar[str] = "question"
+    key: str
+
+    def __post_init__(self):
+        _check(_QUESTION_KEY, self.key, "question key")
+        if len(self.key) > 80:
+            raise ValueError(f"invalid question key: {self.key!r}")
+
+
+Marker = (StoryMarker | PlanningMarker | PrMarker | CheckpointMarker | ReplyMarker
+          | QuestionMarker)
+_ATTR_KINDS = {cls.KIND: cls for cls in (StoryMarker, PlanningMarker, PrMarker, ReplyMarker,
+                                          QuestionMarker)}
 
 
 def build(marker: Marker) -> str:

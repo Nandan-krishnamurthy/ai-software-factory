@@ -2,7 +2,7 @@
 id: S00
 name: Intake
 allowed_from: [START]
-next: S02
+next: [S01, S02]
 ---
 # S00 Intake
 
@@ -60,9 +60,8 @@ Every factory commit carries the `Factory-Station:` trailer; the state engine us
 - `doctor` reports a `FAIL`, the repo is empty, or `increment next` refuses: report and stop.
 - No requirements file was given, or it contains a secret.
 - `git -C <T> status --porcelain` shows changes that this station did not make.
-- `state --json` reports `next_station` `S01` after this station: the target already has code, and Codebase Discovery (S01) is not available yet. Report this and stop.
 
 ## Done check
 - [ ] `git -C <T> ls-remote --heads origin factory/plan-<INC>` prints the branch.
 - [ ] `python scripts/factory.py doctor` reports `config` as `OK` and no `FAIL`.
-- [ ] `python scripts/factory.py state --json` reports `PLANNING`, increment `<INC>` and `next_station` `S02`.
+- [ ] `python scripts/factory.py state --json` reports `PLANNING`, increment `<INC>` and `next_station` `S01` when `<D>` already has code (an existing project: Codebase Discovery runs next), otherwise `S02`.

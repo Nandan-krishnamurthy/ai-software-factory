@@ -10,12 +10,14 @@ from factory import (
     closeout,
     commands,
     comments,
+    discovery,
     doctor,
     ensure,
     increments,
     issues,
     labels,
     pick,
+    questions,
     signals,
     state,
     target,
@@ -52,6 +54,19 @@ def build_parser() -> argparse.ArgumentParser:
         "doctor", help="check the target is ready for the factory")
     doctor_parser.add_argument("--json", action="store_true", help="machine-readable output")
     doctor_parser.set_defaults(handler=_doctor, needs_target=True)
+
+    discover_parser = subparsers.add_parser(
+        "discover", help="the build/lint/test commands the target declares, with evidence",
+        description="Station S01: lists the stack and the install, build, lint, typecheck and "
+                    "test commands that the repository declares (package.json scripts, "
+                    "Makefile targets, configured Python tools, go.mod, Cargo.toml), each "
+                    "with the file that declares it. An undeclared command is null: nothing "
+                    "is guessed (rule H4). Also lists CI run lines and docs as hints. "
+                    "Read-only; runs nothing.")
+    discover_parser.add_argument("--path", metavar="DIR",
+                                 help="scan this directory instead of the active target")
+    discover_parser.add_argument("--json", action="store_true", help="machine-readable output")
+    discover_parser.set_defaults(handler=_discover)
 
     labels_parser = subparsers.add_parser("labels", help="manage the factory's GitHub labels")
     labels_sub = labels_parser.add_subparsers(dest="labels_command", metavar="<action>")
@@ -205,6 +220,33 @@ def build_parser() -> argparse.ArgumentParser:
                     help="default: carried over from the existing checkpoint, else 0")
     comment_parser.set_defaults(handler=_comment, needs_target=True)
 
+    question_parser = subparsers.add_parser(
+        "question", help="ask the human on a factory:needs-human issue, or read the answer")
+    question_sub = question_parser.add_subparsers(dest="question_command", metavar="<action>")
+    question_sub.required = True
+    qask = question_sub.add_parser(
+        "ask", help="open the question issue, or add to it if it is still open (idempotent)",
+        description="Finds the issue by its <!-- factory:question key=K --> marker. If it is "
+                    "open, posts the text as a marked reply and puts the factory:needs-human "
+                    "label back; otherwise creates one issue with that label. The state "
+                    "engine reports NEEDS_HUMAN while the label is on an open issue.")
+    qask.add_argument("--key", required=True, metavar="K", help="e.g. baseline-002-due-dates")
+    qask.add_argument("--title", required=True, help="the issue title (when one is created)")
+    qask.add_argument("--body-file", required=True, metavar="F",
+                      help="UTF-8 file with the question, or '-' for stdin")
+    qask.add_argument("--json", action="store_true", help="machine-readable output")
+    qask.set_defaults(handler=_question_ask, needs_target=True)
+    qanswer = question_sub.add_parser(
+        "answer", help="whether a reviewer answered /<keyword> since the latest question",
+        description="Reports whether a reviewer (config.reviewers) posted a comment whose "
+                    "first line is /<keyword>, without a factory marker (rule U2), after the "
+                    "factory's latest post on the question issue. Read-only.")
+    qanswer.add_argument("--key", required=True, metavar="K")
+    qanswer.add_argument("--keyword", required=True, metavar="WORD",
+                         help="without the slash (Git Bash rewrites /…), e.g. accept-baseline")
+    qanswer.add_argument("--json", action="store_true", help="machine-readable output")
+    qanswer.set_defaults(handler=_question_answer, needs_target=True)
+
     route_parser = subparsers.add_parser(
         "route", help="which station a /factory-* command runs next, or why it stops",
         description="Used by the command files: reads the state and prints whether the "
@@ -304,6 +346,21 @@ def _doctor(args: argparse.Namespace) -> int:
     checks = doctor.run_doctor(args.target, Gh())
     print(doctor.to_json(checks) if args.json else doctor.render(checks))
     return doctor.exit_code(checks)
+
+
+def _discover(args: argparse.Namespace) -> int:
+    if args.path:
+        root = Path(args.path)
+        if not root.is_dir():
+            print(f"error: --path {args.path} is not a directory", file=sys.stderr)
+            return 1
+    else:  # the active target, with its banner (rule T2), as needs_target would print it
+        active = target.get_target()
+        print(active.banner(), file=sys.stderr if args.json else sys.stdout, flush=True)
+        root = active.path
+    result = discovery.discover(root)
+    print(json.dumps(result.to_dict(), indent=2) if args.json else discovery.render(result))
+    return 0
 
 
 def _labels_ensure(args: argparse.Namespace) -> int:
@@ -474,6 +531,32 @@ def _guard(args: argparse.Namespace) -> int:
     from factory import guard_hook  # imported lazily: only the hook needs it
 
     return guard_hook.main()
+
+
+def _question_ask(args: argparse.Namespace) -> int:
+    asked = questions.ask(Gh(), args.target.repo, args.key, args.title,
+                          _read_body(args.body_file))
+    if args.json:
+        print(json.dumps(asked.to_dict(), indent=2))
+    else:
+        verb = "asked on new" if asked.action == "created" else "added to open"
+        print(f"{verb} issue #{asked.number} ({questions.NEEDS_HUMAN_LABEL}): {asked.url}")
+    return 0
+
+
+def _question_answer(args: argparse.Namespace) -> int:
+    config = load_config(args.target.path)
+    result = questions.answer(Gh(), args.target.repo, args.key, args.keyword, config.reviewers)
+    if args.json:
+        print(json.dumps(result.to_dict(), indent=2))
+    elif result.issue is None:
+        print(f"No question with key {args.key} has been asked.")
+    elif result.accepted:
+        print(f"#{result.issue}: /{args.keyword} from {result.by}: {result.url}")
+    else:
+        print(f"#{result.issue} ({result.state}): no /{args.keyword} from a reviewer since the "
+              "latest question.")
+    return 0
 
 
 def _comment(args: argparse.Namespace) -> int:

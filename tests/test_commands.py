@@ -79,9 +79,10 @@ def after_station(snapshot, station):
         return rework_at(f"S{int(station[1:]) + 1:02d}")  # pushed: the verdict is PENDING
     files = set(snapshot.plan_files.get(INC, frozenset()))
     doc = dict(st.PLAN_DOCS).get(station)
-    if station == "S00":
-        return planning({"00-prd.md"})
-    if station in ("S02", "S03", "S04"):
+    if station == "S00":  # S00 keeps whether <D> already had code (existing project)
+        return dataclasses.replace(planning({"00-prd.md"}),
+                                   existing_project=snapshot.existing_project)
+    if station in ("S01", "S02", "S03", "S04"):
         return dataclasses.replace(snapshot, plan_files={INC: frozenset(files | {doc})})
     if station == "S05":  # opens the Planning PR, or answers /changes: waiting for review
         return GATE_A_WAITING
@@ -257,11 +258,32 @@ class DriveTest(unittest.TestCase):
         self.assertEqual(final.action, "stop")
         self.assertIn("S02 ran but the state engine still names it", final.message)
 
-    def test_existing_project_stops_before_s01_until_it_exists(self):
+    def test_existing_project_runs_codebase_discovery_before_requirements(self):
+        # T5.1: S01 exists, so an existing project goes S00 -> S01 -> S02 ... -> Gate A.
+        ran, final = drive("/factory-start", snap(existing_project=True))
+        self.assertEqual(ran, ["S00", "S01", "S02", "S03", "S04", "S05"])
+        self.assertEqual((final.action, final.state), ("stop", st.GATE_A_WAITING))
         existing = dataclasses.replace(planning({"00-prd.md"}), existing_project=True)
-        ran, final = drive("/factory-resume", existing)
-        self.assertEqual(ran, [])
-        self.assertIn("S01, which is not available yet", final.message)
+        first = route("/factory-resume", result(existing))
+        self.assertEqual((first.action, first.station, first.station_file),
+                         ("run", "S01", "stations/S01-discovery.md"))
+        # A new project never runs S01.
+        ran, _ = drive("/factory-start", snap())
+        self.assertEqual(ran, ["S00", "S02", "S03", "S04", "S05"])
+
+    def test_red_baseline_question_stops_planning_until_the_human_answers(self):
+        # T5.1: S01 on a red baseline commits nothing and opens a factory:needs-human
+        # issue, so the state is NEEDS_HUMAN and every command stops.
+        existing = dataclasses.replace(planning({"00-prd.md"}), existing_project=True)
+        asked = dataclasses.replace(existing, needs_human=("issue #42",))
+        self.assertEqual(result(asked)["state"], st.NEEDS_HUMAN)
+        for command in ("/factory-resume", "/factory-continue", "/factory-start"):
+            with self.subTest(command=command):
+                decision = route(command, result(asked))
+                self.assertEqual(decision.action, "stop")
+                self.assertIn("issue #42", decision.message)
+        # Once the human removes the label, S01 runs again from its first step.
+        self.assertEqual(route("/factory-resume", result(existing)).station, "S01")
 
 
 class RouteTest(unittest.TestCase):
@@ -385,7 +407,8 @@ class RouteTest(unittest.TestCase):
     def test_station_file(self):
         self.assertEqual(commands.station_file("S05b"), "stations/S05b-issues.md")
         self.assertEqual(commands.station_file("S05"), "stations/S05-stories.md")
-        self.assertIsNone(commands.station_file("S01"))
+        self.assertEqual(commands.station_file("S01"), "stations/S01-discovery.md")
+        self.assertIsNone(commands.station_file("S13"))
 
     def test_scopes(self):
         ids = {s.id for s in load_stations()}

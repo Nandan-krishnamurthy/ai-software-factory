@@ -37,7 +37,7 @@ FRONTMATTER_KEYS = ["id", "name", "allowed_from", "next"]
 GATES = {"GATE_A", "GATE_B", "GATE_C"}
 ENTRY_POINTS = {"START"}  # /factory-start
 # Stations that other stations may already name, before they are built.
-PENDING = {"S01": "T5.1 (M5)"}
+PENDING: dict[str, str] = {}
 # The stations built by T2.4. Later tasks add more; these must always exist.
 PLANNING_STATIONS = {"S00-intake.md", "S02-requirements.md", "S03-architecture.md",
                      "S04-plan.md", "S05-stories.md", "S05b-issues.md"}
@@ -92,8 +92,15 @@ class Station:
         return self.frontmatter.get("id", "")
 
     @property
-    def next(self) -> str:
+    def next(self) -> str | list[str]:
         return self.frontmatter.get("next", "")
+
+    @property
+    def nexts(self) -> list[str]:
+        """Where the station leads: one station or gate, or a branch (``next: [S01, S02]``,
+        S00 for an existing or a new project)."""
+        value = self.next
+        return value if isinstance(value, list) else [value]
 
     @property
     def allowed_from(self) -> list[str]:
@@ -275,18 +282,19 @@ def lint_graph(stations: list[Station]) -> list[str]:
     if len(ids) != len(stations):
         problems.append("two stations share an id")
     for s in stations:
-        if s.next not in ids | GATES | set(PENDING):
+        if not s.nexts or any(n not in ids | GATES | set(PENDING) for n in s.nexts):
             problems.append(f"{s.id}: next {s.next!r} is not a station or a gate")
         for source in s.allowed_from:
             if source not in ids | GATES | ENTRY_POINTS | set(PENDING):
                 problems.append(f"{s.id}: allowed_from {source!r} is not a station, gate "
                                 "or entry point")
-            elif source in by_id and by_id[source].next != s.id:
+            elif source in by_id and s.id not in by_id[source].nexts:
                 problems.append(f"{s.id}: allowed_from {source}, but {source}.next is "
                                 f"{by_id[source].next!r}")
-        if s.next in by_id and s.id not in by_id[s.next].allowed_from:
-            problems.append(f"{s.id}: next is {s.next}, but {s.next}.allowed_from does not "
-                            f"list {s.id}")
+        for nxt in s.nexts:
+            if nxt in by_id and s.id not in by_id[nxt].allowed_from:
+                problems.append(f"{s.id}: next is {nxt}, but {nxt}.allowed_from does not "
+                                f"list {s.id}")
     # Everything is reachable from an entry point. Transitions: an entry point or a gate
     # leads to every station that lists it in allowed_from; a station leads to its next.
     reached, frontier = set(), set(ENTRY_POINTS)
@@ -294,7 +302,7 @@ def lint_graph(stations: list[Station]) -> list[str]:
         node = frontier.pop()
         reached.add(node)
         if node in by_id:
-            targets = {by_id[node].next} & (GATES | ids)
+            targets = set(by_id[node].nexts) & (GATES | ids)
         else:
             targets = {s.id for s in stations if node in s.allowed_from}
         frontier |= targets - reached
@@ -332,9 +340,13 @@ class StationFilesTest(unittest.TestCase):
 
     def test_planning_flow(self):
         by_id = {s.id: s for s in self.stations}
-        self.assertEqual([by_id[i].next for i in ("S00", "S02", "S03", "S04", "S05", "S05b")],
+        self.assertEqual([by_id[i].next for i in ("S01", "S02", "S03", "S04", "S05", "S05b")],
                          ["S02", "S03", "S04", "S05", "GATE_A", "GATE_C"])
+        # S00 leads to Codebase Discovery for an existing project, else straight to S02.
+        self.assertEqual(by_id["S00"].next, ["S01", "S02"])
         self.assertEqual(by_id["S00"].allowed_from, ["START"])
+        self.assertEqual(by_id["S01"].allowed_from, ["S00"])
+        self.assertEqual(by_id["S02"].allowed_from, ["S00", "S01"])
         self.assertIn("GATE_A", by_id["S05"].allowed_from)  # revision mode (GATE_A_CHANGES)
         self.assertEqual(by_id["S05b"].allowed_from, ["GATE_A"])
 
@@ -379,7 +391,7 @@ class StationFilesTest(unittest.TestCase):
     def test_planning_commits_carry_the_station_trailer(self):
         # state.py checks invariant 4 with this trailer.
         for station in self.stations:
-            if station.id in ("S00", "S02", "S03", "S04", "S05"):
+            if station.id in ("S00", "S01", "S02", "S03", "S04", "S05"):
                 with self.subTest(station=station.id):
                     self.assertIn(f'-m "{state.FACTORY_COMMIT_TRAILER}: {station.id}"',
                                   station.sections["Checkpoint"])
@@ -397,6 +409,44 @@ class StationFilesTest(unittest.TestCase):
         steps = s05.sections["Steps"]
         self.assertIn("python scripts/factory.py feedback --pr <N>", steps)
         self.assertIn("python scripts/factory.py comment --pr <N> --kind reply", steps)
+
+
+class DiscoveryStationTest(unittest.TestCase):
+    """T5.1: S01 never guesses a command, and stops on a red baseline."""
+
+    def setUp(self):
+        self.s01 = {s.id: s for s in load_stations()}["S01"]
+
+    def section(self, name):
+        return self.s01.sections[name]
+
+    def test_commands_come_from_evidence_and_are_run(self):
+        steps = self.section("Steps")
+        self.assertIn("python scripts/factory.py discover --json", steps)
+        self.assertIn("Never compose a command yourself", steps)
+        self.assertIn("Otherwise `null`", steps)
+        self.assertIn("verbatim", steps)
+        self.assertIn("**Run the baseline**", steps)
+        # Rule H4 is named where the station states its purpose.
+        self.assertIn("rule H4", self.section("Purpose"))
+
+    def test_red_baseline_asks_the_human_and_commits_nothing(self):
+        steps = self.section("Steps")
+        self.assertIn("python scripts/factory.py question answer --key baseline-<INC> "
+                      "--keyword accept-baseline --json", steps)
+        self.assertIn("python scripts/factory.py question ask --key baseline-<INC>", steps)
+        self.assertIn("**without** writing anything into `<T>`", steps)
+        self.assertIn("nothing is committed", self.section("Checkpoint"))
+        self.assertIn("**Red baseline**", self.section("Stop conditions"))
+        self.assertIn("`NEEDS_HUMAN`", self.section("Done check"))
+        # The analysis reaches <T> only after the gate (step 7 follows step 6).
+        self.assertLess(steps.index("**Gate on the baseline.**"),
+                        steps.index("Copy the analysis to `<T>/docs/factory/increments/"))
+
+    def test_it_writes_only_the_commands_of_the_config(self):
+        self.assertIn("set each of the five `commands`", self.section("Steps"))
+        self.assertIn("change nothing else", self.section("Steps"))
+        self.assertIn(".factory/config.json` (its `commands` only)", self.section("Outputs"))
 
 
 class StoryStationsTest(unittest.TestCase):
