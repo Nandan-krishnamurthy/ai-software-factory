@@ -283,3 +283,124 @@ Merging, pushing to `main` and the merge of #9 were all done by the human. The f
 - **Task Tracker** is at **`IDLE_AT_GATE_C`**: `main` at 00fdcfd, clean, 10 of 12 stories done, #12 (STORY-011) and #13 (STORY-012) ready. Run `/factory-target C:\Projects\task-tracker-factory-test` before the next factory command.
 - **Sandbox** is left at **`NEEDS_HUMAN`**: PR #12 closed unmerged, #10 `status:in-review`, #11 ready and blocked by #10, and the local clone on `story/10-celsius-to-fahrenheit`. Reopening PR #12 would return it to `GATE_B_WAITING_REVIEW`. The six integration-test issues #3–#8 are closed, without the `factory:story` label or marker.
 - The factory never merged anything or pushed to `main` in any repo.
+
+---
+
+## M5: Existing-project increment and hardening
+
+| | |
+|---|---|
+| **Demo run** | 2026-10-07 (09:00 to 11:05 UTC) |
+| **Target** | `Nandan-krishnamurthy/task-tracker-factory-test`, cloned at `C:\Projects\task-tracker-factory-test`. Increment `001-initial` was complete (12/12 stories, REQ-001..REQ-021 Done), so the repo was an existing project. |
+| **Input** | The change request "Add due dates to tasks" (one line) |
+| **Factory code** | `main` at 551eb96 (T5.1–T5.4 merged). The run used the `task/T5.4-runbook-readme-reusability` checkout at 4808e88, which has the same tree. |
+| **Result** | ✅ **Increment 002 ran end to end on an existing project.** `/factory-target` → `/factory-start` → S00 → **S01 (green baseline)** → S02–S05 → **Planning PR [#26](https://github.com/Nandan-krishnamurthy/task-tracker-factory-test/pull/26)** → merge → S05b (issues #27, #28) → two stories delivered through Gate B, merged by the human and closed out (**PRs [#29](https://github.com/Nandan-krishnamurthy/task-tracker-factory-test/pull/29) and [#30](https://github.com/Nandan-krishnamurthy/task-tracker-factory-test/pull/30)**) → **`INCREMENT_COMPLETE`, 26/26 requirements Done**. Success criterion 2 is demonstrated. The success criterion 6 traceability walk-through was **not run** (below). Three follow-ups are open. |
+
+### Tasks
+| Task | PR | Status |
+|---|---|---|
+| T5.1 Station S01 Codebase Discovery | #31 | merged |
+| T5.2 `/factory-start` for existing projects and new increments | #32 | merged |
+| T5.3 `/factory-status` report polish | #33 | merged |
+| T5.4 Runbook, README and reusability check | #34 | merged. **M5 is complete.** |
+
+### Demo steps and results (plan §M5)
+
+**1. `/factory-target C:\Projects\task-tracker-factory-test`**
+
+| Step | Result |
+|---|---|
+| `target set` | ✅ `Target: C:\Projects\task-tracker-factory-test (Nandan-krishnamurthy/task-tracker-factory-test)` |
+| `doctor` | ✅ `Doctor PASSED: 0 failed, 1 warning(s)`. The warning is `branch protection`: `main` is not protected (*follow-up 3*). |
+| `state` / `/factory-status` | ✅ `INCREMENT_COMPLETE` (increment `001-initial`), allowed `/factory-start, /factory-status`; `Next:` line at the top; `Requirements: 21 of 21 Done` |
+
+**2. `/factory-start "Add due dates to tasks"`: S00 Intake**
+
+| Step | Result |
+|---|---|
+| `route --command factory-start` | ✅ `run S00` from `INCREMENT_COMPLETE` |
+| Increment | ✅ `increment next --slug add-due-dates` gave **`002-add-due-dates`**, `REQ-022`, `STORY-013`: the numbering continues from increment 001 (T5.2 acceptance criterion) |
+| Config | ✅ `.factory/config.json` existed and was kept unchanged |
+| Checkpoint | ✅ `S00: intake for 002-add-due-dates` on `factory/plan-002-add-due-dates`; `state` → `PLANNING`, `next_station: S01` (existing code detected) |
+
+**3. S01 Codebase Discovery**
+
+| Step | Result |
+|---|---|
+| `discover --json` | ✅ Node.js (`package.json`); install `npm ci` (lockfile), build, typecheck and test from `package.json` scripts; lint `null` (missing) |
+| Commands | ✅ The config values were kept. Install stays `npm ci && npx playwright install chromium` (the e2e tests need Chromium), and `discover`'s `npm ci` is recorded as the alternative. Lint stays `null` and is reported, not guessed. |
+| **Baseline** on `main` @ e691d55 | ✅ **Green.** Install exit 0; `npm run build` exit 0; `npm run typecheck` exit 0; `npm test` exit 0, with **unit 107 passed (7 files)** and **e2e 65 passed** |
+| Hotspots | ✅ The analysis found that **due dates already exist** (REQ-003, REQ-009, REQ-012, REQ-014, all Done), so the change request as written was already met. |
+| Done check | ✅ `01-codebase-analysis.md` committed with `Factory-Station: S01`; `doctor` `config` OK; `state` → S02 |
+
+**4. S02–S05 and the Planning PR**
+
+| Station | Output | Done check |
+|---|---|---|
+| S02 Requirements | The change request had no new meaning, so the factory asked the human in session (rule H6); the human chose **overdue highlighting**. Delta `02-requirements.md` (from `requirements-delta.md`): **REQ-022..REQ-026**. They cover the Overdue label on active tasks due before today's local date (022); no label for due today, later or undated (023); none on completed tasks, and back on reopen (024); updating on due-date edits (025); text not colour, and axe-clean (026). Nothing changed or retired; only 001's assumption "overdue tasks get no special treatment" is superseded. | ✅ consecutive from REQ-022; one coverage row (the change request has no headings); `state` → S03 |
+| S03 Architecture | Delta `03-architecture.md`: overdue is derived at render time and never stored (no migration, no new dependency); `localDate`/`isOverdue` in `domain/task`; `AppState.today` from the injected clock; the label in `ui/render`; one CSS rule in `index.html` | ✅ 5/5 REQs mapped; `state` → S04 |
+| S04 Plan | M1 Overdue label (REQ-022..025), M2 Overdue styling and accessibility (REQ-026); e2e tests fix the clock with `page.clock` | ✅ 5/5 REQs covered; `state` → S05 |
+| S05 Stories + PR | **STORY-013** (M1, 5 ACs, REQ-022..025) and **STORY-014** (M2, 4 ACs, REQ-026, blocked by STORY-013); 5 new traceability rows; **Planning PR #26** labelled `factory:planning` | ✅ `issues sync --dry-run` exit 0 (`2 to create, 0 already exist`), embedded unedited; `state` → **`GATE_A_WAITING`**; `route` → `stop` |
+
+Before S05, `increment show` reported `next_story: STORY-014`. *Follow-up 1* explains why; the docs were reworded, and the stories were numbered from STORY-013.
+
+**5. Gate A: the human merged Planning PR #26** (09:19 UTC; `main` → 99caa27). No `/changes` round was held.
+
+| Step | Result |
+|---|---|
+| `/factory-resume` | ✅ `ISSUES_PENDING` → S05b: `Done: 2 created`. **#27** (STORY-013, ready) and **#28** (STORY-014, blocked by #27); a summary reply was posted on #26, and the local planning branch was deleted. |
+| Done check | ✅ dry run `0 to create, 2 already exist`; `state` → **`IDLE_AT_GATE_C`**, 1 story ready; `route` → `stop`. No story was started. |
+
+**6. `/factory-continue`: STORY-013 (#27) → PR #29**
+
+| Station | Result |
+|---|---|
+| S06 / S07 | ✅ `pick` chose #27; branch `story/27-overdue-label` |
+| S08 | ✅ `localDate`, `isOverdue`, `AppState.today` and the label. Source diff +27/−5. Build and typecheck exit 0; lint skipped (`null`). |
+| S09 | ⚠️→✅ **1 fix attempt.** The first version added `today` only to the rendered copy of the state, which broke 6 existing `render` assertions. Keeping `today` in the controller state (as the architecture says) fixed it. Two existing exact-state assertions gained the `today` field, recorded as `Changed test:` lines; nothing was weakened. 15 new tests (10 unit, 5 e2e with the clock fixed to 2026-10-07). `npm test` exit 0: **unit 117 passed, e2e 70 passed**. |
+| S10 | ✅ `ac-verifier`: **5/5 pass**, `Suite: pass`; `verdict check` OK |
+| S11 | ✅ **PR #29**, with the verdict copied unchanged; traceability REQ-022..025 → `Implemented`, `#29`; `GATE_B_WAITING_REVIEW` |
+
+The human merged #29 (10:39 UTC, merge commit 86916d4). `/factory-resume` ran S12: #27 closed `status:done`, the local branch deleted (it matched the PR head 8b095c2), #28 reported as unblocked, and a stop at Gate C.
+
+**7. `/factory-continue`: STORY-014 (#28) → PR #30**
+
+| Station | Result |
+|---|---|
+| S06 / S07 | ✅ `pick` chose #28; branch `story/28-overdue-label-style` |
+| S08 | ✅ One CSS rule: `.task-overdue { color: #a40000; font-weight: bold; }`, about 8:1 contrast on white. Build and typecheck exit 0. |
+| S09 | ✅ 4 new e2e tests in `accessibility.spec.ts` (computed contrast ≥ 4.5; axe in both views; `ariaSnapshot` reads the title and "Overdue"); no existing test changed; 0 fix attempts. `npm test` exit 0: **unit 117 passed, e2e 74 passed**. |
+| S10 | ✅ `ac-verifier`: **4/4 pass**, `Suite: pass` |
+| S11 | ✅ **PR #30**; traceability REQ-026 → `Implemented`, `#30`; `GATE_B_WAITING_REVIEW` |
+
+The human merged #30 (11:03 UTC, merge commit 1661f63). `/factory-resume` ran S12: #28 closed `status:done`, the local branch deleted (it matched 4b17f14), and no stories unblocked.
+
+**8. Final state**
+
+| Check | Result |
+|---|---|
+| `state` | ✅ **`INCREMENT_COMPLETE`**: "Increment 002-add-due-dates is complete: all 2 stories are done." `route` → `stop` |
+| `/factory-status` | ✅ **26 of 26 requirements Done**: REQ-001..REQ-021 from increment 001, REQ-022..REQ-025 through #29 and REQ-026 through #30, each `Implemented` with every listed PR merged |
+
+Every factory commit carries its `Factory-Station:` trailer. The guard blocked one shell command that used `$(...)` in a path, so it was re-run with literal paths, as designed. The factory never merged anything or pushed to `main`: PRs #26, #29 and #30 were all merged by the human.
+
+### Not demonstrated in this run
+- **Success criterion 6 (traceability walk-through, timed):** following a merged line of code through PR → issue → REQ → PRD section was not run. The links exist for every line changed in increment 002: each PR body has `Closes #<issue>` and `Requirements:`, the issues have `Traces to`, and `traceability.md` maps REQ → story → PR → tests. But the plan asks for the walk to be timed, and it still needs to be done.
+- **Rework at Gate A or Gate B:** no `/changes` was posted in this increment. The Gate A revision round (S05 revision mode) is still unproven from M2.
+
+### Follow-ups (open)
+1. **The ID scanner counts documentation references.** `S01`'s analysis said "Next free IDs: REQ-022, STORY-013". The increment scanner (`scan_layout` in `increments.py`) counted that mention as a used ID, so after S04 `increment show` reported `next_story: STORY-014`. Rewording the note brought back STORY-013. This is the same class of bug as M2 Problem 4: any `STORY-###` or `REQ-###` that appears in prose under `docs/factory/` uses up an ID. *Fix:* count only story headings, requirement bullets, issue markers and PR bodies, not free text.
+2. **The close-out wording on an increment's last story.** S12's summary always ends with "Say continue (`/factory-continue`) to start the next story", even when no stories are left and the next step is `/factory-start`. *Fix:* when `unblocked` is empty and no open story remains, S12 should say that the increment is complete.
+3. **`main` has no branch protection.** `doctor` warns about it on every run. The factory never changes repo settings (rule S5), so the human should require a pull request on `main` for Task Tracker (no required approvals, include administrators). A factory-side fix could be an S00/runbook prompt to do so.
+
+### Observations
+- The change request duplicated finished work. S02's stop-and-ask path (rule H6) handled it, and the human's answer is recorded under "Current system" in `02-requirements.md`, while `00-prd.md` keeps the request unchanged. A one-line change request gives a single PRD coverage row.
+- Existing e2e tests use fixed 2026 dates, so some of their rows now show `Overdue` on the real date. Their assertions target `.task-due`, `.task-title` and `time`, so they keep passing. The new tests fix the clock.
+- `npm audit` reports 1 high-severity vulnerability in the target's dev dependencies. It was not investigated and is outside the factory's scope.
+- `factory.py target` has no command to clear the target. It was deactivated by deleting `.factory-local/target.json`.
+- The remote story branches `story/27-overdue-label` and `story/28-overdue-label-style` are still on GitHub, like the earlier ones (M4 observation).
+
+### Cleanup and hand-off
+- The target was deactivated to write this record (rule S3): `.factory-local/target.json` was removed, and `factory.py target show` reports "no active target". The `permissions.additionalDirectories` entry for the target in the gitignored `.claude/settings.local.json` was left in place.
+- **Task Tracker** is at **`INCREMENT_COMPLETE`** (`002-add-due-dates`): `main` at 1661f63, clean, 14/14 stories done across both increments, and 26/26 requirements Done. Run `/factory-target C:\Projects\task-tracker-factory-test` before the next factory command.
+- The factory never merged anything or pushed to `main` in any repo.
