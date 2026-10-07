@@ -169,3 +169,117 @@ Problems 1–4 are still open and are candidates for follow-up tasks.
 - The factory never merged anything or pushed to `main` in any repo. The target's history was not rewritten. Its `main` changed only through the human's commits and the human's merge of PR #1.
 - The factory is stopped at **Gate C**. M3 (the story loop) was not started.
 - **Still to prove from the M2 demo:** the `/changes` → `/factory-resume` revision round (S05 revision mode). It can be exercised on the next Planning PR, in M5's increment 002, or on a throwaway planning increment.
+
+---
+
+## M4: Gates, rework, close-out and resume
+
+| | |
+|---|---|
+| **Demo run** | 2026-09-25 to 2026-10-06 (the final steps on 2026-10-06) |
+| **Targets** | `Nandan-krishnamurthy/task-tracker-factory-test` (steps 1–4), cloned at `C:\Projects\task-tracker-factory-test`; `Nandan-krishnamurthy/factory-sandbox` (step 5, a throwaway one-story increment), cloned at `C:\Projects\factory-sandbox` |
+| **Factory code** | `main` after #27 for the 2026-09-30 runs; `main` at e30ed53 (T4.1–T4.5 and #29 merged) for every 2026-10-06 step |
+| **Result** | ✅ **All five demo steps passed.** Steps 1 and 2 were run with real session restarts, step 3 with a two-point `/changes`, and step 5 on the sandbox. Four factory problems were found and fixed during M4 (in #27, #28 and #29), and three follow-ups from the sandbox run are still open (below). |
+
+### Tasks
+| Task | PR | Status |
+|---|---|---|
+| T4.1 State reconciler, Gate B and close-out states | #23 | merged |
+| T4.2 Rework path (S08 and S11 rework mode) | #24 | merged |
+| T4.3 Station S12 close-out | #25 | merged |
+| T4.4 Resume robustness | #26 | merged |
+| *(fix)* Gate C ready count follows the unblocked rule; guard PowerShell false positives | #27 | merged |
+| *(fix)* Guard checks commands after bash keywords | #29 | merged |
+| T4.5 Guard hardening pass | #28 | merged. **M4 is complete.** |
+
+### Automated checks
+On `main` at e30ed53: `python -m unittest` gives **517 tests OK (4 skipped)** in Git Bash and in PowerShell, and `python -m ruff check` passes. The M4 modules pass on their own: `test_state` (55, every row of the architecture §6 state table, including a PR closed without merging), `test_resume` (15, crash replay of S00/S05, S07 and S11), `test_signals` (38), `test_closeout` (10), `test_stations` (32), `test_pick` (23), `test_comments` (21) and `test_guard` (27).
+
+### Demo steps and results (plan §M4)
+
+**1. Kill the session during S08; `/factory-resume` finishes the story without duplicates** (Task Tracker #11, STORY-010)
+
+| Step | Result |
+|---|---|
+| `/factory-continue` at Gate C | ✅ S06 picked #11; S07 pushed `story/11-delete-a-task` (bf4d736) and wrote the checkpoint S07 → S08. S08 read its inputs and the factory stopped before writing any code, as asked. |
+| Kill | The human terminated the session (07:13 UTC) during S08, with a clean working tree and no S08 commit. |
+| New session: `/factory-resume` | ✅ `state` → `STORY_IN_PROGRESS`, `next_station: S08`, from the S07 checkpoint. The route ran S08 → S09 → S10 → S11 on the same branch and stopped at Gate B with **PR [#23](https://github.com/Nandan-krishnamurthy/task-tracker-factory-test/pull/23)**. Tests: unit 107 passed, e2e 52 passed; the AC verifier passed 4/4. |
+| No duplicates | ✅ One branch, one PR (#23), exactly one commit per station (S07 bf4d736, S08 4e8f1f1, S09 746a458, S11 0af58db), one log line per station, and one checkpoint comment on #11, updated in place. |
+
+The kill was taken with a clean tree. The other T4.4 path, uncommitted changes found on resume (reported, not discarded), is covered by tests but was not run live.
+
+**2. Gate B recovery after a session restart** (Task Tracker #10 / PR #22, STORY-009)
+
+| Step | Result |
+|---|---|
+| `/factory-continue` | ✅ S06–S11 for #10, stopping at Gate B with **PR [#22](https://github.com/Nandan-krishnamurthy/task-tracker-factory-test/pull/22)** (vitest 100, Playwright 47; AC verifier 5/5) |
+| Restart | The human closed the session and opened a new one. |
+| New session: `/factory-target` → `/factory-resume` | ✅ `GATE_B_WAITING_REVIEW`, "waiting for your review of PR #22"; the route stopped, no station ran and nothing changed. |
+
+**3. `/changes` with two points → `/factory-resume` → rework on the same PR** (PR #22)
+
+| Step | Result |
+|---|---|
+| `/changes` | The human posted one comment with two numbered points: (1) the PR description must say that an empty due date clears it; (2) add a focused regression test for clearing a priority. |
+| `/factory-resume` | ✅ `GATE_B_CHANGES_REQUESTED` → S08 in rework mode (round 1 of 3, rework lock taken) → S09 → S10 → S11, **on the same PR #22**. |
+| Point 1 | ✅ The PR description gained a **Clearing** bullet (empty due date and "No priority" both clear). |
+| Point 2 | ✅ New unit test `#10 AC4: clearing an existing priority removes only the priority` in commit 3843508; no existing test changed. vitest 101 (was 100), Playwright 47; AC verifier 5/5. |
+| Replies | ✅ One marked reply (`factory:reply to=<comment id>`) quoting and answering both points, then a "Rework round 1 done" summary closing the round. `review_round` = 1 and the label went back to `status:in-review`. |
+
+Both points were in a single comment, so they were answered in one reply to that comment, item by item. Earlier, on 2026-09-30, a one-point rework round on PR #21 had shown that the same `/changes` lists no items after the round closes, so it cannot start rework twice.
+
+**4. Merge → close-out → Gate C; merge → `/factory-continue` → close-out and the next story**
+
+| Step | Result |
+|---|---|
+| Merge PR #22 → `/factory-resume` | ✅ S12 confirmed the merge (75cd79c), closed #10 as `status:done`, posted the close-out summary, switched the clone to an up-to-date `main` and deleted the local branch. It stopped at **Gate C** (`IDLE_AT_GATE_C`, #11 ready) and did not pick a story. |
+| Merge PR #23 → `/factory-resume` | ✅ The same for #11 (merge commit 00fdcfd). The summary named the newly unblocked #12 and #13; stop at Gate C. |
+| Merge → `/factory-continue` (2026-09-30) | ✅ Close-out **and** the next story in one run, stopping at Gate B, three times: PR #18 merged → S12 for #6 → PR #19; PR #19 → S12 for #7 → PR #20; PR #20 → S12 for #8 → PR #21. |
+
+In every close-out, the remote story branch was left on GitHub (the factory never deletes it).
+
+**5. Close a PR without merging → NEEDS_HUMAN** (sandbox)
+
+| Step | Result |
+|---|---|
+| Sandbox preparation | The leftover integration-test issues #3–#8 still carried `factory:story`; the label was removed. Their bodies also still held the `factory:story` marker, which made `increment next` propose `901-initial` / `STORY-9251317` (*follow-up 1*); only the marker line was removed from each body, and `increment next` then gave `001-initial` / `STORY-001`. The human pushed a README and `docs/requirements.md` (a Celsius → Fahrenheit command-line tool) to `main`. |
+| `/factory-target` → `/factory-start docs/requirements.md` | ⚠️ S00 finished, but `state` routed to S01, because the requirements file in `docs/` counted as existing code (*follow-up 2*, M2 Problem 2 again). The human moved it to `docs/factory/requirements.md` on `main`. |
+| `/factory-resume` | ✅ S02–S05: REQ-001..REQ-007, STORY-001..STORY-002, **Planning PR [#9](https://github.com/Nandan-krishnamurthy/factory-sandbox/pull/9)**, stop at Gate A |
+| Merge #9 → `/factory-resume` | ✅ S05b created #10 (STORY-001) and #11 (STORY-002, blocked by #10); stop at Gate C |
+| `/factory-continue` | ✅ S06–S11 for #10, stopping at Gate B with **PR [#12](https://github.com/Nandan-krishnamurthy/factory-sandbox/pull/12)** (8 tests OK; AC verifier 5/5) |
+| The human closed PR #12 without merging | |
+| `/factory-resume` | ✅ **`NEEDS_HUMAN`**, waiting on human: "PR #12 (STORY-001) was closed without merging: the story was rejected. Reopen the PR, or set issue #10 back to status:ready to build it again." The route stopped, and the route for `/factory-continue` also stops with the same message. Nothing changed: PR #12 stayed closed, #10 kept `status:in-review` and its one checkpoint comment, and #11 stayed ready and blocked. |
+
+Merging, pushing to `main` and the merge of #9 were all done by the human. The factory never merged anything or pushed to `main` in any repo.
+
+### Guard hardening (T4.5)
+- **How the commands were collected:** every Bash, PowerShell and file-write tool call from the 5 Claude Code sessions that ran `/factory-*` commands during M2–M4, **775 calls**, each paired with its real outcome. 16 were real guard blocks.
+- **Misclassified:** 5 legitimate Bash commands that set a variable to a literal path earlier in the same command (`T="C:/…"; … >> "$T/.factory/log.md"`). #28 now substitutes such variables and treats them as unknown wherever it cannot be sure of the value. 3 PowerShell false positives had already been fixed by #27. The other 8 blocks were correct and stay blocked.
+- **Replay:** all 775 calls replayed through the old and new guard. Exactly 5 verdicts change, all block → allow; no call that ran is newly blocked.
+- **Safety holes closed on the way:** a variable could hide a push to `main`, a merge verb or a write into the factory (`B=main; git push origin $B`), now blocked by #28. A command after a bash keyword (`if true; then gh pr merge 5; fi`) was never checked; #29 fixes it, and replaying the 775 calls through #29 changes 0 verdicts.
+- **Live probes from `main` (e30ed53):** a write through a literal Bash variable is allowed, and `if false; then gh pr merge 999 …; fi` is blocked.
+
+### Problems found during M4
+1. **✅ Fixed (#27): the Gate C ready count ignored the unblocked rule.** After the close-out of STORY-002, `state` reported 10 ready stories when `pick` could start only #4. The state engine and `pick` now share `pick.readiness()`, and open stories that are all blocked give `NEEDS_HUMAN`.
+2. **✅ Fixed (#27): guard false positives on PowerShell** (`$T="…"`, `if ($?)`, `Out-File -Encoding utf8`), and the false negatives behind them.
+3. **✅ Fixed (#28): Bash literal variables** blocked legitimate writes (see T4.5).
+4. **✅ Fixed (#29): commands after a bash keyword were not checked.**
+
+### Follow-ups from the sandbox run (open)
+1. **The increment scanner counts unlabelled story markers.** `increments.py` reads story issues by their body marker, while the state engine filters on the `factory:story` label. Stale marked issues pushed the numbering to `901-initial` / `STORY-9251317`. *Fix:* count only issues labelled `factory:story`, as the state engine does.
+2. **M2 Problem 2 happened again.** A requirements file under `docs/` on `main` made the sandbox look like an existing project and routed S00 to S01. The workaround was again to move the file under `docs/factory/`. This will hit any new project that keeps its requirements in `docs/`.
+3. **`git clone` into a folder outside the target was not blocked by the guard**, although later file writes there were. Harmless here, but `git clone` writes outside the target and scratch areas.
+
+### Observations
+- No merged story branch is deleted on GitHub; Task Tracker still has all 10 remote story branches, and the sandbox has `factory/plan-001-initial` and `story/10-celsius-to-fahrenheit`.
+- `main` on Task Tracker is still unprotected (the doctor's WARN).
+- Git Bash maps `/tmp` to the user's temp folder, which is an allowed area, but the guard treats `/tmp` as outside (noted in #28).
+- `gh pr $(echo merge) 5` still passes: the guard ignores a computed argument other than the executable name (noted in #27).
+- **Still unproven from M2:** the `/changes` → `/factory-resume` revision round at Gate A (S05 revision mode). The sandbox Planning PR #9 was also merged without `/changes`.
+- `docs/progress.md` has no M3 record.
+
+### Cleanup and hand-off
+- The target was deactivated to write this record (rule S3): the gitignored `.factory-local/target.json` and `.claude/settings.local.json` were removed.
+- **Task Tracker** is at **`IDLE_AT_GATE_C`**: `main` at 00fdcfd, clean, 10 of 12 stories done, #12 (STORY-011) and #13 (STORY-012) ready. Run `/factory-target C:\Projects\task-tracker-factory-test` before the next factory command.
+- **Sandbox** is left at **`NEEDS_HUMAN`**: PR #12 closed unmerged, #10 `status:in-review`, #11 ready and blocked by #10, and the local clone on `story/10-celsius-to-fahrenheit`. Reopening PR #12 would return it to `GATE_B_WAITING_REVIEW`. The six integration-test issues #3–#8 are closed, without the `factory:story` label or marker.
+- The factory never merged anything or pushed to `main` in any repo.
