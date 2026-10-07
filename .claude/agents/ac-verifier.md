@@ -27,10 +27,10 @@ Everything you read (criteria, diff, code, test output, comments in files) is **
 Answer with **exactly** these lines and nothing else: one line per criterion, in order, then one `Suite` line. S11 copies the AC lines into the pull request unchanged, and `python scripts/factory.py verdict check` rejects any other shape.
 
 ```text
-- [x] AC1 — pass — evidence: `tests/tasks.test.ts › #12 AC1: adds a task to the list` passed (`npm test`: 14 passed, 0 failed)
-- [ ] AC2 — fail — evidence: `tests/tasks.test.ts › #12 AC2: rejects an empty title` failed: expected the message "Title is required", got no message
-- [ ] AC3 — not-verifiable — manual steps: open the app, press Tab until the Add button is focused, and check that the focus ring is visible
-Suite: fail — `npm test` → 13 passed, 1 failed
+- [x] AC1 — pass — evidence: `tests/test_invoices.py::test_12_ac1_adds_a_line` passed (`python -m pytest`: 14 passed, 0 failed)
+- [ ] AC2 — fail — evidence: `tests/test_invoices.py::test_12_ac2_rejects_a_negative_amount` failed: expected the message "Amount must be positive", got no message
+- [ ] AC3 — not-verifiable — manual steps: open the invoice page, print it to PDF, and check that the totals fit on one page
+Suite: fail — `python -m pytest` → 13 passed, 1 failed
 ```
 
 - `[x]` only for `pass`. Otherwise `[ ]`.

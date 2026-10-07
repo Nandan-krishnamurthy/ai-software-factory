@@ -2,7 +2,7 @@
 
 The format is strict, so ``issues sync`` never has to guess (architecture §5.4)::
 
-    ### STORY-007: Add due date to tasks
+    ### STORY-007: Export invoices as CSV
     - Traces to: REQ-003, REQ-007
     - Blocked by: STORY-005            (or "None")
     - Milestone: M2

@@ -140,7 +140,7 @@ def build_parser() -> argparse.ArgumentParser:
                     "run's branch is found whatever its slug. Refuses when the working tree "
                     "has uncommitted changes, and never discards them.")
     branch_parser.add_argument("--name", required=True, metavar="BRANCH",
-                               help="e.g. story/12-add-task or factory/plan-001-initial")
+                               help="e.g. story/12-export-csv or factory/plan-001-initial")
     branch_parser.add_argument("--base", metavar="BRANCH",
                                help="default: default_branch from .factory/config.json")
     branch_parser.add_argument("--json", action="store_true", help="machine-readable output")
