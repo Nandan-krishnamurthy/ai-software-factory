@@ -271,6 +271,26 @@ class DriveTest(unittest.TestCase):
         ran, _ = drive("/factory-start", snap())
         self.assertEqual(ran, ["S00", "S02", "S03", "S04", "S05"])
 
+    def test_start_after_a_complete_increment_plans_the_next_one(self):
+        """T5.2: once every story is done, /factory-start begins the next increment with
+        S00, and an existing project goes through Codebase Discovery to Gate A."""
+        done = labelled("done")
+        complete = snap(**MERGED, existing_project=True, issues=(
+            issue(10, 1, labels=done, state="CLOSED"), issue(11, 2, labels=done, state="CLOSED")))
+        self.assertEqual(result(complete)["state"], st.INCREMENT_COMPLETE)
+        first = route("/factory-start", result(complete))
+        self.assertEqual((first.action, first.station, first.station_file),
+                         ("run", "S00", "stations/S00-intake.md"))
+        ran, final = drive("/factory-start", complete)
+        self.assertEqual(ran, ["S00", "S01", "S02", "S03", "S04", "S05"])
+        self.assertEqual((final.action, final.state), ("stop", st.GATE_A_WAITING))
+        # Only /factory-start starts an increment; the entry station applies only at entry.
+        for command in ("/factory-resume", "/factory-continue"):
+            with self.subTest(command=command):
+                self.assertEqual(route(command, result(complete)).action, "stop")
+        self.assertEqual(route("/factory-start", result(complete), continuing=True,
+                               after="S12").action, "stop")
+
     def test_red_baseline_question_stops_planning_until_the_human_answers(self):
         # T5.1: S01 on a red baseline commits nothing and opens a factory:needs-human
         # issue, so the state is NEEDS_HUMAN and every command stops.

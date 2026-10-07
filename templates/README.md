@@ -9,6 +9,10 @@ Skeletons for everything the factory writes into a target repo or onto GitHub. S
 | [pr.md](pr.md) | Body of each story PR | S11 (refreshed during rework) | Requirements §6, §10; architecture §5.5, §7.2 |
 | [planning-pr.md](planning-pr.md) | Body of the Planning PR | S05 | Requirements §2.1, §7 (Gate A), §11; architecture §5.5 |
 | [traceability.md](traceability.md) | `<target>/docs/factory/traceability.md` | S05 (created once, then updated by S05 of later increments and by each story PR at S11) | Requirements §11 |
+| [requirements-delta.md](requirements-delta.md) | `<target>/docs/factory/increments/<INC>/02-requirements.md` of an **existing project** | S02, when the increment has a `01-codebase-analysis.md` | Requirements §2.2, §3 (S2); architecture §5.2 |
+| [architecture-delta.md](architecture-delta.md) | `<target>/docs/factory/increments/<INC>/03-architecture.md` of an **existing project** | S03, when the increment has a `01-codebase-analysis.md` | Requirements §2.2, §3 (S3) |
+
+A new project's `02-requirements.md` and `03-architecture.md` follow the section lists in S02 and S03. An existing project's follow these two **delta** templates, which describe the change against what already exists (T5.2).
 
 `tests/test_templates.py` checks every template against these contracts: its sections, their order, its markers and its placeholders. Changing a template's structure means changing that test and the contract it cites.
 
@@ -85,3 +89,32 @@ The PR **title** is `[Planning] {{increment}}: <one-line description>`.
 | `{{rows}}` | One row per requirement: `\| REQ-### \| stories \| PRs \| tests \| status \|`. Stories are written as `STORY-###` until their issue exists, then as `STORY-### (#N)`. Unknown cells are `—`. |
 
 Later increments add rows to the existing file rather than creating it again.
+
+### `requirements-delta.md`
+Every requirement bullet keeps the form S02 checks: `- **REQ-###** (PRD §<section>): <one testable statement>`, numbered consecutively from `increment show`'s `next_req`. Earlier requirements are referred to by plain ID (`REQ-005`, not bold), so they never count as new ones.
+
+| Placeholder | Value |
+|---|---|
+| `{{increment}}` | Increment folder name, e.g. `002-due-dates` |
+| `{{current_system}}` | What exists today that this change touches, from `01-codebase-analysis.md` and the earlier increments' requirements, citing their `REQ-###` IDs |
+| `{{functional}}` | New functional requirements, one bullet each |
+| `{{non_functional}}` | New non-functional requirements, one bullet each, or `None` |
+| `{{changed_requirements}}` | Earlier requirements this increment changes or retires: `- REQ-005: changed by REQ-022 (<how>)` or `- REQ-009: retired (<why>)`, or `None` |
+| `{{unchanged_behaviour}}` | Existing behaviour that must keep working, citing earlier `REQ-###` IDs and the tests that cover it today. The stories keep these tests passing. |
+| `{{assumptions}}` | What was assumed where the change request is silent, or `None` |
+| `{{out_of_scope}}` | Change-request statements deliberately left out, each with its section and the reason, or `None` |
+| `{{open_questions}}` | Questions for the reviewer at Gate A, or `None` |
+| `{{prd_coverage}}` | One row per heading of `00-prd.md`: `\| <heading> \| REQ-###, … \|` or `\| <heading> \| Out of scope \|` |
+
+### `architecture-delta.md`
+| Placeholder | Value |
+|---|---|
+| `{{increment}}` | Increment folder name, e.g. `002-due-dates` |
+| `{{overview}}` | What changes and why, in a few sentences, plus a diagram if it helps |
+| `{{current_architecture}}` | The existing components the change touches, as they are today, with their files (from `01-codebase-analysis.md` and the earlier `03-architecture.md`) |
+| `{{changes}}` | One row per component: `\| <component> \| New, Changed or Removed \| <responsibility and interfaces after the change> \|` |
+| `{{data_model}}` | Changes to entities, fields or stored data, or `None` |
+| `{{key_decisions}}` | One entry per decision, with the options considered and the reason. Following the existing conventions is the default; a departure from them is a decision. |
+| `{{technology_choices}}` | The existing stack is kept. Each new third-party dependency with its reason (rule S9), or `None` |
+| `{{compatibility}}` | How existing data, users and behaviour are kept working: data migration, defaults for existing records, anything removed. `None` only if nothing existing is affected. |
+| `{{requirement_mapping}}` | One row per `REQ-###` of this increment: `\| REQ-### \| <component(s)> \|` |

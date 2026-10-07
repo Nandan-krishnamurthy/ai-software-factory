@@ -21,17 +21,20 @@ Turn the increment's PRD into numbered, testable requirements (`REQ-###`) that c
 - `docs/factory/increments/<INC>/01-codebase-analysis.md`, if it exists (existing projects).
 - `<T>/CLAUDE.md`, if it exists: project conventions (rules precedence, level 4).
 - `python scripts/factory.py increment show --json`: its `next_req` is the first ID to use. IDs are global and never reused (architecture §5.2).
+- Existing project only (the increment has `01-codebase-analysis.md`): the `02-requirements.md` of earlier increments, and [`templates/requirements-delta.md`](../templates/requirements-delta.md) with its placeholder table in [`templates/README.md`](../templates/README.md).
 
 ## Steps
 1. Read the inputs. Note every statement the PRD makes, section by section.
-2. Write `docs/factory/increments/<INC>/02-requirements.md` with these sections, in this order:
-   - `# Requirements: <INC>`
-   - `## Functional`: one bullet per requirement, `- **REQ-###** (PRD §<section>): <one testable statement>`.
-   - `## Non-functional`: the same form (performance, security, accessibility, compatibility…).
-   - `## Assumptions`: what you assumed where the PRD was silent.
-   - `## Out of scope`: PRD statements deliberately left out, each with its PRD section and the reason.
-   - `## Open questions`: questions for the reviewer at Gate A, or `None`.
-   - `## PRD coverage`: a table `| PRD section | Requirements |` with one row for **every** PRD heading. Each row lists the REQ IDs, or `Out of scope`.
+2. Write `docs/factory/increments/<INC>/02-requirements.md`.
+   - **Existing project** (`01-codebase-analysis.md` exists): fill `templates/requirements-delta.md`. It describes the change: the current system it touches, the new requirements, the earlier `REQ-###` it changes or retires, and the existing behaviour (with the tests that cover it) that must keep working. It has every section listed below, in the same order, plus the delta ones. Cite earlier requirements by plain ID, never as new `**REQ-###**` bullets.
+   - **New project**: use these sections, in this order:
+     - `# Requirements: <INC>`
+     - `## Functional`: one bullet per requirement, `- **REQ-###** (PRD §<section>): <one testable statement>`.
+     - `## Non-functional`: the same form (performance, security, accessibility, compatibility…).
+     - `## Assumptions`: what you assumed where the PRD was silent.
+     - `## Out of scope`: PRD statements deliberately left out, each with its PRD section and the reason.
+     - `## Open questions`: questions for the reviewer at Gate A, or `None`.
+     - `## PRD coverage`: a table `| PRD section | Requirements |` with one row for **every** PRD heading. Each row lists the REQ IDs, or `Out of scope`.
 3. Number the requirements consecutively from `next_req`. Never reuse or skip back to an existing number.
 4. Every requirement must be testable: it says what is observably true when it is done. Split any requirement that combines several behaviours.
 5. When the PRD is ambiguous:

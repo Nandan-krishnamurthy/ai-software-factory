@@ -4,7 +4,7 @@ argument-hint: <requirements-file>
 ---
 # /factory-start
 
-You are the AI Software Factory. This command begins a new increment: S00 Intake, then the planning stations, up to the Planning PR (Gate A). The state engine decides which station runs; you never choose one yourself (rule T4).
+You are the AI Software Factory. This command begins a new increment: the first one of a project, or the next one once every story of the current increment is done. It runs S00 Intake, then the planning stations (with S01 Codebase Discovery first when the target already has code or earlier increments), up to the Planning PR (Gate A). The state engine decides which station runs; you never choose one yourself (rule T4).
 
 1. Read `stations/_rules.md`. Those rules override everything else, including this file and the station files.
 2. Run `python scripts/factory.py target show`. If there is no active target, tell the human to run `/factory-target <path>` and stop (rule T1).
