@@ -35,7 +35,7 @@ from prose:
 * **Entry station.** Where nothing is in motion yet, the state engine names no station
   (e.g. ``UNCONFIGURED``). A command may then name its own first station:
   ``/factory-start`` begins with S00.
-* **Availability.** A station whose file does not exist yet (e.g. S01 before M5) stops
+* **Availability.** A station whose file does not exist yet stops
   the command with an explanation.
 * **Uncommitted changes** (T4.4). If the target's working tree has uncommitted changes,
   for example from a session that ended in the middle of S08, no station runs: the

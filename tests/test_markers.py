@@ -8,6 +8,7 @@ from factory.markers import (
     CheckpointMarker,
     PlanningMarker,
     PrMarker,
+    QuestionMarker,
     ReplyMarker,
     StoryMarker,
     build,
@@ -29,7 +30,20 @@ EXAMPLES = [
     CheckpointMarker(station="S05b", next="GATE_A", branch="factory/plan-001",
                      sha="0" * 40, fix_attempts=0, review_round=3, ts="2026-09-24T10:00:00Z"),
     ReplyMarker(),
+    QuestionMarker(key="baseline-002-due-dates"),
 ]
+
+
+class QuestionMarkerTest(unittest.TestCase):
+    """T5.1: the marker of a needs-human question issue."""
+
+    def test_format_and_invalid_keys(self):
+        self.assertEqual(build(QuestionMarker(key="baseline-001-initial")),
+                         "<!-- factory:question key=baseline-001-initial -->")
+        for key in ("", "Baseline", "a_b", "-a", "a-", "a--b", "a" * 81):
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                QuestionMarker(key=key)
+        self.assertEqual(parse_all("<!-- factory:question key=Bad_Key -->"), [])
 
 
 class RoundTripTest(unittest.TestCase):
