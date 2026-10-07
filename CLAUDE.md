@@ -18,6 +18,7 @@ The most important rules:
 - [docs/01-factory-requirements.md](docs/01-factory-requirements.md): what the factory must do (decisions D1–D5)
 - [docs/02-factory-architecture.md](docs/02-factory-architecture.md): how it is structured
 - [docs/03-factory-plan.md](docs/03-factory-plan.md): the build plan (tasks T0.1–T5.4)
+- [docs/04-task-tracker-test-plan.md](docs/04-task-tracker-test-plan.md): the runbook that proves success criteria 1–8
 
 ## Developing the factory itself
 

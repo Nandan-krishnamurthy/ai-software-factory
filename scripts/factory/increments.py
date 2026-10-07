@@ -125,7 +125,7 @@ def increment_number(name: str) -> int:
 
 
 def slugify(text: str) -> str:
-    """``"Add due dates!"`` → ``"add-due-dates"``. Raises ``ValueError`` if nothing is left."""
+    """``"Export to CSV!"`` → ``"export-to-csv"``. Raises ``ValueError`` if nothing is left."""
     slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:MAX_SLUG].strip("-")
     if not slug:
         raise ValueError(f"cannot make an increment slug from {text!r}")

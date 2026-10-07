@@ -3,10 +3,10 @@
 The ``ac-verifier`` subagent (``.claude/agents/ac-verifier.md``, architecture §4.5)
 answers S10 with one line per acceptance criterion, then one line for the test suite::
 
-    - [x] AC1 — pass — evidence: `tests/app.test.ts › #12 AC1: adds a task` passed
-    - [ ] AC2 — fail — evidence: `#12 AC2: rejects an empty title` failed: expected …
-    - [ ] AC3 — not-verifiable — manual steps: open the app, press Tab …
-    Suite: fail — `npm test` → 14 passed, 1 failed
+    - [x] AC1 — pass — evidence: `tests/test_invoices.py::test_12_ac1_adds_a_line` passed
+    - [ ] AC2 — fail — evidence: `test_12_ac2_rejects_a_negative_amount` failed: expected …
+    - [ ] AC3 — not-verifiable — manual steps: print the invoice to PDF and check …
+    Suite: fail — `python -m pytest` → 14 passed, 1 failed
 
 S11 copies the AC lines into the PR unchanged (rule H5). ``check()`` makes the rules
 objective instead of trusting the text:
