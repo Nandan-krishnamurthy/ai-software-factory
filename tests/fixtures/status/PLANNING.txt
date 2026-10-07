@@ -1,0 +1,9 @@
+Next: Run /factory-resume to finish planning 001-initial (next: S02).
+
+State: PLANNING (increment 001-initial), next station S02
+Waiting on: the factory
+Allowed: /factory-resume, /factory-continue, /factory-status
+Planning increment 001-initial: next is S02.
+Planning documents still to write: 02-requirements.md, 03-architecture.md, 04-implementation-plan.md, 05-stories.md
+
+Requirements: no docs/factory/traceability.md on the default branch yet.

@@ -1,0 +1,8 @@
+Next: Run /factory-resume: the factory revises Planning PR #5 and answers your feedback.
+
+State: GATE_A_CHANGES (increment 001-initial), next station S05
+Waiting on: the factory
+Allowed: /factory-resume, /factory-continue, /factory-status
+Changes requested on Planning PR #5; revise the planning docs and reply to each item.
+
+Requirements: no docs/factory/traceability.md on the default branch yet.

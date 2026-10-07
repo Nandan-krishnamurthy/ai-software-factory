@@ -1,0 +1,15 @@
+Next: Fix the problems listed below by hand; the factory changes nothing until then.
+
+State: INCONSISTENT
+Waiting on: you
+Allowed: /factory-status
+The factory's GitHub state breaks its invariants; nothing will be changed until a human fixes it.
+Problem: more than one story is in flight (in progress, in review, or waiting for close-out): #10, #11
+
+Requirements: 0 of 6 Done, 1 deferred. Done = Implemented and every listed PR merged.
+  REQ-001  not done  #20          PR #20 not found
+  REQ-002  not done  #20, #21     PR #20 not found, #21 not found
+  REQ-003  not done  #21          in progress
+  REQ-004  not done  -            not started
+  REQ-005  not done  -            deferred
+  REQ-006  not done  -            implemented, but no PR listed

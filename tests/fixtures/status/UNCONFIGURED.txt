@@ -1,0 +1,8 @@
+Next: Run /factory-start <requirements-file> to plan the first increment.
+
+State: UNCONFIGURED
+Waiting on: you
+Allowed: /factory-start, /factory-status
+No increment has been started. Run /factory-start.
+
+Requirements: no docs/factory/traceability.md on the default branch yet.

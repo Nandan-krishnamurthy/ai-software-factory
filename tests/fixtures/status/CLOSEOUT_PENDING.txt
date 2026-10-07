@@ -1,0 +1,16 @@
+Next: Run /factory-resume to close out story #10 (PR #20 is merged), or /factory-continue to also start the next story.
+
+State: CLOSEOUT_PENDING (increment 001-initial), next station S12
+Waiting on: the factory
+Allowed: /factory-resume, /factory-continue, /factory-status
+PR #20 (STORY-001) is merged: your approval. Next is close-out (S12) of story #10.
+
+Stories in 001-initial: 0 of 2 done, 2 not started.
+
+Requirements: 1 of 6 Done, 1 deferred. Done = Implemented and every listed PR merged.
+  REQ-001  Done      #20          merged
+  REQ-002  not done  #20, #21     PR #21 not found
+  REQ-003  not done  #21          in progress
+  REQ-004  not done  -            not started
+  REQ-005  not done  -            deferred
+  REQ-006  not done  -            implemented, but no PR listed

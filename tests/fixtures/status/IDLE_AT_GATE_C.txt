@@ -1,0 +1,16 @@
+Next: Say continue: run /factory-continue to start the next story (2 ready).
+
+State: IDLE_AT_GATE_C (increment 001-initial), next station S06
+Waiting on: you
+Allowed: /factory-continue, /factory-status
+2 story(ies) ready. Say continue (/factory-continue) to start the next one.
+
+Stories in 001-initial: 0 of 2 done, 2 not started.
+
+Requirements: 0 of 6 Done, 1 deferred. Done = Implemented and every listed PR merged.
+  REQ-001  not done  #20          PR #20 not found
+  REQ-002  not done  #20, #21     PR #20 not found, #21 not found
+  REQ-003  not done  #21          in progress
+  REQ-004  not done  -            not started
+  REQ-005  not done  -            deferred
+  REQ-006  not done  -            implemented, but no PR listed
