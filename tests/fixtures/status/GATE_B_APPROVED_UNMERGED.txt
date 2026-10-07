@@ -1,0 +1,16 @@
+Next: Merge PR #20 (STORY-001) yourself (the factory never merges), then run /factory-resume.
+
+State: GATE_B_APPROVED_UNMERGED (increment 001-initial)
+Waiting on: you
+Allowed: /factory-status
+PR #20 (STORY-001) is approved. Please merge it: the factory never merges.
+
+Stories in 001-initial: 0 of 2 done, in flight #10, 1 not started.
+
+Requirements: 0 of 6 Done, 1 deferred. Done = Implemented and every listed PR merged.
+  REQ-001  not done  #20          PR #20 open
+  REQ-002  not done  #20, #21     PR #20 open, #21 not found
+  REQ-003  not done  #21          in progress
+  REQ-004  not done  -            not started
+  REQ-005  not done  -            deferred
+  REQ-006  not done  -            implemented, but no PR listed

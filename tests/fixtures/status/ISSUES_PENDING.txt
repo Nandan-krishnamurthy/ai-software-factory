@@ -1,0 +1,10 @@
+Next: Run /factory-resume to create the story issues of 001-initial.
+
+State: ISSUES_PENDING (increment 001-initial), next station S05b
+Waiting on: the factory
+Allowed: /factory-resume, /factory-continue, /factory-status
+1 story issue(s) to create.
+
+Stories in 001-initial: 0 of 1 done, 1 not started.
+
+Requirements: no docs/factory/traceability.md on the default branch yet.

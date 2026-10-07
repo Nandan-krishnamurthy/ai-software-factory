@@ -20,6 +20,7 @@ from factory import (
     questions,
     signals,
     state,
+    status,
     target,
     verdict,
 )
@@ -283,6 +284,17 @@ def build_parser() -> argparse.ArgumentParser:
                     "call (see .claude/settings.json). Not meant to be run by hand.")
     guard_parser.set_defaults(handler=_guard)
 
+    status_parser = subparsers.add_parser(
+        "status", help="what to do next, the increment's progress and each REQ's Done status",
+        description="The /factory-status report. Its first line says what the human does "
+                    "next. It adds a hint when a PR waiting for review has comments but no "
+                    "/changes, the progress of the current increment, and the Done status of "
+                    "each requirement (requirements §11: Implemented and every listed PR "
+                    "merged, from docs/factory/traceability.md on the default branch). "
+                    "Read-only.")
+    status_parser.add_argument("--json", action="store_true", help="machine-readable output")
+    status_parser.set_defaults(handler=_status, needs_target=True)
+
     state_parser = subparsers.add_parser(
         "state", help="work out the factory's current state from GitHub",
         description="Reads GitHub and prints exactly one state, the next station, the "
@@ -381,6 +393,12 @@ def _state(args: argparse.Namespace) -> int:
     snapshot = state.collect_snapshot(Gh(), args.target.repo)
     result = state.derive_state(snapshot)
     print(json.dumps(result.to_dict(), indent=2) if args.json else state.render(result))
+    return 0
+
+
+def _status(args: argparse.Namespace) -> int:
+    report = status.collect(Gh(), args.target.repo)
+    print(json.dumps(report.to_dict(), indent=2) if args.json else status.render(report))
     return 0
 
 

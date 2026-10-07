@@ -1,0 +1,9 @@
+Next: Review Planning PR #5: merge it yourself to approve, or comment /changes and run /factory-resume.
+Hint: PR #5 has 2 comments from you in this round but no /changes, so the factory will not act on them. To request rework, comment /changes (first line) with your feedback, then run /factory-resume.
+
+State: GATE_A_WAITING (increment 001-initial)
+Waiting on: you
+Allowed: /factory-status
+Waiting for you to review Planning PR #5: merge it to approve, or comment /changes.
+
+Requirements: no docs/factory/traceability.md on the default branch yet.

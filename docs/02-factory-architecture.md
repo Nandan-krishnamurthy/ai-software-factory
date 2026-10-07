@@ -141,7 +141,7 @@ ai-software-factory/
 | `/factory-start [requirements-file]` | Begin a new **increment** (§5.2): new project or new requirements for an existing project | S0 → S1 (if existing) → S2 → S3 → S4 → S5 | **Gate A** (Planning PR open) |
 | `/factory-resume` | Finish whatever is already in motion, or whatever your last action on GitHub unlocked | Planning revisions, S5b, the in-progress story station, S8 rework, S12 | The next gate. **Never runs S6.** |
 | `/factory-continue` | Your Gate C "continue" | Anything `/factory-resume` would do first (including S12 close-out of a story you merged), then S6 → S7 → … → S11 for exactly one story | **Gate B** (PR open) |
-| `/factory-status` | Read-only report: state, what is waiting on you, story progress | None | Immediately |
+| `/factory-status` | Read-only report (`factory.py status`): one line saying what to do next, then a hint for "N comments, no `/changes`", the state, story progress and the Done status of each REQ | None | Immediately |
 
 Each command file follows the same pattern:
 
@@ -162,7 +162,7 @@ As built (T2.5), steps 4–6 are decided in code by `python scripts/factory.py r
 - **Availability:** a station file that doesn't exist yet stops the command with an explanation.
 - **Uncommitted changes** (T4.4): if the target's working tree has uncommitted changes, for example from a session that ended in the middle of S08, no station runs. The command lists the files and stops. The factory cannot tell its own unfinished work from yours, so it never discards either: you commit them on their branch or set them aside with `git stash`, then run the command again.
 
-`/factory-start` enters at S00 from `UNCONFIGURED`, where the state engine names no station. Command names are passed without their slash, e.g. `--command factory-start`, because Git Bash on Windows rewrites `/…` arguments into paths. `/factory-target` and `/factory-status` run no station.
+`/factory-start` enters at S00 from `UNCONFIGURED` or `INCREMENT_COMPLETE`, where the state engine names no station. Command names are passed without their slash, e.g. `--command factory-start`, because Git Bash on Windows rewrites `/…` arguments into paths. `/factory-target` and `/factory-status` run no station.
 
 ### 4.3 Stations (Layer 2)
 

@@ -1,0 +1,15 @@
+Next: Decide on issue #11, remove the factory:needs-human label if there is one, then run /factory-resume.
+
+State: NEEDS_HUMAN
+Waiting on: you
+Allowed: /factory-status
+Waiting for a human decision on issue #11. Answer, remove the factory:needs-human label, then resume.
+  - issue #11
+
+Requirements: 0 of 6 Done, 1 deferred. Done = Implemented and every listed PR merged.
+  REQ-001  not done  #20          PR #20 not found
+  REQ-002  not done  #20, #21     PR #20 not found, #21 not found
+  REQ-003  not done  #21          in progress
+  REQ-004  not done  -            not started
+  REQ-005  not done  -            deferred
+  REQ-006  not done  -            implemented, but no PR listed
