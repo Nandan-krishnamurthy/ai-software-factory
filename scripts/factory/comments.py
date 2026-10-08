@@ -7,7 +7,8 @@ told apart from the human's when both use the same GitHub account (D5).
 * ``post_reply`` adds a new comment that starts with ``<!-- factory:reply -->``, or
   ``<!-- factory:reply to=<id> -->`` when it answers one feedback item (T4.2).
 * ``upsert_checkpoint`` keeps exactly **one** checkpoint comment per issue: it edits the
-  existing one in place, or creates it if there is none.
+  existing one in place, or creates it if there is none. An evidence block already in the
+  note (``set_checkpoint_evidence``, T6.1) is carried over unless the new note has one.
 
 Comments go through the REST issue-comments API, which covers PRs as well (every PR is
 an issue). Bodies are sent as JSON on stdin, never as command-line arguments.
@@ -22,6 +23,11 @@ from factory.markers import CheckpointMarker, ReplyMarker, build, find, has_fact
 
 # GitHub rejects comment bodies over 65,536 characters.
 MAX_BODY = 65536
+
+# The evidence ledger (``verify run``, T6.1) lives in the checkpoint note between these
+# delimiters. They are not factory markers: the state engine never reads them.
+EVIDENCE_START = "<!-- evidence:start -->"
+EVIDENCE_END = "<!-- evidence:end -->"
 
 
 class CommentError(FactoryError):
@@ -117,6 +123,12 @@ def upsert_checkpoint(
 
     line = (f"**Factory checkpoint:** {station} complete. Next: {next_station}. "
             f"Branch: `{branch}` @ `{sha[:7]}`.")
+    if existing is not None and EVIDENCE_START not in note:
+        # The evidence ledger (``verify run``) outlives a station's note, such as S10's
+        # verdict; ``verify check`` decides whether it is still current.
+        carried = evidence_block(existing[0].get("body") or "")
+        if carried:
+            note = f"{note.strip()}\n\n{carried}"
     text = line + (f"\n\n{note.strip()}" if note.strip() else "")
     body = _checked_body(marker, text)
 
@@ -125,6 +137,38 @@ def upsert_checkpoint(
                          json_body={"body": body})
         return Posted("created", created["id"], created["html_url"], body)
     comment = existing[0]
+    updated = gh.api(f"repos/{repo}/issues/comments/{comment['id']}", method="PATCH",
+                     json_body={"body": body})
+    return Posted("updated", updated["id"], updated["html_url"], body)
+
+
+def evidence_block(body: str) -> str | None:
+    """The evidence block (``EVIDENCE_START`` … ``EVIDENCE_END``) in a comment body."""
+    body = (body or "").replace("\r\n", "\n")
+    start = body.find(EVIDENCE_START)
+    end = body.find(EVIDENCE_END, start + 1) if start >= 0 else -1
+    return body[start:end + len(EVIDENCE_END)] if start >= 0 and end >= 0 else None
+
+
+def set_checkpoint_evidence(gh: Gh, repo: str, number: int, block: str) -> Posted:
+    """Put ``block`` into the note of issue ``number``'s checkpoint comment, replacing an
+    earlier evidence block. The marker and the rest of the note stay exactly as they are,
+    so the state engine's view of the story does not change."""
+    if not (block.startswith(EVIDENCE_START) and block.endswith(EVIDENCE_END)):
+        raise CommentError("an evidence block must start and end with its delimiters")
+    if has_factory_marker(block):
+        raise CommentError("the evidence block must not contain '<!-- factory:' markers")
+    existing = find_checkpoint(list_comments(gh, repo, number))
+    if existing is None:
+        raise CommentError(f"issue #{number} has no checkpoint comment yet (S07 writes the "
+                           "first one); the evidence has nowhere to go")
+    comment = existing[0]
+    body = (comment.get("body") or "").replace("\r\n", "\n").rstrip()
+    old = evidence_block(body)
+    body = body.replace(old, block) if old else f"{body}\n\n{block}"
+    if len(body) > MAX_BODY:
+        raise CommentError(f"checkpoint body would be {len(body)} characters; GitHub's limit "
+                           f"is {MAX_BODY}")
     updated = gh.api(f"repos/{repo}/issues/comments/{comment['id']}", method="PATCH",
                      json_body={"body": body})
     return Posted("updated", updated["id"], updated["html_url"], body)

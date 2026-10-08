@@ -8,7 +8,9 @@ they describe how the factory was proven.
 
 The one place allowed to name an ecosystem is codebase discovery (S01, T5.1), which must
 know the manifests of every stack it supports. That exception is narrow and checked: those
-files must also name the other stacks, so they stay multi-stack.
+files must also name the other stacks, so they stay multi-stack. The same holds for the
+evidence ledger's summary parser (T6.1), which must recognise the output of every test
+runner it supports: it may name test runners only alongside the others.
 """
 
 import json
@@ -46,6 +48,9 @@ NODE = r"\bnpm\b|\byarn\b|\bpnpm\b|package\.json|package-lock|node_modules"
 DISCOVERY_FILES = {Path("scripts/factory/discovery.py"), Path("stations/S01-discovery.md"),
                    Path("scripts/factory/cli.py")}  # cli.py: the `discover` help text
 OTHER_STACKS = ("Python", "go.mod", "Cargo.toml", "Makefile")
+# Test-runner names that only the multi-runner summary parser may use (T6.1).
+RUNNER_FILES = {Path("scripts/factory/evidence.py")}
+OTHER_RUNNERS = ("pytest", "unittest", "go test", "cargo test")
 
 
 def audited_files(root: Path = REPO_ROOT) -> list[Path]:
@@ -68,6 +73,8 @@ def findings(root: Path = REPO_ROOT) -> list[str]:
         text = (root / rel).read_text(encoding="utf-8", errors="replace")
         for number, line in enumerate(text.splitlines(), start=1):
             for why, pattern in rules:
+                if why == "its test runners" and rel in RUNNER_FILES:
+                    continue
                 if match := pattern.search(line):
                     found.append(f"{rel.as_posix()}:{number}: {why}: {match.group(0)!r}")
             if rel not in DISCOVERY_FILES and (match := node.search(line)):
@@ -100,6 +107,7 @@ class ReusabilityTest(unittest.TestCase):
                 ".claude/agents/x.md": "Evidence: `tests/tasks.test.ts` (`npm test`)",
                 "templates/x.md": "Store it in localStorage with Vite.",
                 "scripts/factory/discovery.py": "npm ci  # allowed here",
+                "scripts/factory/evidence.py": "_VITEST = ...  # allowed here",
             }
             for name, text in planted.items():
                 (root / name).parent.mkdir(parents=True, exist_ok=True)
@@ -115,6 +123,7 @@ class ReusabilityTest(unittest.TestCase):
             with self.subTest(expected=expected):
                 self.assertIn(expected, whys)
         self.assertNotIn("discovery.py", whys)
+        self.assertNotIn("evidence.py", whys)
 
     def test_discovery_names_node_only_among_other_stacks(self):
         """The Node.js exception is for multi-stack discovery, not a Node.js factory."""
@@ -123,6 +132,14 @@ class ReusabilityTest(unittest.TestCase):
             for stack in OTHER_STACKS:
                 with self.subTest(file=rel.as_posix(), stack=stack):
                     self.assertTrue(stack in text, f"{rel.as_posix()} does not name {stack}")
+
+    def test_summary_parser_names_runners_only_among_other_runners(self):
+        """The runner-name exception is for a multi-runner parser, not a Vitest factory."""
+        for rel in RUNNER_FILES:
+            text = (REPO_ROOT / rel).read_text(encoding="utf-8")
+            for runner in OTHER_RUNNERS:
+                with self.subTest(file=rel.as_posix(), runner=runner):
+                    self.assertTrue(runner in text, f"{rel.as_posix()} does not name {runner}")
 
 
 class OneCheckoutManyTargetsTest(unittest.TestCase):

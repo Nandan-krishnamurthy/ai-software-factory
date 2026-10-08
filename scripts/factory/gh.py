@@ -2,6 +2,8 @@
 
 * ``run_process`` is the single place ``subprocess`` is called (``git.py`` reuses it).
   Every call has a timeout, never reads the parent's stdin, and decodes output as UTF-8.
+  ``run_command_line`` is its sibling for the target's own configured commands
+  (``verify run``), which are shell command lines by definition.
 * ``Gh`` wraps the ``gh`` CLI: argument lists only, JSON parsing, typed errors.
   ``Gh._env`` is the one place auth is injected (``GH_TOKEN`` from a named env var),
   which is what the future bot mode needs (architecture §9.4).
@@ -84,6 +86,80 @@ def run_process(
             argv, None, "", str(exc), detail=f"executable {argv[0]!r} not found"
         ) from None
     return ProcessResult(argv, completed.returncode, completed.stdout or "", completed.stderr or "")
+
+
+def run_command_line(
+    command: str,
+    *,
+    timeout: float,
+    cwd: str | Path,
+    env: Mapping[str, str] | None = None,
+) -> ProcessResult:
+    """Run one of the target's configured commands (``commands.*`` in its config) through
+    the platform shell, exactly as written (rule H4), and capture stdout and stderr merged
+    in order, as ``stdout``.
+
+    This is the one deliberate exception to "argument lists, never shell strings": the
+    command *is* a shell command line, declared by the project. On POSIX it runs as
+    ``/bin/sh -c <command>``; on Windows as ``cmd.exe /d /s /c "<command>"``. On a timeout
+    the whole process tree is killed (a test runner's child processes would otherwise keep
+    the pipe open) and ``CommandTimeout`` carries the output captured so far.
+    """
+    if timeout is None or timeout <= 0:
+        raise ValueError("every external command needs a positive timeout")
+    if os.name == "nt":
+        comspec = os.environ.get("COMSPEC") or "cmd.exe"
+        # A string, not a list: with /s, cmd removes exactly the outer quotes and runs the
+        # rest verbatim, which list quoting would break for commands containing quotes.
+        args: str | list[str] = f'"{comspec}" /d /s /c "{command}"'
+        argv = [comspec, "/d", "/s", "/c", command]
+        options: dict[str, Any] = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    else:
+        args = argv = ["/bin/sh", "-c", command]
+        options = {"start_new_session": True}
+    try:
+        process = subprocess.Popen(
+            args,
+            cwd=cwd,
+            env=dict(env) if env is not None else None,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            **options,
+        )
+    except FileNotFoundError as exc:
+        raise CommandNotFound(argv, None, "", str(exc),
+                              detail=f"shell {argv[0]!r} not found") from None
+    try:
+        output, _ = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_tree(process)
+        try:
+            output, _ = process.communicate(timeout=10)
+        except subprocess.TimeoutExpired:  # a stray grandchild still holds the pipe
+            output = ""
+        raise CommandTimeout(argv, None, output or "", "",
+                             detail=f"timed out after {timeout:g}s") from None
+    return ProcessResult(argv, process.returncode, output or "", "")
+
+
+def _kill_tree(process: subprocess.Popen) -> None:
+    """Kill ``process`` and every process it started."""
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(process.pid)],
+                       stdin=subprocess.DEVNULL, capture_output=True, timeout=30, check=False)
+    else:
+        try:
+            os.killpg(process.pid, 9)  # its own session (start_new_session=True)
+        except ProcessLookupError:
+            pass
+    try:
+        process.kill()
+    except OSError:
+        pass
 
 
 def _as_text(data: str | bytes | None) -> str:
