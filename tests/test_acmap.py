@@ -9,6 +9,7 @@ test names: a test removed, a test failing, a test that did not run, a forged "p
 """
 
 import contextlib
+import hashlib
 import io
 import json
 import re
@@ -59,9 +60,13 @@ def statuses(result):
     return {a.ac: a.status for a in result.acs}
 
 
-def check(verdict_text, result, issue=27):
+def check(verdict_text, result, issue=27, **current):
+    """``verdict check`` on ``result``, by default stored beside its evidence and for the
+    branch head; ``current`` overrides any of those facts."""
+    facts = {"evidence_sha": result.sha, "checkpoint_branch": result.branch,
+             "branch_head": result.sha, **current}
     parsed = verdict.parse(verdict_text, [a.ac for a in result.acs])
-    parsed.problems += verdict.cross_check(parsed, result, issue=issue)
+    parsed.problems += verdict.cross_check(parsed, result, issue=issue, **facts)
     return parsed
 
 
@@ -235,6 +240,56 @@ class DoctoredRunsTest(unittest.TestCase):
         unit = next(t for t in result.status(3).tests if t.file == "src/domain/task.test.ts")
         self.assertEqual(unit.status, "failed")
         self.assertEqual(result.status(3).status, "failed")
+
+
+class RequiredMapTest(unittest.TestCase):
+    """The map is required, beside its evidence, for the checkpoint's branch and its head."""
+
+    def setUp(self):
+        self.result = build(27)
+        self.text = fixture("27.verdict.md")
+
+    def test_no_map_is_invalid(self):
+        parsed = verdict.parse(self.text, [1, 2, 3, 4, 5])
+        parsed.problems += verdict.cross_check(parsed, None, issue=27, evidence_sha=SHA,
+                                               checkpoint_branch="story/27-x", branch_head=SHA)
+        self.assertEqual(parsed.problems, [
+            "no AC-to-test map is stored in the checkpoint; the verdict cannot be checked "
+            "against the recorded tests: run `verify run`, then `verify map`"])
+        self.assertIn("INVALID", verdict.render(parsed))
+
+    def test_the_map_must_be_beside_its_evidence(self):
+        self.assertIn("the checkpoint has no evidence beside the AC-to-test map; run "
+                      "`verify run`, then `verify map`",
+                      check(self.text, self.result, evidence_sha=None).problems)
+        self.assertIn("the AC-to-test map is for commit 1111111, but the evidence is for "
+                      "2222222; run `verify map` again",
+                      check(self.text, self.result, evidence_sha="2" * 40).problems)
+
+    def test_the_map_must_be_for_the_checkpoints_branch(self):
+        problems = check(self.text, self.result, checkpoint_branch="story/27-y").problems
+        self.assertIn("the AC-to-test map is for branch story/27-x, but the checkpoint names "
+                      "story/27-y", problems)
+
+    def test_a_map_for_an_old_head_is_stale(self):
+        problems = check(self.text, self.result, branch_head="2" * 40).problems
+        self.assertIn("the AC-to-test map is for commit 1111111, but the head of story/27-x "
+                      "is 2222222: the map is stale; run `verify run`, then `verify map`, "
+                      "again", problems)
+        self.assertIn("is not on origin", check(self.text, self.result,
+                                                branch_head=None).problems[0])
+
+    def test_a_map_for_another_issue_is_refused(self):
+        problems = check(self.text, self.result, issue=28).problems
+        self.assertIn("the AC-to-test map is for issue #27, not #28; run `verify map` again",
+                      problems)
+
+    def test_invalid_stops_s10_for_the_human(self):
+        """S10 already treats INVALID as: retry the verifier once, then needs-human."""
+        s10 = (REPO_ROOT / "stations" / "S10-verify.md").read_text(encoding="utf-8")
+        self.assertIn("If the second answer is still invalid, stop and ask the human", s10)
+        self.assertIn("`gh issue edit <I> --repo <R> --add-label factory:needs-human`, and "
+                      "stop", s10)
 
 
 # ----------------------------------------------------------------------------- parts
@@ -590,9 +645,9 @@ class CliTest(unittest.TestCase):
         self.repo = DiffingGitRepo(fixture("27.diff"), remote={"refs/heads/story/27-x": SHA})
         checkpoint(Gh(transport=self.github), number=27, branch="story/27-x", sha=SHA)
 
-    def cli(self, *argv, output=None):
-        runner = FakeRunner({"npm test": (0 if output is None else 1,
-                                          output or fixture("27.output.txt"))})
+    def cli(self, *argv, output=None, runner=None):
+        runner = runner or FakeRunner({"npm test": (0 if output is None else 1,
+                                                    output or fixture("27.output.txt"))})
         out, err = io.StringIO(), io.StringIO()
         with mock.patch.object(target, "get_target",
                                return_value=target.Target(self.path, REPO)), \
@@ -612,8 +667,13 @@ class CliTest(unittest.TestCase):
         return self.github.checkpoint_comments(27)[0]["body"]
 
     def store_verdict(self, text):
-        head, _, rest = self.body().partition("\n\n")
-        self.github.checkpoint_comments(27)[0]["body"] = f"{head}\n\n{text}\n\n{rest}"
+        """S10 stores the verdict as its checkpoint note; the blocks are carried over."""
+        checkpoint(Gh(transport=self.github), number=27, station="S10", next_station="S11",
+                   branch="story/27-x", sha=SHA, note=text)
+
+    def run_and_map(self, output=None, runner=None, *extra):
+        self.cli("verify", "run", "--issue", "27", *extra, output=output, runner=runner)
+        return self.cli("verify", "map", "--issue", "27")
 
     def test_run_map_then_check_the_real_verdict(self):
         self.assertEqual(self.cli("verify", "run", "--issue", "27")[0], 0)
@@ -626,14 +686,14 @@ class CliTest(unittest.TestCase):
         self.assertEqual(acmap.read(self.scratch / "acmap-27.json"), stored)
         self.assertEqual(set(statuses(stored).values()), {"passed"})
         self.store_verdict(fixture("27.verdict.md"))
+        self.assertEqual(acmap.from_body(self.body()), stored)  # carried by S10's note
         code, out, _ = self.cli("verdict", "check", "--issue", "27")
         self.assertEqual(code, 0, out)
         self.assertIn("AC-to-test map @ 1111111: AC1 passed", out)
         self.assertIn("OK: every AC has evidence and nothing failed.", out)
 
     def test_a_failing_test_fails_the_map_and_the_forged_pass_is_invalid(self):
-        self.cli("verify", "run", "--issue", "27", output=fixture("27-e2e-failed.output.txt"))
-        code, out, _ = self.cli("verify", "map", "--issue", "27")
+        code, out, _ = self.run_and_map(fixture("27-e2e-failed.output.txt"))
         self.assertEqual(code, 1)
         self.assertIn("FAILING: a mapped test failed for AC2.", out)
         verdict_file = self.scratch / "verdict-27.md"
@@ -643,16 +703,65 @@ class CliTest(unittest.TestCase):
         self.assertIn("AC2: the verifier says pass, but its mapped test failed", out)
         self.assertIn("INVALID", out)
 
-    def test_a_map_file_can_be_given(self):
-        self.cli("verify", "run", "--issue", "27")
+    def test_a_missing_test_through_the_cli(self):
         self.repo.diff = without(27, 3, fixture("27.diff"))
-        self.cli("verify", "map", "--issue", "27", "--out", str(self.scratch / "m.json"))
-        verdict_file = self.scratch / "v.md"
-        verdict_file.write_text(fixture("27.verdict.md"), encoding="utf-8")
-        code, out, _ = self.cli("verdict", "check", "--issue", "27", "--file",
-                                str(verdict_file), "--map", str(self.scratch / "m.json"))
+        self.run_and_map()
+        self.store_verdict(fixture("27.verdict.md"))
+        code, out, _ = self.cli("verdict", "check", "--issue", "27")
         self.assertEqual(code, 1)
         self.assertIn("AC3: the verifier says pass, but no test is named `#27 AC3`", out)
+
+    def test_the_map_and_evidence_escape_hatches_are_gone(self):
+        for argv in (("verdict", "check", "--issue", "27", "--map", "m.json"),
+                     ("verify", "map", "--issue", "27", "--evidence", "e.json")):
+            with self.subTest(argv[-2]), self.assertRaises(SystemExit) as raised:
+                self.cli(*argv)
+            self.assertEqual(raised.exception.code, 2)  # argparse: unknown option
+        for argv in (["verdict", "check", "--issue", "1"], ["verify", "map", "--issue", "1"]):
+            parsed = cli.build_parser().parse_args(argv)
+            self.assertFalse(hasattr(parsed, "map") or hasattr(parsed, "evidence"))
+
+    def test_without_a_map_the_verdict_is_invalid(self):
+        self.store_verdict(fixture("27.verdict.md"))
+        code, out, _ = self.cli("verdict", "check", "--issue", "27")
+        self.assertEqual(code, 1)
+        self.assertIn("no AC-to-test map is stored in the checkpoint", out)
+        self.assertIn("INVALID", out)
+        # Evidence alone is not enough: the map is what the verdict is held against.
+        self.cli("verify", "run", "--issue", "27")
+        self.store_verdict(fixture("27.verdict.md"))
+        code, out, _ = self.cli("verdict", "check", "--issue", "27")
+        self.assertEqual(code, 1)
+        self.assertIn("no AC-to-test map is stored in the checkpoint", out)
+
+    def test_without_a_checkpoint_a_verdict_file_is_invalid(self):
+        self.github.comments.clear()
+        verdict_file = self.scratch / "v.md"
+        verdict_file.write_text(fixture("27.verdict.md"), encoding="utf-8")
+        code, out, _ = self.cli("verdict", "check", "--issue", "27", "--file", str(verdict_file))
+        self.assertEqual(code, 1)
+        self.assertIn("no AC-to-test map is stored in the checkpoint", out)
+
+    def test_a_stale_map_after_the_head_moved_is_rejected(self):
+        self.run_and_map()
+        self.store_verdict(fixture("27.verdict.md"))
+        self.assertEqual(self.cli("verdict", "check", "--issue", "27")[0], 0)
+        self.repo.remote = {"refs/heads/story/27-x": "2" * 40}  # a new commit was pushed
+        code, out, _ = self.cli("verdict", "check", "--issue", "27")
+        self.assertEqual(code, 1)
+        self.assertIn("but the head of story/27-x is 2222222: the map is stale", out)
+
+    def test_a_map_older_than_the_evidence_is_rejected(self):
+        self.run_and_map()
+        other = "2" * 40
+        self.repo.heads, self.repo.remote = [other], {"refs/heads/story/27-x": other}
+        self.cli("verify", "run", "--issue", "27")  # new evidence, the map not rebuilt
+        self.store_verdict(fixture("27.verdict.md"))
+        code, out, _ = self.cli("verdict", "check", "--issue", "27")
+        self.assertEqual(code, 1)
+        self.assertIn("the AC-to-test map is for commit 1111111, but the evidence is for "
+                      "2222222", out)
+        self.assertIn("the map is stale", out)
 
     def test_stale_evidence_is_not_mapped(self):
         self.cli("verify", "run", "--issue", "27")
@@ -662,29 +771,67 @@ class CliTest(unittest.TestCase):
         self.assertIn("the evidence cannot be mapped", err)
         self.assertIsNone(acmap.from_body(self.body()))
 
-    def test_a_map_for_other_evidence_is_refused(self):
-        self.cli("verify", "run", "--issue", "27")
-        self.cli("verify", "map", "--issue", "27")
-        other = build(27)
-        other.sha = "2" * 40
-        self.store_verdict(fixture("27.verdict.md"))
-        (self.scratch / "other.json").write_text(json.dumps(other.to_dict()), encoding="utf-8")
-        code, out, _ = self.cli("verdict", "check", "--issue", "27", "--map",
-                                str(self.scratch / "other.json"))
-        self.assertEqual(code, 1)
-        self.assertIn("the AC-to-test map is for commit 2222222, but the evidence is for "
-                      "1111111", out)
-
-    def test_without_a_map_the_verdict_is_checked_on_its_own(self):
-        self.store_verdict(fixture("27.verdict.md"))
-        code, out, _ = self.cli("verdict", "check", "--issue", "27")
-        self.assertEqual(code, 0, out)
-        self.assertIn("AC-to-test map: none stored", out)
-
     def test_map_needs_evidence(self):
         code, _, err = self.cli("verify", "map", "--issue", "27")
         self.assertEqual(code, 1)
         self.assertIn("checkpoint has no evidence", err)
+
+    def test_a_forged_log_and_evidence_file_in_scratch_are_not_trusted(self):
+        """The run failed; the model writes a passing log and an evidence file whose hash
+        matches it. verify map trusts only the checkpoint's hash, so it refuses."""
+        self.cli("verify", "run", "--issue", "27", output=fixture("27-e2e-failed.output.txt"))
+        forged = fixture("27.output.txt").encode("utf-8")
+        (self.scratch / "evidence-27.test.log").write_bytes(forged)
+        local = json.loads((self.scratch / "evidence-27.json").read_text(encoding="utf-8"))
+        local["commands"][3].update(status="pass", exit_code=0,
+                                    output_sha256=hashlib.sha256(forged).hexdigest())
+        (self.scratch / "evidence-27.json").write_text(json.dumps(local), encoding="utf-8")
+        code, _, err = self.cli("verify", "map", "--issue", "27")
+        self.assertEqual(code, 1)
+        self.assertIn("is not the test output the evidence recorded (its SHA-256 differs)", err)
+        self.assertIsNone(acmap.from_body(self.body()))
+
+    def test_a_captured_report_is_used_and_a_forged_copy_is_refused(self):
+        report = (FIXTURES / "27-unit.vitest.json").read_bytes()
+
+        def writes_a_report(command, *, cwd, timeout):
+            if command == "npm test":
+                (cwd / "reports").mkdir(exist_ok=True)
+                (cwd / "reports" / "unit.json").write_bytes(report)
+                return ProcessResult([], 0, fixture("27.output.txt"), "")
+            return ProcessResult([], 0, "ok\n", "")
+
+        code, out, err = self.run_and_map(None, writes_a_report, "--report", "reports/unit.json")
+        self.assertEqual(code, 0, err)
+        self.assertIn("report reports/unit.json (jest-style JSON, 117 cases)", out)
+        unit = next(t for t in acmap.from_body(self.body()).status(3).tests
+                    if t.file == "src/domain/task.test.ts")
+        self.assertEqual((unit.status, unit.source), ("passed", "report reports/unit.json"))
+        copy = self.scratch / "evidence-27.report1.json"
+        self.assertEqual(copy.read_bytes(), report)
+        copy.write_bytes(report + b" ")
+        code, _, err = self.cli("verify", "map", "--issue", "27")
+        self.assertEqual(code, 1)
+        self.assertIn("is not the report reports/unit.json the evidence recorded", err)
+
+    def test_a_checkpoint_note_cannot_supply_a_map_or_evidence(self):
+        self.run_and_map(fixture("27-e2e-failed.output.txt"))
+        before = self.body()
+        recorded, _ = run()
+        for name, block in (("map", acmap.to_block(build(27))),  # every AC passed
+                            ("evidence", evidence.to_block(recorded))):
+            with self.subTest(name):
+                note_file = self.scratch / f"{name}.md"
+                note_file.write_text(fixture("27.verdict.md") + "\n" + block, encoding="utf-8")
+                code, _, err = self.cli("comment", "--issue", "27", "--kind", "checkpoint",
+                                        "--station", "S10", "--next", "S11",
+                                        "--body-file", str(note_file))
+                self.assertEqual(code, 1)
+                self.assertIn("a checkpoint note may not contain", err)
+                self.assertEqual(self.body(), before)
+        self.store_verdict(fixture("27.verdict.md"))
+        self.assertEqual(acmap.from_body(self.body()).failed(), [2])  # the real map stayed
+        self.assertEqual(self.cli("verdict", "check", "--issue", "27")[0], 1)
 
 
 if __name__ == "__main__":

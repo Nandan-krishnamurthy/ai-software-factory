@@ -30,10 +30,13 @@ acceptance criteria of story ``#N`` have a test that really passed (rule H1):
    AC is ``failed`` if any of its tests failed, ``passed`` if one passed, and
    ``missing`` otherwise (no test in the diff, or none with a passing result).
 
-The map is written to ``<SCRATCH>/acmap-<N>.json`` and into the checkpoint note, beside
-the evidence. ``verdict check`` then refuses a verifier ``pass`` for an AC without a
-passing mapped test, a ``not-verifiable`` that hides a failing test, and an AC without
-a test that is not ``not-verifiable`` with written manual steps.
+The evidence is read only from the checkpoint note, and the local output and reports
+only if their SHA-256 is the one it recorded. The map is written to
+``<SCRATCH>/acmap-<N>.json`` and into the checkpoint note, beside the evidence.
+``verdict check`` requires it there, for the branch head on ``origin``, and refuses a
+verifier ``pass`` for an AC without a passing mapped test, a ``not-verifiable`` that
+hides a failing test, and an AC without a test that is not ``not-verifiable`` with
+written manual steps.
 """
 
 import json

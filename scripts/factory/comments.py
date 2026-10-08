@@ -9,7 +9,9 @@ told apart from the human's when both use the same GitHub account (D5).
 * ``upsert_checkpoint`` keeps exactly **one** checkpoint comment per issue: it edits the
   existing one in place, or creates it if there is none. An evidence block
   (``set_checkpoint_evidence``, T6.1) or an AC-to-test map block (``set_checkpoint_map``,
-  T6.2) already in the note is carried over unless the new note has its own.
+  T6.2) already in the note is always carried over. A note may never supply one of its
+  own (T6.2): only ``verify run`` and ``verify map`` write these blocks, so ``verdict
+  check`` can trust them.
 
 Comments go through the REST issue-comments API, which covers PRs as well (every PR is
 an issue). Bodies are sent as JSON on stdin, never as command-line arguments.
@@ -34,6 +36,9 @@ MAP_START = "<!-- acmap:start -->"
 MAP_END = "<!-- acmap:end -->"
 # The blocks a later checkpoint carries over from the previous note.
 CARRIED_BLOCKS = ((EVIDENCE_START, EVIDENCE_END), (MAP_START, MAP_END))
+# A station's note may contain none of these: each one alone could end, fake or shift a
+# block the factory wrote.
+NOTE_DELIMITERS = (EVIDENCE_START, EVIDENCE_END, MAP_START, MAP_END)
 
 
 class CommentError(FactoryError):
@@ -111,7 +116,16 @@ def upsert_checkpoint(
 
     ``fix_attempts`` / ``review_round`` default to the values in the existing checkpoint,
     so a station that does not mention them never resets them by accident.
+
+    ``note`` may not contain an evidence or AC-to-test map delimiter: those blocks come
+    only from ``verify run`` and ``verify map``, and the ones already stored are carried.
     """
+    found = [d for d in NOTE_DELIMITERS if d in (note or "")]
+    if found:
+        raise CommentError("a checkpoint note may not contain " + ", ".join(found)
+                           + ": evidence and AC-to-test map blocks are written only by "
+                             "`verify run` and `verify map`, and the stored ones are "
+                             "carried over")
     existing = find_checkpoint(list_comments(gh, repo, number))
     previous = existing[1] if existing else None
     try:
@@ -130,8 +144,6 @@ def upsert_checkpoint(
     line = (f"**Factory checkpoint:** {station} complete. Next: {next_station}. "
             f"Branch: `{branch}` @ `{sha[:7]}`.")
     for start, end in CARRIED_BLOCKS if existing is not None else ():
-        if start in note:
-            continue
         # The evidence ledger (``verify run``) and the AC-to-test map (``verify map``)
         # outlive a station's note, such as S10's verdict; ``verify check`` and
         # ``verdict check`` decide whether they are still current.

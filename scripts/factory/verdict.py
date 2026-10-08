@@ -20,7 +20,9 @@ objective instead of trusting the text:
   verdict failing. ``Suite: skipped`` is allowed only as ``commands.test is null``.
 
 ``cross_check()`` (T6.2) holds the verdict against the AC-to-test map that ``verify map``
-built from the recorded run, so the verifier's word is no longer the only proof:
+built from the recorded run, so the verifier's word is no longer the only proof. The map
+is **required**: it must be in the checkpoint, beside the evidence it was built from, and
+for the branch head on ``origin``. Then:
 
 * a ``pass`` needs a mapped test that passed;
 * a ``not-verifiable`` may not hide a mapped test that failed;
@@ -157,17 +159,38 @@ def checkpoint_note(gh: Gh, repo: str, number: int, body: str | None = None) -> 
     return parts[1] if len(parts) == 2 else ""
 
 
-def cross_check(verdict: Verdict, acmap: AcMap, *, issue: int,
-                evidence_sha: str | None = None) -> list[str]:
-    """Why the verdict disagrees with the AC-to-test map of the recorded run; empty if
-    it agrees. Every problem makes the verdict INVALID."""
-    problems = []
+def cross_check(verdict: Verdict, acmap: AcMap | None, *, issue: int,
+                evidence_sha: str | None, checkpoint_branch: str | None,
+                branch_head: str | None) -> list[str]:
+    """Why the verdict cannot stand against the AC-to-test map of the recorded run; empty
+    if it agrees. Every problem makes the verdict INVALID.
+
+    ``acmap`` and ``evidence_sha`` come from the checkpoint (``None``: none stored),
+    ``checkpoint_branch`` from its marker, and ``branch_head`` is the head of the map's
+    branch on ``origin`` (``None``: not there)."""
+    if acmap is None:
+        return ["no AC-to-test map is stored in the checkpoint; the verdict cannot be "
+                "checked against the recorded tests: run `verify run`, then `verify map`"]
     if acmap.issue != issue:
         return [f"the AC-to-test map is for issue #{acmap.issue}, not #{issue}; run "
                 "`verify map` again"]
-    if evidence_sha is not None and acmap.sha != evidence_sha:
+    problems = []
+    if evidence_sha is None:
+        problems.append("the checkpoint has no evidence beside the AC-to-test map; run "
+                        "`verify run`, then `verify map`")
+    elif acmap.sha != evidence_sha:
         problems.append(f"the AC-to-test map is for commit {acmap.sha[:7]}, but the evidence "
                         f"is for {evidence_sha[:7]}; run `verify map` again")
+    if checkpoint_branch is not None and acmap.branch != checkpoint_branch:
+        problems.append(f"the AC-to-test map is for branch {acmap.branch}, but the "
+                        f"checkpoint names {checkpoint_branch}")
+    if branch_head is None:
+        problems.append(f"branch {acmap.branch} is not on origin, so the AC-to-test map "
+                        "cannot be shown to be current")
+    elif branch_head != acmap.sha:
+        problems.append(f"the AC-to-test map is for commit {acmap.sha[:7]}, but the head of "
+                        f"{acmap.branch} is {branch_head[:7]}: the map is stale; run "
+                        "`verify run`, then `verify map`, again")
     mapped = [m.ac for m in acmap.acs]
     stated = [a.number for a in verdict.acs]
     if stated and mapped != stated:
@@ -206,19 +229,15 @@ def _listed(m: AcMapping, status: str) -> str:
     return "; ".join(f"`{t.name or t.file}`" for t in m.tests if t.status == status)
 
 
-def render(verdict: Verdict, acmap: AcMap | None = None, *, mapped: bool = False) -> str:
-    """The verdict's summary. ``mapped``: say whether it was held against an AC-to-test
-    map (``acmap``) or checked on its own, because none was stored yet."""
+def render(verdict: Verdict, acmap: AcMap | None = None) -> str:
+    """The verdict's summary, with the AC-to-test map it was held against, if any."""
     counts = {v: sum(a.verdict == v for a in verdict.acs) for v in VERDICTS}
     lines = [f"Verdict: {len(verdict.acs)} AC(s): {counts['pass']} pass, {counts['fail']} "
              f"fail, {counts['not-verifiable']} not-verifiable; suite {verdict.suite or '?'}"]
     if acmap is not None:
         lines.append(f"  AC-to-test map @ {acmap.sha[:7]}: " + ", ".join(
             f"AC{a.ac} {a.status}" for a in acmap.acs))
-    elif mapped:
-        lines.append("  AC-to-test map: none stored; the verdict was checked on its own "
-                     "(run `verify map` to hold it against the recorded tests)")
-    lines += [f"  problem: {p}" for p in verdict.problems]
+    lines +=[f"  problem: {p}" for p in verdict.problems]
     if verdict.problems:
         lines.append("INVALID: the verdict breaks the rules above; S10 must obtain a new one.")
     elif verdict.failing:
