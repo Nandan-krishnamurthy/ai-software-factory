@@ -18,8 +18,19 @@ inferred from anything but a zero exit.
 
 The evidence names the exact commit it ran on. ``verify run`` refuses a dirty working
 tree, so that commit is exactly what was tested, and records whether HEAD moved or
-tracked files changed during the run. Each command is checked by the factory guard
-before anything runs: a configured command can never become a merge path (rule S1).
+tracked files changed during the run.
+
+**Only approved commands run.** The commands come from ``.factory/config.json`` on the
+default branch on ``origin`` (``origin/HEAD``), which only a PR the human merged can
+change, never from the story branch's working tree, which the model can edit. A
+``commands.*`` value that differs on the branch is recorded, and ``verify check`` rejects
+the evidence: the branch's change was not what ran.
+
+**The guard checks the language that runs.** Commands run with bash on every platform
+(``gh.run_command_line``), and before anything runs each one is checked by the factory
+guard as a bash command, so a configured command can never become a merge path (rule
+S1). A command written with cmd.exe-only syntax (``^``, ``%VAR%``, ``!VAR!``, ``call``)
+is refused outright: it means something else to cmd.exe than to the guard.
 
 The evidence is written to ``<SCRATCH>/evidence-<N>.json`` and into the issue's
 checkpoint note (``comments.set_checkpoint_evidence``). ``verify check`` reads it back
@@ -38,6 +49,7 @@ from pathlib import Path
 from typing import Any
 
 from factory.comments import EVIDENCE_END, EVIDENCE_START, evidence_block
+from factory.config import COMMAND_NAMES, CONFIG_RELPATH, load_config, parse_config
 from factory.errors import CommandNotFound, CommandTimeout, FactoryError, GitError
 from factory.gh import ProcessResult, run_command_line
 from factory.git import Git
@@ -82,6 +94,8 @@ class Evidence:
     commands: list[CommandEvidence]
     sha_after: str
     changed_files: list[str] = field(default_factory=list)
+    config_source: str = ""  # the approved config the commands came from: origin/main@abc1234
+    unapproved: list[str] = field(default_factory=list)  # commands.* changed on the branch
     tails_omitted: bool = False
     schema: int = SCHEMA
 
@@ -102,7 +116,6 @@ def run_verification(
     *,
     issue: int,
     repo: str,
-    commands: Mapping[str, str | None],
     git: Git,
     runner: Runner | None = None,
     vet: Vetter | None = None,
@@ -110,7 +123,8 @@ def run_verification(
     clock: Callable[[], float] = time.monotonic,
     now: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> Evidence:
-    """Run the quality commands on the target's current commit and record the results."""
+    """Run the approved quality commands on the target's current commit and record the
+    results. Nothing runs if any check before the run fails."""
     dirty = _status_lines(git)
     if dirty:
         raise EvidenceError("the target has uncommitted changes, so the evidence could not "
@@ -123,13 +137,19 @@ def run_verification(
         sha = git.rev_parse("HEAD")
     except GitError:
         raise EvidenceError("the target has no commits") from None
-    if vet is not None:
-        for name in VERIFY_COMMANDS:
-            command = commands.get(name)
-            reason = vet(command) if command else None
-            if reason:
-                raise EvidenceError(f"commands.{name} is refused by the factory guard: "
-                                    f"{reason}; nothing was run")
+    commands, source = approved_commands(git)
+    unapproved = unapproved_changes(target_path, commands)
+    for name in VERIFY_COMMANDS:
+        command = commands.get(name)
+        if not command:
+            continue
+        if reason := cmd_syntax(command):
+            raise EvidenceError(f"commands.{name} uses {reason}; configured commands run with "
+                                "bash, the language the guard checks, so write it in bash "
+                                "syntax; nothing was run")
+        if vet is not None and (reason := vet(command)):
+            raise EvidenceError(f"commands.{name} is refused by the factory guard: "
+                                f"{reason}; nothing was run")
 
     started = now()
     runner = runner or run_command_line
@@ -140,8 +160,63 @@ def run_verification(
         started_at=started.isoformat(timespec="seconds"),
         finished_at=now().isoformat(timespec="seconds"),
         commands=results, sha_after=git.rev_parse("HEAD"),
-        changed_files=_status_lines(git),
+        changed_files=_status_lines(git), config_source=source, unapproved=unapproved,
     )
+
+
+def approved_commands(git: Git) -> tuple[dict[str, str | None], str]:
+    """The ``commands`` of ``.factory/config.json`` on the default branch on ``origin``,
+    and where they came from (``origin/main@abc1234``). Raises ``EvidenceError`` when
+    there is no such config: nothing may run without approved commands."""
+    try:
+        ref = git.run(["rev-parse", "--abbrev-ref", "origin/HEAD"]).strip()
+    except GitError:
+        raise EvidenceError("origin/HEAD is not set, so the default branch's approved "
+                            "config cannot be found; run `git remote set-head origin "
+                            "--auto` in the target") from None
+    if not ref.startswith("origin/") or ref == "origin/HEAD":
+        raise EvidenceError(f"origin/HEAD does not name a branch on origin ({ref!r})")
+    path = f"{ref}:{CONFIG_RELPATH.as_posix()}"
+    try:
+        sha = git.rev_parse(ref)
+        text = git.run(["show", f"{sha}:{CONFIG_RELPATH.as_posix()}"])
+        config = parse_config(json.loads(text), path)
+    except GitError:
+        raise EvidenceError(f"{path} does not exist: there are no approved commands to "
+                            "run (they reach the default branch only through a merged "
+                            "PR)") from None
+    except ValueError as err:
+        raise EvidenceError(f"{path} is not valid JSON: {err}") from None
+    except FactoryError as err:
+        raise EvidenceError(f"{path} is not a valid config: {err}") from None
+    return {name: config.commands.get(name) for name in COMMAND_NAMES}, f"{ref}@{sha[:7]}"
+
+
+def unapproved_changes(target_path: Path, approved: Mapping[str, str | None]) -> list[str]:
+    """The ``commands.*`` that the story branch's config changes from the approved ones."""
+    try:
+        branch = load_config(target_path).commands
+    except FactoryError:
+        return [f"{CONFIG_RELPATH.as_posix()} (missing or invalid on the branch)"]
+    return [f"commands.{name}" for name in COMMAND_NAMES
+            if branch.get(name) != approved.get(name)]
+
+
+# cmd.exe syntax that bash, and so the guard, reads differently.
+_CMD_SYNTAX = (
+    (re.compile(r"\^"), "`^` (the cmd.exe escape character)"),
+    (re.compile(r"%(?:[A-Za-z_]\w*%|[~*\d])"), "a `%...%` variable (cmd.exe syntax)"),
+    (re.compile(r"![A-Za-z_]\w*!"), "a `!...!` variable (cmd.exe delayed expansion)"),
+    (re.compile(r"(?i)(?:^|[;&|(])\s*call\s"), "`call` (a cmd.exe command)"),
+)
+
+
+def cmd_syntax(command: str) -> str | None:
+    """Why ``command`` looks like cmd.exe syntax, or ``None``."""
+    for pattern, why in _CMD_SYNTAX:
+        if pattern.search(command):
+            return why
+    return None
 
 
 def _run_one(name: str, command: str | None, cwd: Path, runner: Runner, timeout: float,
@@ -432,6 +507,12 @@ def check(evidence: Evidence, *, issue: int, branch_head: str | None,
     if evidence.changed_files:
         problems.append("the commands changed files in the working tree, so the tested "
                         "tree is not the commit: " + ", ".join(evidence.changed_files))
+    if not evidence.config_source:
+        problems.append("the evidence does not name the approved config its commands came "
+                        "from")
+    problems += [f"{name} differs on the branch from the approved config "
+                 f"({evidence.config_source}); the approved command ran, so the branch's "
+                 "change is not verified" for name in evidence.unapproved]
     problems += evidence.failures()
     return problems
 
@@ -458,7 +539,8 @@ def headline(evidence: Evidence) -> str:
 
 def render(evidence: Evidence, path: Path | None = None) -> str:
     lines = [f"Evidence for #{evidence.issue} on {evidence.branch} @ {evidence.sha[:7]} "
-             f"({evidence.started_at} to {evidence.finished_at})"]
+             f"({evidence.started_at} to {evidence.finished_at})",
+             f"  commands from the approved config: {evidence.config_source}"]
     for c in evidence.commands:
         if c.status == "skipped":
             lines.append(f"  {c.name:<10} skipped   {c.detail}")
@@ -472,11 +554,18 @@ def render(evidence: Evidence, path: Path | None = None) -> str:
             lines.append(f"  {'':<10} {c.detail}")
     if evidence.changed_files:
         lines.append("  changed during the run: " + ", ".join(evidence.changed_files))
+    if evidence.unapproved:
+        lines.append("  NOT run, changed on this branch: " + ", ".join(evidence.unapproved))
     if path is not None:
         lines.append(f"Written to {path} and to the checkpoint note.")
     failures = evidence.failures()
-    lines.append("FAILING: " + "; ".join(failures) if failures
-                 else "OK: every configured command passed.")
+    if failures:
+        lines.append("FAILING: " + "; ".join(failures))
+    elif evidence.unapproved:
+        lines.append("NOT ACCEPTED: the approved commands passed, but this branch changes "
+                     + ", ".join(evidence.unapproved) + "; that change was not verified.")
+    else:
+        lines.append("OK: every configured command passed.")
     return "\n".join(lines)
 
 
