@@ -1,0 +1,986 @@
+{
+ "numTotalTests": 117,
+ "numPassedTests": 117,
+ "numFailedTests": 0,
+ "success": true,
+ "testResults": [
+  {
+   "name": "src/app/controller.test.ts",
+   "status": "passed",
+   "assertionResults": [
+    {
+     "ancestorTitles": [
+      "controller.addTask"
+     ],
+     "fullName": "controller.addTask #3 AC2: adds the task to the state and renders it",
+     "status": "passed",
+     "title": "#3 AC2: adds the task to the state and renders it"
+    },
+    {
+     "ancestorTitles": [
+      "controller.addTask"
+     ],
+     "fullName": "controller.addTask #3 AC3: an empty title adds nothing and sets the validation message",
+     "status": "passed",
+     "title": "#3 AC3: an empty title adds nothing and sets the validation message"
+    },
+    {
+     "ancestorTitles": [
+      "controller.addTask"
+     ],
+     "fullName": "controller.addTask #3 AC4: a valid title after an error clears the message",
+     "status": "passed",
+     "title": "#3 AC4: a valid title after an error clears the message"
+    },
+    {
+     "ancestorTitles": [
+      "controller persistence"
+     ],
+     "fullName": "controller persistence #4 AC3: when addTask returns, task-tracker:v1 already holds the new task",
+     "status": "passed",
+     "title": "#4 AC3: when addTask returns, task-tracker:v1 already holds the new task"
+    },
+    {
+     "ancestorTitles": [
+      "controller persistence"
+     ],
+     "fullName": "controller persistence #4 AC3: an invalid title saves nothing",
+     "status": "passed",
+     "title": "#4 AC3: an invalid title saves nothing"
+    },
+    {
+     "ancestorTitles": [
+      "controller persistence"
+     ],
+     "fullName": "controller persistence #4 AC1: a new controller on the same storage starts with the same tasks, in order",
+     "status": "passed",
+     "title": "#4 AC1: a new controller on the same storage starts with the same tasks, in order"
+    },
+    {
+     "ancestorTitles": [
+      "controller persistence"
+     ],
+     "fullName": "controller persistence #4 AC4: with nothing stored, the controller starts with an empty list and no message",
+     "status": "passed",
+     "title": "#4 AC4: with nothing stored, the controller starts with an empty list and no message"
+    },
+    {
+     "ancestorTitles": [
+      "controller persistence"
+     ],
+     "fullName": "controller persistence #9 AC5: an edited title is saved, and is shown when loaded again",
+     "status": "passed",
+     "title": "#9 AC5: an edited title is saved, and is shown when loaded again"
+    },
+    {
+     "ancestorTitles": [
+      "controller when saving fails"
+     ],
+     "fullName": "controller when saving fails #5 AC3: the task is still added and shown, with the storage warning",
+     "status": "passed",
+     "title": "#5 AC3: the task is still added and shown, with the storage warning"
+    },
+    {
+     "ancestorTitles": [
+      "controller when saving fails"
+     ],
+     "fullName": "controller when saving fails #5 AC3: the warning stays through a validation error and clears after a good save",
+     "status": "passed",
+     "title": "#5 AC3: the warning stays through a validation error and clears after a good save"
+    },
+    {
+     "ancestorTitles": [
+      "controller views and completion"
+     ],
+     "fullName": "controller views and completion #8 AC1: starts on the Active view",
+     "status": "passed",
+     "title": "#8 AC1: starts on the Active view"
+    },
+    {
+     "ancestorTitles": [
+      "controller views and completion"
+     ],
+     "fullName": "controller views and completion #8 AC2 AC3: toggleTask marks a task done and not done, and renders",
+     "status": "passed",
+     "title": "#8 AC2 AC3: toggleTask marks a task done and not done, and renders"
+    },
+    {
+     "ancestorTitles": [
+      "controller views and completion"
+     ],
+     "fullName": "controller views and completion #8 AC4: setView switches the view and renders",
+     "status": "passed",
+     "title": "#8 AC4: setView switches the view and renders"
+    },
+    {
+     "ancestorTitles": [
+      "controller views and completion"
+     ],
+     "fullName": "controller views and completion #8: adding a task while Completed is shown switches to Active",
+     "status": "passed",
+     "title": "#8: adding a task while Completed is shown switches to Active"
+    },
+    {
+     "ancestorTitles": [
+      "controller completion persistence"
+     ],
+     "fullName": "controller completion persistence #8 AC5: a completed task is saved, and is still completed when loaded again",
+     "status": "passed",
+     "title": "#8 AC5: a completed task is saved, and is still completed when loaded again"
+    },
+    {
+     "ancestorTitles": [
+      "controller editing"
+     ],
+     "fullName": "controller editing #9 AC1: startEdit opens the form, and editTask saves the new title and closes it",
+     "status": "passed",
+     "title": "#9 AC1: startEdit opens the form, and editTask saves the new title and closes it"
+    },
+    {
+     "ancestorTitles": [
+      "controller editing"
+     ],
+     "fullName": "controller editing #9 AC3: an empty title is rejected, the old title kept and the form left open with a message",
+     "status": "passed",
+     "title": "#9 AC3: an empty title is rejected, the old title kept and the form left open with a message"
+    },
+    {
+     "ancestorTitles": [
+      "controller editing"
+     ],
+     "fullName": "controller editing #9 AC4: cancelEdit closes the form and keeps the old title",
+     "status": "passed",
+     "title": "#9 AC4: cancelEdit closes the form and keeps the old title"
+    },
+    {
+     "ancestorTitles": [
+      "controller deleting"
+     ],
+     "fullName": "controller deleting #11 AC1: removeTask removes an active task at once and renders",
+     "status": "passed",
+     "title": "#11 AC1: removeTask removes an active task at once and renders"
+    },
+    {
+     "ancestorTitles": [
+      "controller deleting"
+     ],
+     "fullName": "controller deleting #11 AC2: removeTask removes a completed task",
+     "status": "passed",
+     "title": "#11 AC2: removeTask removes a completed task"
+    },
+    {
+     "ancestorTitles": [
+      "controller deleting"
+     ],
+     "fullName": "controller deleting #11 AC3: the deletion is saved, and the task is gone when loaded again",
+     "status": "passed",
+     "title": "#11 AC3: the deletion is saved, and the task is gone when loaded again"
+    },
+    {
+     "ancestorTitles": [
+      "controller deleting"
+     ],
+     "fullName": "controller deleting #11: deleting the task being edited closes its edit form",
+     "status": "passed",
+     "title": "#11: deleting the task being edited closes its edit form"
+    },
+    {
+     "ancestorTitles": [
+      "controller today"
+     ],
+     "fullName": "controller today #27 AC1: the state carries the local date of the injected clock",
+     "status": "passed",
+     "title": "#27 AC1: the state carries the local date of the injected clock"
+    },
+    {
+     "ancestorTitles": [
+      "controller today"
+     ],
+     "fullName": "controller today #27 AC4: every rendered state reads the clock again",
+     "status": "passed",
+     "title": "#27 AC4: every rendered state reads the clock again"
+    }
+   ]
+  },
+  {
+   "name": "src/app/title.test.ts",
+   "status": "passed",
+   "assertionResults": [
+    {
+     "ancestorTitles": [
+      "APP_TITLE"
+     ],
+     "fullName": "APP_TITLE #2 AC3: the unit test runner runs (APP_TITLE is \"Task Tracker\")",
+     "status": "passed",
+     "title": "#2 AC3: the unit test runner runs (APP_TITLE is \"Task Tracker\")"
+    }
+   ]
+  },
+  {
+   "name": "src/domain/filter.test.ts",
+   "status": "passed",
+   "assertionResults": [
+    {
+     "ancestorTitles": [
+      "setCompleted"
+     ],
+     "fullName": "setCompleted #8 AC2: marks an active task done, without mutating the list",
+     "status": "passed",
+     "title": "#8 AC2: marks an active task done, without mutating the list"
+    },
+    {
+     "ancestorTitles": [
+      "setCompleted"
+     ],
+     "fullName": "setCompleted #8 AC3: marks a done task not done again",
+     "status": "passed",
+     "title": "#8 AC3: marks a done task not done again"
+    },
+    {
+     "ancestorTitles": [
+      "setCompleted"
+     ],
+     "fullName": "setCompleted returns the same list for an unknown id or no change",
+     "status": "passed",
+     "title": "returns the same list for an unknown id or no change"
+    },
+    {
+     "ancestorTitles": [
+      "tasksForView"
+     ],
+     "fullName": "tasksForView #8 AC1: Active lists only tasks that are not done",
+     "status": "passed",
+     "title": "#8 AC1: Active lists only tasks that are not done"
+    },
+    {
+     "ancestorTitles": [
+      "tasksForView"
+     ],
+     "fullName": "tasksForView #8 AC4: Completed lists only done tasks",
+     "status": "passed",
+     "title": "#8 AC4: Completed lists only done tasks"
+    }
+   ]
+  },
+  {
+   "name": "src/domain/sort.test.ts",
+   "status": "passed",
+   "assertionResults": [
+    {
+     "ancestorTitles": [
+      "sortTasks"
+     ],
+     "fullName": "sortTasks #7 AC1: orders due dates soonest first",
+     "status": "passed",
+     "title": "#7 AC1: orders due dates soonest first"
+    },
+    {
+     "ancestorTitles": [
+      "sortTasks"
+     ],
+     "fullName": "sortTasks #7 AC1: compares across months and years, not just days",
+     "status": "passed",
+     "title": "#7 AC1: compares across months and years, not just days"
+    },
+    {
+     "ancestorTitles": [
+      "sortTasks"
+     ],
+     "fullName": "sortTasks #7 AC2: puts every task without a due date after every task with one",
+     "status": "passed",
+     "title": "#7 AC2: puts every task without a due date after every task with one"
+    },
+    {
+     "ancestorTitles": [
+      "sortTasks"
+     ],
+     "fullName": "sortTasks #7 AC3: keeps creation order for tasks with the same due date",
+     "status": "passed",
+     "title": "#7 AC3: keeps creation order for tasks with the same due date"
+    },
+    {
+     "ancestorTitles": [
+      "sortTasks"
+     ],
+     "fullName": "sortTasks #7 AC3: keeps creation order for tasks without a due date",
+     "status": "passed",
+     "title": "#7 AC3: keeps creation order for tasks without a due date"
+    },
+    {
+     "ancestorTitles": [
+      "sortTasks"
+     ],
+     "fullName": "sortTasks #7 AC4: priority does not change the order of tasks with the same due date",
+     "status": "passed",
+     "title": "#7 AC4: priority does not change the order of tasks with the same due date"
+    },
+    {
+     "ancestorTitles": [
+      "sortTasks"
+     ],
+     "fullName": "sortTasks #7 AC5: the order is a pure function of the tasks, and the input is not mutated",
+     "status": "passed",
+     "title": "#7 AC5: the order is a pure function of the tasks, and the input is not mutated"
+    },
+    {
+     "ancestorTitles": [
+      "sortTasks"
+     ],
+     "fullName": "sortTasks returns an empty list for no tasks",
+     "status": "passed",
+     "title": "returns an empty list for no tasks"
+    }
+   ]
+  },
+  {
+   "name": "src/domain/task.test.ts",
+   "status": "passed",
+   "assertionResults": [
+    {
+     "ancestorTitles": [
+      "validateTitle"
+     ],
+     "fullName": "validateTitle #3 AC3: rejects an empty title",
+     "status": "passed",
+     "title": "#3 AC3: rejects an empty title"
+    },
+    {
+     "ancestorTitles": [
+      "validateTitle"
+     ],
+     "fullName": "validateTitle #3 AC3: rejects a whitespace-only title",
+     "status": "passed",
+     "title": "#3 AC3: rejects a whitespace-only title"
+    },
+    {
+     "ancestorTitles": [
+      "validateTitle"
+     ],
+     "fullName": "validateTitle #3 AC5: trims leading and trailing spaces",
+     "status": "passed",
+     "title": "#3 AC5: trims leading and trailing spaces"
+    },
+    {
+     "ancestorTitles": [
+      "validateTitle"
+     ],
+     "fullName": "validateTitle #3 AC2: accepts a valid title",
+     "status": "passed",
+     "title": "#3 AC2: accepts a valid title"
+    },
+    {
+     "ancestorTitles": [
+      "createTask"
+     ],
+     "fullName": "createTask #3 AC2: appends in creation order with the injected id and time",
+     "status": "passed",
+     "title": "#3 AC2: appends in creation order with the injected id and time"
+    },
+    {
+     "ancestorTitles": [
+      "createTask"
+     ],
+     "fullName": "createTask #3 AC5: stores the trimmed title",
+     "status": "passed",
+     "title": "#3 AC5: stores the trimmed title"
+    },
+    {
+     "ancestorTitles": [
+      "createTask"
+     ],
+     "fullName": "createTask #3 AC3: adds nothing for an invalid title and leaves the list unchanged",
+     "status": "passed",
+     "title": "#3 AC3: adds nothing for an invalid title and leaves the list unchanged"
+    },
+    {
+     "ancestorTitles": [
+      "createTask with a due date and a priority"
+     ],
+     "fullName": "createTask with a due date and a priority #6 AC1 AC2: keeps the given due date and priority",
+     "status": "passed",
+     "title": "#6 AC1 AC2: keeps the given due date and priority"
+    },
+    {
+     "ancestorTitles": [
+      "createTask with a due date and a priority"
+     ],
+     "fullName": "createTask with a due date and a priority #6 AC2: accepts each of low, medium and high",
+     "status": "passed",
+     "title": "#6 AC2: accepts each of low, medium and high"
+    },
+    {
+     "ancestorTitles": [
+      "createTask with a due date and a priority"
+     ],
+     "fullName": "createTask with a due date and a priority #6 AC3: an empty or missing due date and priority give none",
+     "status": "passed",
+     "title": "#6 AC3: an empty or missing due date and priority give none"
+    },
+    {
+     "ancestorTitles": [
+      "createTask with a due date and a priority"
+     ],
+     "fullName": "createTask with a due date and a priority #6 AC2: rejects a priority that is not low, medium or high",
+     "status": "passed",
+     "title": "#6 AC2: rejects a priority that is not low, medium or high"
+    },
+    {
+     "ancestorTitles": [
+      "createTask with a due date and a priority"
+     ],
+     "fullName": "createTask with a due date and a priority #6 AC1: rejects a due date that is not a calendar day",
+     "status": "passed",
+     "title": "#6 AC1: rejects a due date that is not a calendar day"
+    },
+    {
+     "ancestorTitles": [
+      "createTask with a due date and a priority"
+     ],
+     "fullName": "createTask with a due date and a priority #6 AC1: any real calendar day is allowed, including past dates",
+     "status": "passed",
+     "title": "#6 AC1: any real calendar day is allowed, including past dates"
+    },
+    {
+     "ancestorTitles": [
+      "updateTask"
+     ],
+     "fullName": "updateTask #9 AC1 AC2: changes the title (trimmed) and keeps every other field and the position",
+     "status": "passed",
+     "title": "#9 AC1 AC2: changes the title (trimmed) and keeps every other field and the position"
+    },
+    {
+     "ancestorTitles": [
+      "updateTask"
+     ],
+     "fullName": "updateTask #9 AC3: rejects an empty or whitespace-only title",
+     "status": "passed",
+     "title": "#9 AC3: rejects an empty or whitespace-only title"
+    },
+    {
+     "ancestorTitles": [
+      "updateTask"
+     ],
+     "fullName": "updateTask #10 AC1 AC3: sets and changes the due date and priority, keeping the other fields",
+     "status": "passed",
+     "title": "#10 AC1 AC3: sets and changes the due date and priority, keeping the other fields"
+    },
+    {
+     "ancestorTitles": [
+      "updateTask"
+     ],
+     "fullName": "updateTask #10 AC2 AC4: an empty value clears the due date and the priority",
+     "status": "passed",
+     "title": "#10 AC2 AC4: an empty value clears the due date and the priority"
+    },
+    {
+     "ancestorTitles": [
+      "updateTask"
+     ],
+     "fullName": "updateTask #10 AC4: clearing an existing priority removes only the priority",
+     "status": "passed",
+     "title": "#10 AC4: clearing an existing priority removes only the priority"
+    },
+    {
+     "ancestorTitles": [
+      "updateTask"
+     ],
+     "fullName": "updateTask #10: rejects an invalid due date or priority, changing nothing",
+     "status": "passed",
+     "title": "#10: rejects an invalid due date or priority, changing nothing"
+    },
+    {
+     "ancestorTitles": [
+      "updateTask"
+     ],
+     "fullName": "updateTask returns the list unchanged for an unknown id",
+     "status": "passed",
+     "title": "returns the list unchanged for an unknown id"
+    },
+    {
+     "ancestorTitles": [
+      "deleteTask"
+     ],
+     "fullName": "deleteTask #11 AC1 AC2: removes only the given id and keeps the others in order",
+     "status": "passed",
+     "title": "#11 AC1 AC2: removes only the given id and keeps the others in order"
+    },
+    {
+     "ancestorTitles": [
+      "deleteTask"
+     ],
+     "fullName": "deleteTask #11: returns the list unchanged for an unknown id",
+     "status": "passed",
+     "title": "#11: returns the list unchanged for an unknown id"
+    },
+    {
+     "ancestorTitles": [
+      "localDate and isOverdue"
+     ],
+     "fullName": "localDate and isOverdue #27 AC1: today is the local calendar day, just after and just before midnight",
+     "status": "passed",
+     "title": "#27 AC1: today is the local calendar day, just after and just before midnight"
+    },
+    {
+     "ancestorTitles": [
+      "localDate and isOverdue"
+     ],
+     "fullName": "localDate and isOverdue #27 AC1: an open task due before today is overdue",
+     "status": "passed",
+     "title": "#27 AC1: an open task due before today is overdue"
+    },
+    {
+     "ancestorTitles": [
+      "localDate and isOverdue"
+     ],
+     "fullName": "localDate and isOverdue #27 AC2: a task due today, later, or with no due date is not overdue",
+     "status": "passed",
+     "title": "#27 AC2: a task due today, later, or with no due date is not overdue"
+    },
+    {
+     "ancestorTitles": [
+      "localDate and isOverdue"
+     ],
+     "fullName": "localDate and isOverdue #27 AC3: a completed task is never overdue",
+     "status": "passed",
+     "title": "#27 AC3: a completed task is never overdue"
+    }
+   ]
+  },
+  {
+   "name": "src/storage/taskStore.test.ts",
+   "status": "passed",
+   "assertionResults": [
+    {
+     "ancestorTitles": [
+      "encodeTasks / decodeTasks"
+     ],
+     "fullName": "encodeTasks / decodeTasks #4 AC1: round-trips every Task field, in the same order",
+     "status": "passed",
+     "title": "#4 AC1: round-trips every Task field, in the same order"
+    },
+    {
+     "ancestorTitles": [
+      "loadTasks"
+     ],
+     "fullName": "loadTasks #4 AC4: nothing stored yet (first visit) gives an empty list",
+     "status": "passed",
+     "title": "#4 AC4: nothing stored yet (first visit) gives an empty list"
+    },
+    {
+     "ancestorTitles": [
+      "loadTasks"
+     ],
+     "fullName": "loadTasks #4 AC1: returns the saved tasks with the same titles in the same order",
+     "status": "passed",
+     "title": "#4 AC1: returns the saved tasks with the same titles in the same order"
+    },
+    {
+     "ancestorTitles": [
+      "loadTasks with corrupted data"
+     ],
+     "fullName": "loadTasks with corrupted data #5 AC1: not JSON gives an empty list and a reason, without throwing",
+     "status": "passed",
+     "title": "#5 AC1: not JSON gives an empty list and a reason, without throwing"
+    },
+    {
+     "ancestorTitles": [
+      "loadTasks with corrupted data"
+     ],
+     "fullName": "loadTasks with corrupted data #5 AC1: empty string gives an empty list and a reason, without throwing",
+     "status": "passed",
+     "title": "#5 AC1: empty string gives an empty list and a reason, without throwing"
+    },
+    {
+     "ancestorTitles": [
+      "loadTasks with corrupted data"
+     ],
+     "fullName": "loadTasks with corrupted data #5 AC2: wrong version gives an empty list and a reason, without throwing",
+     "status": "passed",
+     "title": "#5 AC2: wrong version gives an empty list and a reason, without throwing"
+    },
+    {
+     "ancestorTitles": [
+      "loadTasks with corrupted data"
+     ],
+     "fullName": "loadTasks with corrupted data #5 AC2: no version gives an empty list and a reason, without throwing",
+     "status": "passed",
+     "title": "#5 AC2: no version gives an empty list and a reason, without throwing"
+    },
+    {
+     "ancestorTitles": [
+      "loadTasks with corrupted data"
+     ],
+     "fullName": "loadTasks with corrupted data #5 AC2: not an object gives an empty list and a reason, without throwing",
+     "status": "passed",
+     "title": "#5 AC2: not an object gives an empty list and a reason, without throwing"
+    },
+    {
+     "ancestorTitles": [
+      "loadTasks with corrupted data"
+     ],
+     "fullName": "loadTasks with corrupted data #5 AC2: null gives an empty list and a reason, without throwing",
+     "status": "passed",
+     "title": "#5 AC2: null gives an empty list and a reason, without throwing"
+    },
+    {
+     "ancestorTitles": [
+      "loadTasks with corrupted data"
+     ],
+     "fullName": "loadTasks with corrupted data #5 AC2: tasks not a list gives an empty list and a reason, without throwing",
+     "status": "passed",
+     "title": "#5 AC2: tasks not a list gives an empty list and a reason, without throwing"
+    },
+    {
+     "ancestorTitles": [
+      "loadTasks with corrupted data"
+     ],
+     "fullName": "loadTasks with corrupted data #5 AC2: task not an object gives an empty list and a reason, without throwing",
+     "status": "passed",
+     "title": "#5 AC2: task not an object gives an empty list and a reason, without throwing"
+    },
+    {
+     "ancestorTitles": [
+      "loadTasks with corrupted data"
+     ],
+     "fullName": "loadTasks with corrupted data #5 AC2: missing id gives an empty list and a reason, without throwing",
+     "status": "passed",
+     "title": "#5 AC2: missing id gives an empty list and a reason, without throwing"
+    },
+    {
+     "ancestorTitles": [
+      "loadTasks with corrupted data"
+     ],
+     "fullName": "loadTasks with corrupted data #5 AC2: empty id gives an empty list and a reason, without throwing",
+     "status": "passed",
+     "title": "#5 AC2: empty id gives an empty list and a reason, without throwing"
+    },
+    {
+     "ancestorTitles": [
+      "loadTasks with corrupted data"
+     ],
+     "fullName": "loadTasks with corrupted data #5 AC2: title not a string gives an empty list and a reason, without throwing",
+     "status": "passed",
+     "title": "#5 AC2: title not a string gives an empty list and a reason, without throwing"
+    },
+    {
+     "ancestorTitles": [
+      "loadTasks with corrupted data"
+     ],
+     "fullName": "loadTasks with corrupted data #5 AC2: empty title gives an empty list and a reason, without throwing",
+     "status": "passed",
+     "title": "#5 AC2: empty title gives an empty list and a reason, without throwing"
+    },
+    {
+     "ancestorTitles": [
+      "loadTasks with corrupted data"
+     ],
+     "fullName": "loadTasks with corrupted data #5 AC2: untrimmed title gives an empty list and a reason, without throwing",
+     "status": "passed",
+     "title": "#5 AC2: untrimmed title gives an empty list and a reason, without throwing"
+    },
+    {
+     "ancestorTitles": [
+      "loadTasks with corrupted data"
+     ],
+     "fullName": "loadTasks with corrupted data #5 AC2: bad date format gives an empty list and a reason, without throwing",
+     "status": "passed",
+     "title": "#5 AC2: bad date format gives an empty list and a reason, without throwing"
+    },
+    {
+     "ancestorTitles": [
+      "loadTasks with corrupted data"
+     ],
+     "fullName": "loadTasks with corrupted data #5 AC2: impossible date gives an empty list and a reason, without throwing",
+     "status": "passed",
+     "title": "#5 AC2: impossible date gives an empty list and a reason, without throwing"
+    },
+    {
+     "ancestorTitles": [
+      "loadTasks with corrupted data"
+     ],
+     "fullName": "loadTasks with corrupted data #5 AC2: bad priority gives an empty list and a reason, without throwing",
+     "status": "passed",
+     "title": "#5 AC2: bad priority gives an empty list and a reason, without throwing"
+    },
+    {
+     "ancestorTitles": [
+      "loadTasks with corrupted data"
+     ],
+     "fullName": "loadTasks with corrupted data #5 AC2: completed not boolean gives an empty list and a reason, without throwing",
+     "status": "passed",
+     "title": "#5 AC2: completed not boolean gives an empty list and a reason, without throwing"
+    },
+    {
+     "ancestorTitles": [
+      "loadTasks with corrupted data"
+     ],
+     "fullName": "loadTasks with corrupted data #5 AC2: bad createdAt gives an empty list and a reason, without throwing",
+     "status": "passed",
+     "title": "#5 AC2: bad createdAt gives an empty list and a reason, without throwing"
+    },
+    {
+     "ancestorTitles": [
+      "loadTasks with corrupted data"
+     ],
+     "fullName": "loadTasks with corrupted data #5 AC2: one bad task among good ones (all or nothing) gives an empty list and a reason, without throwing",
+     "status": "passed",
+     "title": "#5 AC2: one bad task among good ones (all or nothing) gives an empty list and a reason, without throwing"
+    },
+    {
+     "ancestorTitles": [
+      "loadTasks with corrupted data"
+     ],
+     "fullName": "loadTasks with corrupted data #5 AC2: a getItem that throws gives an empty list",
+     "status": "passed",
+     "title": "#5 AC2: a getItem that throws gives an empty list"
+    },
+    {
+     "ancestorTitles": [
+      "loadTasks with corrupted data"
+     ],
+     "fullName": "loadTasks with corrupted data #5 AC4: loading never writes, so corrupted data stays as it was",
+     "status": "passed",
+     "title": "#5 AC4: loading never writes, so corrupted data stays as it was"
+    },
+    {
+     "ancestorTitles": [
+      "loadTasks with corrupted data"
+     ],
+     "fullName": "loadTasks with corrupted data #5 AC2: valid data with every field still loads",
+     "status": "passed",
+     "title": "#5 AC2: valid data with every field still loads"
+    },
+    {
+     "ancestorTitles": [
+      "saveTasks"
+     ],
+     "fullName": "saveTasks #5 AC3: a setItem that throws is reported, not thrown",
+     "status": "passed",
+     "title": "#5 AC3: a setItem that throws is reported, not thrown"
+    },
+    {
+     "ancestorTitles": [
+      "saveTasks"
+     ],
+     "fullName": "saveTasks #5 AC3: a successful save reports ok",
+     "status": "passed",
+     "title": "#5 AC3: a successful save reports ok"
+    },
+    {
+     "ancestorTitles": [
+      "saveTasks"
+     ],
+     "fullName": "saveTasks #4 AC3: writes the exact stored format under task-tracker:v1",
+     "status": "passed",
+     "title": "#4 AC3: writes the exact stored format under task-tracker:v1"
+    }
+   ]
+  },
+  {
+   "name": "src/ui/render.test.ts",
+   "status": "passed",
+   "assertionResults": [
+    {
+     "ancestorTitles": [
+      "render"
+     ],
+     "fullName": "render #3 AC1: shows a labelled title field and an Add button",
+     "status": "passed",
+     "title": "#3 AC1: shows a labelled title field and an Add button"
+    },
+    {
+     "ancestorTitles": [
+      "render"
+     ],
+     "fullName": "render #3 AC2: lists titles as text, never as HTML",
+     "status": "passed",
+     "title": "#3 AC2: lists titles as text, never as HTML"
+    },
+    {
+     "ancestorTitles": [
+      "render"
+     ],
+     "fullName": "render #6 AC5: the priority control offers exactly none, Low, Medium and High, and is labelled",
+     "status": "passed",
+     "title": "#6 AC5: the priority control offers exactly none, Low, Medium and High, and is labelled"
+    },
+    {
+     "ancestorTitles": [
+      "render"
+     ],
+     "fullName": "render #6 AC1: the due date field is a labelled date input",
+     "status": "passed",
+     "title": "#6 AC1: the due date field is a labelled date input"
+    },
+    {
+     "ancestorTitles": [
+      "render"
+     ],
+     "fullName": "render #6 AC1 AC2: a task shows its due date and priority",
+     "status": "passed",
+     "title": "#6 AC1 AC2: a task shows its due date and priority"
+    },
+    {
+     "ancestorTitles": [
+      "render"
+     ],
+     "fullName": "render #6 AC3: a task without a due date or priority shows only its title",
+     "status": "passed",
+     "title": "#6 AC3: a task without a due date or priority shows only its title"
+    },
+    {
+     "ancestorTitles": [
+      "render"
+     ],
+     "fullName": "render #7 AC1 AC2: lists tasks soonest due first, undated last, without reordering the state",
+     "status": "passed",
+     "title": "#7 AC1 AC2: lists tasks soonest due first, undated last, without reordering the state"
+    },
+    {
+     "ancestorTitles": [
+      "render"
+     ],
+     "fullName": "render #5 AC3: shows the storage warning in an alert region, and empties it when cleared",
+     "status": "passed",
+     "title": "#5 AC3: shows the storage warning in an alert region, and empties it when cleared"
+    },
+    {
+     "ancestorTitles": [
+      "render"
+     ],
+     "fullName": "render #3 AC2: re-rendering keeps the same form, so the field keeps its focus",
+     "status": "passed",
+     "title": "#3 AC2: re-rendering keeps the same form, so the field keeps its focus"
+    },
+    {
+     "ancestorTitles": [
+      "bindEvents"
+     ],
+     "fullName": "bindEvents #3 AC2: submitting adds the task and clears the field",
+     "status": "passed",
+     "title": "#3 AC2: submitting adds the task and clears the field"
+    },
+    {
+     "ancestorTitles": [
+      "bindEvents"
+     ],
+     "fullName": "bindEvents #6 AC1 AC2: the date and priority are passed on, then reset with the title",
+     "status": "passed",
+     "title": "#6 AC1 AC2: the date and priority are passed on, then reset with the title"
+    },
+    {
+     "ancestorTitles": [
+      "Active and Completed views"
+     ],
+     "fullName": "Active and Completed views #8 AC1: Active is shown by default, marked as current, with only tasks not done",
+     "status": "passed",
+     "title": "#8 AC1: Active is shown by default, marked as current, with only tasks not done"
+    },
+    {
+     "ancestorTitles": [
+      "Active and Completed views"
+     ],
+     "fullName": "Active and Completed views #8 AC4: the Completed view lists only done tasks and is marked as current",
+     "status": "passed",
+     "title": "#8 AC4: the Completed view lists only done tasks and is marked as current"
+    },
+    {
+     "ancestorTitles": [
+      "Active and Completed views"
+     ],
+     "fullName": "Active and Completed views #8 AC2 AC3: each task has a checkbox that names the task and shows whether it is done",
+     "status": "passed",
+     "title": "#8 AC2 AC3: each task has a checkbox that names the task and shows whether it is done"
+    },
+    {
+     "ancestorTitles": [
+      "Active and Completed views"
+     ],
+     "fullName": "Active and Completed views #8 AC2 AC3 AC4: ticking and unticking moves a task between the views",
+     "status": "passed",
+     "title": "#8 AC2 AC3 AC4: ticking and unticking moves a task between the views"
+    },
+    {
+     "ancestorTitles": [
+      "inline editing"
+     ],
+     "fullName": "inline editing #10 AC1-AC4: the edit form holds the due date and priority, and saving changes them",
+     "status": "passed",
+     "title": "#10 AC1-AC4: the edit form holds the due date and priority, and saving changes them"
+    },
+    {
+     "ancestorTitles": [
+      "inline editing"
+     ],
+     "fullName": "inline editing #9 AC1: Edit opens a labelled field with the title, and saving shows the new title",
+     "status": "passed",
+     "title": "#9 AC1: Edit opens a labelled field with the title, and saving shows the new title"
+    },
+    {
+     "ancestorTitles": [
+      "inline editing"
+     ],
+     "fullName": "inline editing #9 AC2: editing a completed task keeps it completed",
+     "status": "passed",
+     "title": "#9 AC2: editing a completed task keeps it completed"
+    },
+    {
+     "ancestorTitles": [
+      "inline editing"
+     ],
+     "fullName": "inline editing #9 AC3: an empty title shows a message next to the field and keeps the old title",
+     "status": "passed",
+     "title": "#9 AC3: an empty title shows a message next to the field and keeps the old title"
+    },
+    {
+     "ancestorTitles": [
+      "inline editing"
+     ],
+     "fullName": "inline editing #9 AC4: Escape cancels, keeps the old title and returns focus to the Edit button",
+     "status": "passed",
+     "title": "#9 AC4: Escape cancels, keeps the old title and returns focus to the Edit button"
+    },
+    {
+     "ancestorTitles": [
+      "inline editing"
+     ],
+     "fullName": "inline editing #9 AC4: the Cancel button cancels too",
+     "status": "passed",
+     "title": "#9 AC4: the Cancel button cancels too"
+    },
+    {
+     "ancestorTitles": [
+      "render overdue label"
+     ],
+     "fullName": "render overdue label #27 AC1: an active task due before today shows \"Overdue\" after its due date",
+     "status": "passed",
+     "title": "#27 AC1: an active task due before today shows \"Overdue\" after its due date"
+    },
+    {
+     "ancestorTitles": [
+      "render overdue label"
+     ],
+     "fullName": "render overdue label #27 AC2: tasks due today, later or never show no label",
+     "status": "passed",
+     "title": "#27 AC2: tasks due today, later or never show no label"
+    },
+    {
+     "ancestorTitles": [
+      "render overdue label"
+     ],
+     "fullName": "render overdue label #27 AC3: a completed task in the Completed view shows no label",
+     "status": "passed",
+     "title": "#27 AC3: a completed task in the Completed view shows no label"
+    },
+    {
+     "ancestorTitles": [
+      "render overdue label"
+     ],
+     "fullName": "render overdue label #27 AC5: without today no label is shown, and the due text and order are unchanged",
+     "status": "passed",
+     "title": "#27 AC5: without today no label is shown, and the due text and order are unchanged"
+    }
+   ]
+  }
+ ]
+}

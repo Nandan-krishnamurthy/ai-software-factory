@@ -7,8 +7,11 @@ told apart from the human's when both use the same GitHub account (D5).
 * ``post_reply`` adds a new comment that starts with ``<!-- factory:reply -->``, or
   ``<!-- factory:reply to=<id> -->`` when it answers one feedback item (T4.2).
 * ``upsert_checkpoint`` keeps exactly **one** checkpoint comment per issue: it edits the
-  existing one in place, or creates it if there is none. An evidence block already in the
-  note (``set_checkpoint_evidence``, T6.1) is carried over unless the new note has one.
+  existing one in place, or creates it if there is none. An evidence block
+  (``set_checkpoint_evidence``, T6.1) or an AC-to-test map block (``set_checkpoint_map``,
+  T6.2) already in the note is always carried over. A note may never supply one of its
+  own (T6.2): only ``verify run`` and ``verify map`` write these blocks, so ``verdict
+  check`` can trust them.
 
 Comments go through the REST issue-comments API, which covers PRs as well (every PR is
 an issue). Bodies are sent as JSON on stdin, never as command-line arguments.
@@ -28,6 +31,14 @@ MAX_BODY = 65536
 # delimiters. They are not factory markers: the state engine never reads them.
 EVIDENCE_START = "<!-- evidence:start -->"
 EVIDENCE_END = "<!-- evidence:end -->"
+# The AC-to-test map (``verify map``, T6.2) lives there too, between its own delimiters.
+MAP_START = "<!-- acmap:start -->"
+MAP_END = "<!-- acmap:end -->"
+# The blocks a later checkpoint carries over from the previous note.
+CARRIED_BLOCKS = ((EVIDENCE_START, EVIDENCE_END), (MAP_START, MAP_END))
+# A station's note may contain none of these: each one alone could end, fake or shift a
+# block the factory wrote.
+NOTE_DELIMITERS = (EVIDENCE_START, EVIDENCE_END, MAP_START, MAP_END)
 
 
 class CommentError(FactoryError):
@@ -105,7 +116,16 @@ def upsert_checkpoint(
 
     ``fix_attempts`` / ``review_round`` default to the values in the existing checkpoint,
     so a station that does not mention them never resets them by accident.
+
+    ``note`` may not contain an evidence or AC-to-test map delimiter: those blocks come
+    only from ``verify run`` and ``verify map``, and the ones already stored are carried.
     """
+    found = [d for d in NOTE_DELIMITERS if d in (note or "")]
+    if found:
+        raise CommentError("a checkpoint note may not contain " + ", ".join(found)
+                           + ": evidence and AC-to-test map blocks are written only by "
+                             "`verify run` and `verify map`, and the stored ones are "
+                             "carried over")
     existing = find_checkpoint(list_comments(gh, repo, number))
     previous = existing[1] if existing else None
     try:
@@ -123,10 +143,11 @@ def upsert_checkpoint(
 
     line = (f"**Factory checkpoint:** {station} complete. Next: {next_station}. "
             f"Branch: `{branch}` @ `{sha[:7]}`.")
-    if existing is not None and EVIDENCE_START not in note:
-        # The evidence ledger (``verify run``) outlives a station's note, such as S10's
-        # verdict; ``verify check`` decides whether it is still current.
-        carried = evidence_block(existing[0].get("body") or "")
+    for start, end in CARRIED_BLOCKS if existing is not None else ():
+        # The evidence ledger (``verify run``) and the AC-to-test map (``verify map``)
+        # outlive a station's note, such as S10's verdict; ``verify check`` and
+        # ``verdict check`` decide whether they are still current.
+        carried = note_block(existing[0].get("body") or "", start, end)
         if carried:
             note = f"{note.strip()}\n\n{carried}"
     text = line + (f"\n\n{note.strip()}" if note.strip() else "")
@@ -142,29 +163,51 @@ def upsert_checkpoint(
     return Posted("updated", updated["id"], updated["html_url"], body)
 
 
+def note_block(body: str, start_mark: str, end_mark: str) -> str | None:
+    """The block from ``start_mark`` to ``end_mark`` in a comment body, or ``None``."""
+    body = (body or "").replace("\r\n", "\n")
+    start = body.find(start_mark)
+    end = body.find(end_mark, start + 1) if start >= 0 else -1
+    return body[start:end + len(end_mark)] if start >= 0 and end >= 0 else None
+
+
 def evidence_block(body: str) -> str | None:
     """The evidence block (``EVIDENCE_START`` … ``EVIDENCE_END``) in a comment body."""
-    body = (body or "").replace("\r\n", "\n")
-    start = body.find(EVIDENCE_START)
-    end = body.find(EVIDENCE_END, start + 1) if start >= 0 else -1
-    return body[start:end + len(EVIDENCE_END)] if start >= 0 and end >= 0 else None
+    return note_block(body, EVIDENCE_START, EVIDENCE_END)
+
+
+def map_block(body: str) -> str | None:
+    """The AC-to-test map block (``MAP_START`` … ``MAP_END``) in a comment body."""
+    return note_block(body, MAP_START, MAP_END)
 
 
 def set_checkpoint_evidence(gh: Gh, repo: str, number: int, block: str) -> Posted:
     """Put ``block`` into the note of issue ``number``'s checkpoint comment, replacing an
     earlier evidence block. The marker and the rest of the note stay exactly as they are,
     so the state engine's view of the story does not change."""
-    if not (block.startswith(EVIDENCE_START) and block.endswith(EVIDENCE_END)):
-        raise CommentError("an evidence block must start and end with its delimiters")
+    return _set_block(gh, repo, number, block, EVIDENCE_START, EVIDENCE_END, "evidence")
+
+
+def set_checkpoint_map(gh: Gh, repo: str, number: int, block: str) -> Posted:
+    """Put the AC-to-test map ``block`` into the checkpoint note, the way
+    ``set_checkpoint_evidence`` does for the evidence."""
+    return _set_block(gh, repo, number, block, MAP_START, MAP_END, "AC-to-test map")
+
+
+def _set_block(gh: Gh, repo: str, number: int, block: str, start: str, end: str,
+               what: str) -> Posted:
+    article = "an" if what[0] in "aeiouAEIOU" else "a"
+    if not (block.startswith(start) and block.endswith(end)):
+        raise CommentError(f"{article} {what} block must start and end with its delimiters")
     if has_factory_marker(block):
-        raise CommentError("the evidence block must not contain '<!-- factory:' markers")
+        raise CommentError(f"the {what} block must not contain '<!-- factory:' markers")
     existing = find_checkpoint(list_comments(gh, repo, number))
     if existing is None:
         raise CommentError(f"issue #{number} has no checkpoint comment yet (S07 writes the "
-                           "first one); the evidence has nowhere to go")
+                           f"first one); the {what} has nowhere to go")
     comment = existing[0]
     body = (comment.get("body") or "").replace("\r\n", "\n").rstrip()
-    old = evidence_block(body)
+    old = note_block(body, start, end)
     body = body.replace(old, block) if old else f"{body}\n\n{block}"
     if len(body) > MAX_BODY:
         raise CommentError(f"checkpoint body would be {len(body)} characters; GitHub's limit "

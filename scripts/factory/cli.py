@@ -7,6 +7,7 @@ from pathlib import Path
 
 from factory import (
     __version__,
+    acmap,
     closeout,
     commands,
     comments,
@@ -184,17 +185,24 @@ def build_parser() -> argparse.ArgumentParser:
     vcheck = verdict_sub.add_parser(
         "check", help="validate a verdict against the story's acceptance criteria",
         description="Checks that the verdict has one line per acceptance criterion of the "
-                    "issue, each with evidence, and a Suite line. Exit 0: valid and nothing "
-                    "failed. Exit 1: invalid, or an AC or the suite failed (S11 must not "
-                    "open a ready PR). Reads --file, or else the note of the issue's "
-                    "checkpoint comment, where S10 stores the verdict. Read-only.")
+                    "issue, each with evidence, and a Suite line, and holds it against "
+                    "the AC-to-test map `verify map` stored in the checkpoint, which is "
+                    "required: it must be beside the evidence it was built from and for "
+                    "the branch head on origin. It refuses a pass for an AC without a "
+                    "passing mapped test, a not-verifiable that hides a failing test, and "
+                    "an AC without a test that is not not-verifiable with manual steps. "
+                    "Exit 0: valid and nothing failed. Exit 1: invalid (including no or a "
+                    "stale map), or an AC or the suite failed (S11 must not open a ready "
+                    "PR). Reads the verdict from --file, or else the note of the issue's "
+                    "checkpoint comment, where S10 stores it. Read-only.")
     vcheck.add_argument("--issue", type=_positive_int, required=True, metavar="N")
     vcheck.add_argument("--file", metavar="F", help="UTF-8 file with the verdict (default: "
                                                    "the checkpoint comment's note)")
     vcheck.set_defaults(handler=_verdict_check, needs_target=True)
 
     verify_parser = subparsers.add_parser(
-        "verify", help="run the target's quality commands and record the evidence (T6.1)")
+        "verify", help="run the target's quality commands and record the evidence (T6.1), "
+                       "and map each AC to its tests (T6.2)")
     verify_sub = verify_parser.add_subparsers(dest="verify_command", metavar="<action>")
     verify_sub.required = True
     vrun = verify_sub.add_parser(
@@ -216,8 +224,31 @@ def build_parser() -> argparse.ArgumentParser:
                            "<temp dir>/evidence-<N>.json)")
     vrun.add_argument("--timeout", type=_positive_float, default=evidence.DEFAULT_TIMEOUT,
                       metavar="SECONDS", help="per command (default: %(default)g)")
+    vrun.add_argument("--report", action="append", default=[], metavar="PATH",
+                      help="a JUnit or JSON report the test command writes, relative to "
+                           "the target; kept beside the evidence for `verify map` if the "
+                           "run created or changed it (repeatable)")
     vrun.add_argument("--json", action="store_true", help="print the evidence as JSON")
     vrun.set_defaults(handler=_verify_run, needs_target=True)
+    vmap = verify_sub.add_parser(
+        "map", help="map each acceptance criterion to its tests and their recorded results",
+        description="Finds the tests named `#N AC<n>` that the story branch adds (the diff "
+                    "against the default branch on origin, at the evidence's commit), and "
+                    "their results in the recorded run: the reports `verify run --report` "
+                    "captured, else the test command's full output. Each AC is passed, "
+                    "failed or missing (no test, or none with a passing result). The "
+                    "evidence comes only from the checkpoint note, and the full output and "
+                    "reports `verify run` kept at <temp dir>/evidence-<N>.* are used only "
+                    "if their SHA-256 is the one that evidence recorded. Writes the map to "
+                    "--out and into the checkpoint note, where `verdict check` holds the "
+                    "verifier's verdict against it. Refuses evidence that is not for the "
+                    "branch head on origin. Exit 0: no mapped test failed. Exit 1: one "
+                    "failed, or the evidence cannot be used. Runs no tests.")
+    vmap.add_argument("--issue", type=_positive_int, required=True, metavar="N")
+    vmap.add_argument("--out", metavar="F",
+                      help="where to write the map JSON (default: <temp dir>/acmap-<N>.json)")
+    vmap.add_argument("--json", action="store_true", help="print the map as JSON")
+    vmap.set_defaults(handler=_verify_map, needs_target=True)
     vcheck_ev = verify_sub.add_parser(
         "check", help="check that recorded evidence is current and passing",
         description="Reads the evidence from --file, or else from the issue's checkpoint "
@@ -544,15 +575,27 @@ def _closeout(args: argparse.Namespace) -> int:
 def _verdict_check(args: argparse.Namespace) -> int:
     gh = Gh()
     issue = gh.api(f"repos/{args.target.repo}/issues/{args.issue}")
+    found = comments.find_checkpoint(comments.list_comments(gh, args.target.repo, args.issue))
+    body = None if found is None else (found[0].get("body") or "").replace("\r\n", "\n")
     if args.file:
         try:
             text = Path(args.file).read_text(encoding="utf-8")
         except OSError as err:
             raise verdict.VerdictError(f"cannot read --file {args.file}: {err}") from None
     else:
-        text = verdict.checkpoint_note(gh, args.target.repo, args.issue)
+        text = verdict.checkpoint_note(gh, args.target.repo, args.issue, body)
     result = verdict.parse(text, verdict.issue_acs(issue.get("body") or ""))
-    print(verdict.render(result))
+    # The AC-to-test map is required (T6.2), and is trusted only from the checkpoint,
+    # beside its evidence and for the branch head on origin.
+    mapping = acmap.from_body(body) if body is not None else None
+    recorded = evidence.from_body(body) if body is not None else None
+    head = (evidence.remote_head(Git(args.target.path), mapping.branch)
+            if mapping is not None else None)
+    result.problems += verdict.cross_check(
+        result, mapping, issue=args.issue,
+        evidence_sha=recorded.sha if recorded is not None else None,
+        checkpoint_branch=found[1].branch if found is not None else None, branch_head=head)
+    _print_safe(verdict.render(result, mapping))
     return 0 if result.ok else 1
 
 
@@ -566,7 +609,7 @@ def _verify_run(args: argparse.Namespace) -> int:
                                      "(S07 writes the first one); nothing was run")
     result = evidence.run_verification(
         path, issue=args.issue, repo=repo, git=Git(path),
-        vet=evidence.guard_vetter(path), timeout=args.timeout)
+        vet=evidence.guard_vetter(path), timeout=args.timeout, reports=args.report)
     out = evidence.write(result, Path(args.out) if args.out else
                          evidence.default_path(args.issue))
     comments.set_checkpoint_evidence(gh, repo, args.issue, evidence.to_block(result))
@@ -575,25 +618,61 @@ def _verify_run(args: argparse.Namespace) -> int:
     return 1 if result.failures() or result.unapproved else 0
 
 
+def _recorded_evidence(gh: Gh, repo: str, issue: int, file: str | None
+                       ) -> tuple[evidence.Evidence, str | None]:
+    """The evidence from ``file``, or else from the checkpoint note, and the branch the
+    checkpoint names (``None`` for a file)."""
+    if file:
+        return evidence.read(Path(file)), None
+    found = comments.find_checkpoint(comments.list_comments(gh, repo, issue))
+    if found is None:
+        raise evidence.EvidenceError(f"issue #{issue} has no checkpoint comment")
+    result = evidence.from_body(found[0].get("body") or "")
+    if result is None:
+        raise evidence.EvidenceError(f"issue #{issue}'s checkpoint has no evidence; "
+                                     "run `verify run` first")
+    return result, found[1].branch
+
+
 def _verify_check(args: argparse.Namespace) -> int:
     repo, git = args.target.repo, Git(args.target.path)
-    expected_branch = None
-    if args.file:
-        result = evidence.read(Path(args.file))
-    else:
-        found = comments.find_checkpoint(comments.list_comments(Gh(), repo, args.issue))
-        if found is None:
-            raise evidence.EvidenceError(f"issue #{args.issue} has no checkpoint comment")
-        result = evidence.from_body(found[0].get("body") or "")
-        if result is None:
-            raise evidence.EvidenceError(f"issue #{args.issue}'s checkpoint has no evidence; "
-                                         "run `verify run` first")
-        expected_branch = found[1].branch
+    result, expected_branch = _recorded_evidence(Gh(), repo, args.issue, args.file)
     problems = evidence.check(result, issue=args.issue,
                               branch_head=evidence.remote_head(git, result.branch),
                               expected_branch=expected_branch)
     _print_safe(evidence.render_check(result, problems))
     return 1 if problems else 0
+
+
+def _verify_map(args: argparse.Namespace) -> int:
+    repo, git, gh = args.target.repo, Git(args.target.path), Gh()
+    issue = gh.api(f"repos/{repo}/issues/{args.issue}")
+    if "pull_request" in issue:
+        raise acmap.AcMapError(f"#{args.issue} is a pull request, not a story issue")
+    # Only the checkpoint's evidence, which only `verify run` writes, is trusted; the local
+    # files beside the default evidence path are used only if their hashes match it.
+    recorded, expected_branch = _recorded_evidence(gh, repo, args.issue, None)
+    failures = set(recorded.failures())
+    unusable = [p for p in evidence.check(recorded, issue=args.issue,
+                                          branch_head=evidence.remote_head(git, recorded.branch),
+                                          expected_branch=expected_branch)
+                if p not in failures]
+    if unusable:
+        raise acmap.AcMapError("the evidence cannot be mapped: " + "; ".join(unusable))
+    evidence_path = evidence.default_path(args.issue)
+    output, output_note = evidence.recorded_output(recorded, evidence_path)
+    reports, notes = evidence.recorded_reports(recorded, evidence_path)
+    base = evidence.default_ref(git)
+    result = acmap.build(
+        issue=args.issue, acs=verdict.issue_acs(issue.get("body") or ""), evidence=recorded,
+        base=f"{base}@{git.rev_parse(base)[:7]}",
+        diff=acmap.branch_diff(git, base, recorded.sha), output=output,
+        output_note=output_note, reports=reports, notes=notes)
+    out = acmap.write(result, Path(args.out) if args.out else acmap.default_path(args.issue))
+    comments.set_checkpoint_map(gh, repo, args.issue, acmap.to_block(result))
+    _print_safe(json.dumps(result.to_dict(), indent=2, ensure_ascii=False) if args.json
+                else acmap.render(result, out))
+    return 1 if result.failed() else 0
 
 
 def _print_safe(text: str) -> None:

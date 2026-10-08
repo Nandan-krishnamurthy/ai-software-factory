@@ -9,8 +9,9 @@ they describe how the factory was proven.
 The one place allowed to name an ecosystem is codebase discovery (S01, T5.1), which must
 know the manifests of every stack it supports. That exception is narrow and checked: those
 files must also name the other stacks, so they stay multi-stack. The same holds for the
-evidence ledger's summary parser (T6.1), which must recognise the output of every test
-runner it supports: it may name test runners only alongside the others.
+evidence ledger's summary parser (T6.1) and the AC-to-test map's result readers (T6.2),
+which must recognise the output and reports of every test runner they support: they may
+name test runners only alongside the others.
 """
 
 import json
@@ -48,8 +49,9 @@ NODE = r"\bnpm\b|\byarn\b|\bpnpm\b|package\.json|package-lock|node_modules"
 DISCOVERY_FILES = {Path("scripts/factory/discovery.py"), Path("stations/S01-discovery.md"),
                    Path("scripts/factory/cli.py")}  # cli.py: the `discover` help text
 OTHER_STACKS = ("Python", "go.mod", "Cargo.toml", "Makefile")
-# Test-runner names that only the multi-runner summary parser may use (T6.1).
-RUNNER_FILES = {Path("scripts/factory/evidence.py")}
+# Test-runner names that only the multi-runner summary parser (T6.1) and the AC-to-test
+# map's result readers (T6.2) may use.
+RUNNER_FILES = {Path("scripts/factory/evidence.py"), Path("scripts/factory/acmap.py")}
 OTHER_RUNNERS = ("pytest", "unittest", "go test", "cargo test")
 
 
@@ -108,6 +110,7 @@ class ReusabilityTest(unittest.TestCase):
                 "templates/x.md": "Store it in localStorage with Vite.",
                 "scripts/factory/discovery.py": "npm ci  # allowed here",
                 "scripts/factory/evidence.py": "_VITEST = ...  # allowed here",
+                "scripts/factory/acmap.py": "Playwright JSON  # allowed here",
             }
             for name, text in planted.items():
                 (root / name).parent.mkdir(parents=True, exist_ok=True)
@@ -124,6 +127,7 @@ class ReusabilityTest(unittest.TestCase):
                 self.assertIn(expected, whys)
         self.assertNotIn("discovery.py", whys)
         self.assertNotIn("evidence.py", whys)
+        self.assertNotIn("acmap.py", whys)
 
     def test_discovery_names_node_only_among_other_stacks(self):
         """The Node.js exception is for multi-stack discovery, not a Node.js factory."""

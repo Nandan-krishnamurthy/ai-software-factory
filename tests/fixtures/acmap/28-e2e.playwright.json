@@ -1,0 +1,337 @@
+{
+ "suites": [
+  {
+   "title": "accessibility.spec.ts",
+   "file": "accessibility.spec.ts",
+   "column": 0,
+   "line": 0,
+   "specs": [
+    {
+     "title": "#12 AC1: axe reports no violations in the Active view",
+     "ok": true,
+     "tags": [],
+     "tests": [
+      {
+       "timeout": 30000,
+       "annotations": [],
+       "expectedStatus": "passed",
+       "projectId": "chromium",
+       "projectName": "chromium",
+       "results": [
+        {
+         "status": "passed",
+         "duration": 2251,
+         "errors": [],
+         "retry": 0,
+         "annotations": []
+        }
+       ],
+       "status": "expected"
+      }
+     ],
+     "id": "ddd864604af8a6a0198f-2e130c9eec677d4d76bc",
+     "file": "accessibility.spec.ts",
+     "line": 33,
+     "column": 1
+    },
+    {
+     "title": "#12 AC1: axe reports no violations in the Completed view",
+     "ok": true,
+     "tags": [],
+     "tests": [
+      {
+       "timeout": 30000,
+       "annotations": [],
+       "expectedStatus": "passed",
+       "projectId": "chromium",
+       "projectName": "chromium",
+       "results": [
+        {
+         "status": "passed",
+         "duration": 2455,
+         "errors": [],
+         "retry": 0,
+         "annotations": []
+        }
+       ],
+       "status": "expected"
+      }
+     ],
+     "id": "ddd864604af8a6a0198f-b9e4dd40604ae5176a76",
+     "file": "accessibility.spec.ts",
+     "line": 39,
+     "column": 1
+    },
+    {
+     "title": "#12 AC1: axe reports no violations with a task in edit mode",
+     "ok": true,
+     "tags": [],
+     "tests": [
+      {
+       "timeout": 30000,
+       "annotations": [],
+       "expectedStatus": "passed",
+       "projectId": "chromium",
+       "projectName": "chromium",
+       "results": [
+        {
+         "status": "passed",
+         "duration": 3559,
+         "errors": [],
+         "retry": 0,
+         "annotations": []
+        }
+       ],
+       "status": "expected"
+      }
+     ],
+     "id": "ddd864604af8a6a0198f-9a601539d00e3dc711b6",
+     "file": "accessibility.spec.ts",
+     "line": 47,
+     "column": 1
+    },
+    {
+     "title": "#12 AC2: the whole task journey works with the keyboard only",
+     "ok": true,
+     "tags": [],
+     "tests": [
+      {
+       "timeout": 30000,
+       "annotations": [],
+       "expectedStatus": "passed",
+       "projectId": "chromium",
+       "projectName": "chromium",
+       "results": [
+        {
+         "status": "passed",
+         "duration": 1868,
+         "errors": [],
+         "retry": 0,
+         "annotations": []
+        }
+       ],
+       "status": "expected"
+      }
+     ],
+     "id": "ddd864604af8a6a0198f-28de73c91ff4ed44f3b0",
+     "file": "accessibility.spec.ts",
+     "line": 59,
+     "column": 1
+    },
+    {
+     "title": "#12 AC3: the checkbox, Edit and Delete names include the task title",
+     "ok": true,
+     "tags": [],
+     "tests": [
+      {
+       "timeout": 30000,
+       "annotations": [],
+       "expectedStatus": "passed",
+       "projectId": "chromium",
+       "projectName": "chromium",
+       "results": [
+        {
+         "status": "passed",
+         "duration": 410,
+         "errors": [],
+         "retry": 0,
+         "annotations": []
+        }
+       ],
+       "status": "expected"
+      }
+     ],
+     "id": "ddd864604af8a6a0198f-e9368ba940ff046878ee",
+     "file": "accessibility.spec.ts",
+     "line": 103,
+     "column": 1
+    },
+    {
+     "title": "#12 AC4: the empty-title message is in a live region the field refers to",
+     "ok": true,
+     "tags": [],
+     "tests": [
+      {
+       "timeout": 30000,
+       "annotations": [],
+       "expectedStatus": "passed",
+       "projectId": "chromium",
+       "projectName": "chromium",
+       "results": [
+        {
+         "status": "passed",
+         "duration": 445,
+         "errors": [],
+         "retry": 0,
+         "annotations": []
+        }
+       ],
+       "status": "expected"
+      }
+     ],
+     "id": "ddd864604af8a6a0198f-45d0c7110c71623e04f2",
+     "file": "accessibility.spec.ts",
+     "line": 115,
+     "column": 1
+    },
+    {
+     "title": "#12 AC5: every focused element shows a visible focus indicator",
+     "ok": true,
+     "tags": [],
+     "tests": [
+      {
+       "timeout": 30000,
+       "annotations": [],
+       "expectedStatus": "passed",
+       "projectId": "chromium",
+       "projectName": "chromium",
+       "results": [
+        {
+         "status": "passed",
+         "duration": 914,
+         "errors": [],
+         "retry": 0,
+         "annotations": []
+        }
+       ],
+       "status": "expected"
+      }
+     ],
+     "id": "ddd864604af8a6a0198f-c38b8d734fcadfd8b8f0",
+     "file": "accessibility.spec.ts",
+     "line": 152,
+     "column": 1
+    }
+   ],
+   "suites": [
+    {
+     "title": "overdue label",
+     "file": "accessibility.spec.ts",
+     "line": 172,
+     "column": 6,
+     "specs": [
+      {
+       "title": "#28 AC1: the Overdue label has its own style with AA contrast",
+       "ok": true,
+       "tags": [],
+       "tests": [
+        {
+         "timeout": 30000,
+         "annotations": [],
+         "expectedStatus": "passed",
+         "projectId": "chromium",
+         "projectName": "chromium",
+         "results": [
+          {
+           "status": "passed",
+           "duration": 614,
+           "errors": [],
+           "retry": 0,
+           "annotations": []
+          }
+         ],
+         "status": "expected"
+        }
+       ],
+       "id": "ddd864604af8a6a0198f-8e2796932658c9c78320",
+       "file": "accessibility.spec.ts",
+       "line": 186,
+       "column": 3
+      },
+      {
+       "title": "#28 AC2: axe reports no violations with an overdue task in the Active view",
+       "ok": true,
+       "tags": [],
+       "tests": [
+        {
+         "timeout": 30000,
+         "annotations": [],
+         "expectedStatus": "passed",
+         "projectId": "chromium",
+         "projectName": "chromium",
+         "results": [
+          {
+           "status": "passed",
+           "duration": 2258,
+           "errors": [],
+           "retry": 0,
+           "annotations": []
+          }
+         ],
+         "status": "expected"
+        }
+       ],
+       "id": "ddd864604af8a6a0198f-f93496130856b53559b3",
+       "file": "accessibility.spec.ts",
+       "line": 214,
+       "column": 3
+      },
+      {
+       "title": "#28 AC3: axe reports no violations with a past-dated task in the Completed view",
+       "ok": true,
+       "tags": [],
+       "tests": [
+        {
+         "timeout": 30000,
+         "annotations": [],
+         "expectedStatus": "passed",
+         "projectId": "chromium",
+         "projectName": "chromium",
+         "results": [
+          {
+           "status": "passed",
+           "duration": 2074,
+           "errors": [],
+           "retry": 0,
+           "annotations": []
+          }
+         ],
+         "status": "expected"
+        }
+       ],
+       "id": "ddd864604af8a6a0198f-48e887abbd6b31cd2390",
+       "file": "accessibility.spec.ts",
+       "line": 220,
+       "column": 3
+      },
+      {
+       "title": "#28 AC4: the overdue row is read with its title and \"Overdue\"",
+       "ok": true,
+       "tags": [],
+       "tests": [
+        {
+         "timeout": 30000,
+         "annotations": [],
+         "expectedStatus": "passed",
+         "projectId": "chromium",
+         "projectName": "chromium",
+         "results": [
+          {
+           "status": "passed",
+           "duration": 507,
+           "errors": [],
+           "retry": 0,
+           "annotations": []
+          }
+         ],
+         "status": "expected"
+        }
+       ],
+       "id": "ddd864604af8a6a0198f-e4cb39d3d3a13cb0e049",
+       "file": "accessibility.spec.ts",
+       "line": 228,
+       "column": 3
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "stats": {
+  "duration": 10511.139,
+  "expected": 11,
+  "skipped": 0,
+  "unexpected": 0,
+  "flaky": 0
+ }
+}

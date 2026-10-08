@@ -1,0 +1,131 @@
+
+> task-tracker@0.1.0 test
+> npm run test:unit && npm run test:e2e
+
+
+> task-tracker@0.1.0 test:unit
+> vitest run
+
+
+ RUN  v5.0.2 C:/Projects/task-tracker-factory-test
+
+
+ Test Files  7 passed (7)
+      Tests  117 passed (117)
+   Start at  15:06:42
+   Duration  2.85s (environment 55%, transform 22%, tests 11%, import 11%, worker 3%)
+
+
+> task-tracker@0.1.0 test:e2e
+> playwright test
+
+
+Running 70 tests using 4 workers
+
+  ok  3 [chromium] › tests\e2e\accessibility.spec.ts:59:1 › #12 AC2: the whole task journey works with the keyboard only (2.1s)
+  ok  1 [chromium] › tests\e2e\accessibility.spec.ts:33:1 › #12 AC1: axe reports no violations in the Active view (2.5s)
+  ok  5 [chromium] › tests\e2e\accessibility.spec.ts:103:1 › #12 AC3: the checkbox, Edit and Delete names include the task title (475ms)
+  ok  2 [chromium] › tests\e2e\accessibility.spec.ts:39:1 › #12 AC1: axe reports no violations in the Completed view (2.6s)
+  ok  6 [chromium] › tests\e2e\accessibility.spec.ts:115:1 › #12 AC4: the empty-title message is in a live region the field refers to (423ms)
+  ok  8 [chromium] › tests\e2e\add-task.spec.ts:20:1 › #3 AC1: opens straight onto the add-task form, with no setup step (421ms)
+  ok  7 [chromium] › tests\e2e\accessibility.spec.ts:152:1 › #12 AC5: every focused element shows a visible focus indicator (840ms)
+  ok  9 [chromium] › tests\e2e\add-task.spec.ts:27:1 › #3 AC2: Enter adds the task without a reload and clears the field (467ms)
+  ok 10 [chromium] › tests\e2e\add-task.spec.ts:35:1 › #3 AC2: the Add button adds the task too (609ms)
+  ok  4 [chromium] › tests\e2e\accessibility.spec.ts:47:1 › #12 AC1: axe reports no violations with a task in edit mode (3.7s)
+  ok 11 [chromium] › tests\e2e\add-task.spec.ts:54:1 › #3 AC4: the message disappears after a valid title is added (485ms)
+  ok 12 [chromium] › tests\e2e\add-task.spec.ts:45:1 › #3 AC3: an empty or whitespace-only title adds nothing and shows a message (509ms)
+  ok 13 [chromium] › tests\e2e\add-task.spec.ts:63:1 › #3 AC5: shows the trimmed title (476ms)
+  ok 14 [chromium] › tests\e2e\complete-and-views.spec.ts:24:1 › #8 AC1: the app opens on the Active view, marked as current, listing only open tasks (652ms)
+  ok 15 [chromium] › tests\e2e\complete-and-views.spec.ts:36:1 › #8 AC2: ticking an active task moves it from Active to Completed (595ms)
+  ok 16 [chromium] › tests\e2e\complete-and-views.spec.ts:46:1 › #8 AC3: unticking a completed task moves it from Completed to Active (658ms)
+  ok 18 [chromium] › tests\e2e\complete-and-views.spec.ts:71:1 › #8 AC4: the views and checkboxes work from the keyboard (491ms)
+  ok 17 [chromium] › tests\e2e\complete-and-views.spec.ts:57:1 › #8 AC4: the Completed view lists only done tasks and is marked as current (717ms)
+  ok 20 [chromium] › tests\e2e\complete-and-views.spec.ts:93:1 › #8: adding a task while Completed is shown switches to Active (504ms)
+  ok 19 [chromium] › tests\e2e\complete-and-views.spec.ts:82:1 › #8 AC5: a completed task is still completed after a reload (701ms)
+  ok 21 [chromium] › tests\e2e\delete-task.spec.ts:21:1 › #11 AC1: deleting an active task removes it from both views at once (614ms)
+  ok 22 [chromium] › tests\e2e\delete-task.spec.ts:30:1 › #11 AC2: deleting a completed task in the Completed view removes it from both views (686ms)
+  ok 23 [chromium] › tests\e2e\delete-task.spec.ts:42:1 › #11 AC3: a deleted task does not come back after a reload (652ms)
+  ok 24 [chromium] › tests\e2e\delete-task.spec.ts:53:1 › #11 AC4: a keyboard delete moves focus to the next Delete button, then to the title field (527ms)
+  ok 25 [chromium] › tests\e2e\delete-task.spec.ts:65:1 › #11 AC4: deleting the last row moves focus to the Delete button of the row above (533ms)
+  ok 26 [chromium] › tests\e2e\due-date-priority.spec.ts:21:1 › #6 AC1: a task added with a due date shows that date (514ms)
+  ok 27 [chromium] › tests\e2e\due-date-priority.spec.ts:34:3 › #6 AC2: a task added with priority Low shows that priority (473ms)
+  ok 28 [chromium] › tests\e2e\due-date-priority.spec.ts:34:3 › #6 AC2: a task added with priority Medium shows that priority (478ms)
+  ok 29 [chromium] › tests\e2e\due-date-priority.spec.ts:34:3 › #6 AC2: a task added with priority High shows that priority (498ms)
+  ok 30 [chromium] › tests\e2e\due-date-priority.spec.ts:40:1 › #6 AC3: a task added with neither shows neither (506ms)
+  ok 32 [chromium] › tests\e2e\due-date-priority.spec.ts:60:1 › #6 AC5: the priority choices are only none, Low, Medium and High (402ms)
+  ok 31 [chromium] › tests\e2e\due-date-priority.spec.ts:47:1 › #6 AC4: due date and priority are unchanged after a reload (877ms)
+  ok 34 [chromium] › tests\e2e\edit-due-date-priority.spec.ts:40:1 › #10 AC2: a cleared due date is not shown and the task moves last (756ms)
+  ok 33 [chromium] › tests\e2e\edit-due-date-priority.spec.ts:28:1 › #10 AC1: a set or changed due date is shown and moves the task (946ms)
+  ok 35 [chromium] › tests\e2e\edit-due-date-priority.spec.ts:48:1 › #10 AC3: a set or changed priority is shown (944ms)
+  ok 36 [chromium] › tests\e2e\edit-due-date-priority.spec.ts:56:1 › #10 AC4: "No priority" removes the priority (632ms)
+  ok 38 [chromium] › tests\e2e\edit-title.spec.ts:29:1 › #9 AC1: editing an active task shows the new title immediately (683ms)
+  ok 37 [chromium] › tests\e2e\edit-due-date-priority.spec.ts:62:1 › #10 AC5: changes to a completed task are kept after a reload (884ms)
+  ok 39 [chromium] › tests\e2e\edit-title.spec.ts:38:1 › #9 AC2: a completed task shows its new title and stays completed (705ms)
+  ok 40 [chromium] › tests\e2e\edit-title.spec.ts:47:1 › #9 AC3: a blank title is rejected with a message; the old title stays (849ms)
+  ok 41 [chromium] › tests\e2e\edit-title.spec.ts:62:1 › #9 AC4: Escape cancels, keeps the title, refocuses the Edit button (586ms)
+  ok 42 [chromium] › tests\e2e\edit-title.spec.ts:73:1 › #9 AC5: an edited title is still shown after a reload (678ms)
+add: median 39.6 ms (43.7, 40.0, 34.3, 39.6, 36.8)
+  ok 43 [chromium] › tests\e2e\latency-and-network.spec.ts:108:1 › #13 AC1: with 500 tasks stored, an added task appears within 100 ms (936ms)
+toggle: median 34.9 ms (40.4, 34.9, 34.9, 36.3, 32.9)
+  ok 44 [chromium] › tests\e2e\latency-and-network.spec.ts:115:1 › #13 AC2: with 500 tasks stored, completing a task is shown within 100 ms (927ms)
+toggle: median 35.8 ms (34.4, 32.8, 36.2, 37.7, 35.8)
+  ok 45 [chromium] › tests\e2e\latency-and-network.spec.ts:122:1 › #13 AC2: with 500 tasks stored, reopening a task is shown within 100 ms (1.1s)
+delete: median 49.0 ms (55.8, 49.0, 44.1, 50.5, 38.4)
+  ok 47 [chromium] › tests\e2e\latency-and-network.spec.ts:141:1 › #13 AC2: with 500 tasks stored, deleting a task is shown within 100 ms (940ms)
+  ok 49 [chromium] › tests\e2e\overdue.spec.ts:29:1 › #27 AC1: an active task due before today is marked "Overdue" (453ms)
+  ok 48 [chromium] › tests\e2e\latency-and-network.spec.ts:148:1 › #13 AC3: a full journey makes no requests beyond the page’s own files on load (1.5s)
+  ok 51 [chromium] › tests\e2e\overdue.spec.ts:43:1 › #27 AC3: completing removes the label, and reopening shows it again (673ms)
+  ok 53 [chromium] › tests\e2e\overdue.spec.ts:68:1 › #27 AC5: the order and the due text are unchanged by the label (549ms)
+  ok 52 [chromium] › tests\e2e\overdue.spec.ts:54:1 › #27 AC4: editing the due date shows or removes the label at once (1.0s)
+  ok 54 [chromium] › tests\e2e\persistence.spec.ts:18:1 › #4 AC1: after a reload the same tasks are shown, in the same order (504ms)
+  ok 56 [chromium] › tests\e2e\persistence.spec.ts:38:1 › #4 AC3: once the add has returned, task-tracker:v1 already holds the task (285ms)
+  ok 55 [chromium] › tests\e2e\persistence.spec.ts:25:1 › #4 AC2: a new page in the same browser profile shows the tasks with no user action (712ms)
+  ok 57 [chromium] › tests\e2e\persistence.spec.ts:53:1 › #4 AC4: on a first visit the list is empty and there is no error (342ms)
+  ok 58 [chromium] › tests\e2e\skeleton.spec.ts:3:1 › #2 AC1: the build writes index.html and its assets to dist/ (66ms)
+  ok 59 [chromium] › tests\e2e\skeleton.spec.ts:16:1 › #2 AC3 AC4: shows the heading and requests only its own files (312ms)
+  ok 60 [chromium] › tests\e2e\sort-by-due-date.spec.ts:21:1 › #7 AC1: tasks added out of order are listed soonest due first (526ms)
+  ok 61 [chromium] › tests\e2e\sort-by-due-date.spec.ts:28:1 › #7 AC2: tasks without a due date come after every task with one (568ms)
+  ok 62 [chromium] › tests\e2e\sort-by-due-date.spec.ts:36:1 › #7 AC3: ties keep the order in which the tasks were created (562ms)
+edit: median 51.5 ms (69.1, 57.3, 50.6, 51.5, 51.2)
+  ok 63 [chromium] › tests\e2e\sort-by-due-date.spec.ts:44:1 › #7 AC4: priority does not change the order of tasks due the same day (511ms)
+  ok 46 [chromium] › tests\e2e\latency-and-network.spec.ts:130:1 › #13 AC2: with 500 tasks stored, an edit is shown within 100 ms (5.4s)
+  ok 64 [chromium] › tests\e2e\sort-by-due-date.spec.ts:51:1 › #7 AC5: the order is the same after a reload (663ms)
+  ok 65 [chromium] › tests\e2e\storage-failures.spec.ts:34:1 › #5 AC1: text that is not JSON gives an empty list, and a task can be added (380ms)
+  ok 66 [chromium] › tests\e2e\storage-failures.spec.ts:67:3 › #5 AC2: a wrong version gives an empty list without crashing (343ms)
+  ok 67 [chromium] › tests\e2e\storage-failures.spec.ts:67:3 › #5 AC2: a task with an invalid field gives an empty list without crashing (316ms)
+  ok 68 [chromium] › tests\e2e\storage-failures.spec.ts:67:3 › #5 AC2: tasks not a list gives an empty list without crashing (328ms)
+  ok 69 [chromium] › tests\e2e\storage-failures.spec.ts:78:1 › #5 AC3: when saving throws, the task still appears with an announced warning (379ms)
+  ok 70 [chromium] › tests\e2e\storage-failures.spec.ts:95:1 › #5 AC4: opening the app with corrupted data and changing nothing leaves it as it was (365ms)
+  x  50 [chromium] › tests\e2e\overdue.spec.ts:34:1 › #27 AC2: tasks due today, tomorrow or never are not marked (5.7s)
+
+
+  1) [chromium] › tests\e2e\overdue.spec.ts:34:1 › #27 AC2: tasks due today, tomorrow or never are not marked 
+
+    Error: expect(locator).toHaveCount(expected) failed
+
+    Locator:  getByRole('list', { name: 'Tasks' }).getByRole('listitem').filter({ has: getByText('Due today', { exact: true }) }).locator('.task-overdue')
+    Expected: 1
+    Received: 0
+    Timeout:  5000ms
+
+    Call log:
+      - Expect "toHaveCount" getByRole('list', { name: 'Tasks' }).getByRole('listitem').filter({ has: getByText('Due today', { exact: true }) }).locator('.task-overdue') with timeout 5000ms
+      - waiting for getByRole('list', { name: 'Tasks' }).getByRole('listitem').filter({ has: getByText('Due today', { exact: true }) }).locator('.task-overdue')
+        14 × locator resolved to 0 elements
+           - unexpected value "0"
+
+
+      37 |   await addTask(page, 'No date');
+      38 |   for (const name of ['Due today', 'Due tomorrow', 'No date']) {
+    > 39 |     await expect(overdue(page, name)).toHaveCount(1);
+         |                                       ^
+      40 |   }
+      41 | });
+      42 |
+        at C:\Projects\task-tracker-factory-test\tests\e2e\overdue.spec.ts:39:39
+
+    Error Context: test-results\overdue--27-AC2-tasks-due--ba3af-row-or-never-are-not-marked-chromium\error-context.md
+
+  1 failed
+    [chromium] › tests\e2e\overdue.spec.ts:34:1 › #27 AC2: tasks due today, tomorrow or never are not marked 
+  69 passed (22.8s)

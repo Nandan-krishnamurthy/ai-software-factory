@@ -1,0 +1,111 @@
+diff --git a/.factory/log.md b/.factory/log.md
+index 3ea90eb..cc14aa8 100644
+--- a/.factory/log.md
++++ b/.factory/log.md
+@@ -69,0 +70,4 @@
++2026-10-07T10:48:21Z S07 002-add-due-dates #28 branch story/28-overdue-label-style
++2026-10-07T10:49:26Z S08 002-add-due-dates #28 implement
++2026-10-07T10:51:45Z S09 002-add-due-dates #28 tests pass (unit 117 passed; e2e 74 passed)
++2026-10-07T10:57:27Z S11 002-add-due-dates #28 PR #30
+diff --git a/docs/factory/traceability.md b/docs/factory/traceability.md
+index 4e4d7f9..9693920 100644
+--- a/docs/factory/traceability.md
++++ b/docs/factory/traceability.md
+@@ -36 +36 @@ Status is one of: `Not started`, `In progress`, `Implemented`, `Deferred`.
+-| REQ-026 | STORY-014 | — | — | Not started |
++| REQ-026 | STORY-014 (#28) | #30 | `#28 AC1: the Overdue label has its own style with AA contrast`; `#28 AC2: axe reports no violations with an overdue task in the Active view`; `#28 AC3: axe reports no violations with a past-dated task in the Completed view`; `#28 AC4: the overdue row is read with its title and "Overdue"` | Implemented |
+diff --git a/index.html b/index.html
+index 9a9b56d..96785d1 100644
+--- a/index.html
++++ b/index.html
+@@ -12,0 +13,5 @@
++      /* The word carries the meaning; dark red on white (about 8:1) passes WCAG AA (REQ-026). */
++      .task-overdue {
++        color: #a40000;
++        font-weight: bold;
++      }
+diff --git a/tests/e2e/accessibility.spec.ts b/tests/e2e/accessibility.spec.ts
+index 6e37457..0f33740 100644
+--- a/tests/e2e/accessibility.spec.ts
++++ b/tests/e2e/accessibility.spec.ts
+@@ -157,0 +158,80 @@ test('#12 AC5: every focused element shows a visible focus indicator', async ({
++
++/** WCAG contrast ratio of two `rgb(r, g, b)` colours. */
++function contrast(a: string, b: string): number {
++  const luminance = (rgb: string) => {
++    const [r, g, bl] = rgb.match(/\d+(\.\d+)?/g)!.slice(0, 3).map((c) => {
++      const s = Number(c) / 255;
++      return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
++    });
++    return 0.2126 * r + 0.7152 * g + 0.0722 * bl;
++  };
++  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
++  return (hi + 0.05) / (lo + 0.05);
++}
++
++test.describe('overdue label', () => {
++  test.beforeEach(async ({ page }) => {
++    // Today is 2026-10-07 on the device, as in the STORY-013 tests.
++    await page.clock.setFixedTime(new Date(2026, 9, 7, 10, 0));
++    await page.goto('/');
++  });
++
++  async function addDue(page: Page, name: string, due: string) {
++    await page.getByLabel('Task title').fill(name);
++    await page.getByLabel('Due date', { exact: true }).fill(due);
++    await page.getByLabel('Task title').press('Enter');
++    await expect(titles(page).getByText(name, { exact: true })).toHaveCount(1);
++  }
++
++  test('#28 AC1: the Overdue label has its own style with AA contrast', async ({ page }) => {
++    await addDue(page, 'Pay rent', '2026-10-06');
++    const label = list(page).locator('.task-overdue');
++    await expect(label).toHaveText('Overdue');
++    const styles = await label.evaluate((el) => {
++      const own = getComputedStyle(el);
++      const title = getComputedStyle(el.parentElement!.querySelector('.task-title')!);
++      // The nearest ancestor with a painted background; none means the white canvas.
++      let bg = 'rgb(255, 255, 255)';
++      for (let node: Element | null = el; node; node = node.parentElement) {
++        const color = getComputedStyle(node).backgroundColor;
++        if (color !== 'rgba(0, 0, 0, 0)' && color !== 'transparent') {
++          bg = color;
++          break;
++        }
++      }
++      return {
++        color: own.color,
++        weight: own.fontWeight,
++        titleColor: title.color,
++        titleWeight: title.fontWeight,
++        bg,
++      };
++    });
++    expect([styles.color, styles.weight]).not.toEqual([styles.titleColor, styles.titleWeight]);
++    expect(contrast(styles.color, styles.bg)).toBeGreaterThanOrEqual(4.5);
++  });
++
++  test('#28 AC2: axe reports no violations with an overdue task in the Active view', async ({ page }) => {
++    await addDue(page, 'Pay rent', '2026-10-06');
++    await expect(list(page).locator('.task-overdue')).toHaveText('Overdue');
++    await expectNoViolations(page);
++  });
++
++  test('#28 AC3: axe reports no violations with a past-dated task in the Completed view', async ({ page }) => {
++    await addDue(page, 'Pay rent', '2026-10-01');
++    await page.getByRole('checkbox', { name: 'Done: Pay rent' }).click();
++    await view(page, 'Completed').click();
++    await expect(titles(page)).toHaveText(['Pay rent']);
++    await expectNoViolations(page);
++  });
++
++  test('#28 AC4: the overdue row is read with its title and "Overdue"', async ({ page }) => {
++    await addDue(page, 'Pay rent', '2026-10-06');
++    const row = list(page).getByRole('listitem').filter({ hasText: 'Pay rent' });
++    await expect(row).toContainText('Pay rent');
++    await expect(row).toContainText('Overdue');
++    const snapshot = await row.ariaSnapshot();
++    expect(snapshot).toContain('Pay rent');
++    expect(snapshot).toContain('Overdue');
++  });
++});

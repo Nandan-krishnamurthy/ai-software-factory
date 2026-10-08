@@ -9,9 +9,10 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from factory import cli, target, templates, verdict
+from factory import acmap, cli, evidence, target, templates, verdict
 from factory.comments import compose
 from factory.gh import Gh, ProcessResult
+from factory.git import Git
 from factory.markers import CheckpointMarker
 from tests import REPO_ROOT
 from tests.test_stations import parse_frontmatter
@@ -115,11 +116,39 @@ class ParseTest(unittest.TestCase):
         self.assertEqual(verdict.issue_acs(body), [1, 2])
 
 
-def checkpoint_comment(note):
-    marker = CheckpointMarker("S10", "S11", "story/12-x", "a" * 40, 0, 0,
+HEAD = "a" * 40
+
+
+def recorded_blocks():
+    """The evidence and AC-to-test map blocks `verify run` / `verify map` store for #12 at
+    HEAD: AC1 and AC2 have a passing test, AC3 has none (GOOD gives it manual steps)."""
+    ran = evidence.Evidence(
+        issue=12, repo=REPO, branch="story/12-x", sha=HEAD, started_at="2026-09-25T09:00:00",
+        finished_at="2026-09-25T09:01:00", sha_after=HEAD, config_source="origin/main@0000000",
+        commands=[evidence.CommandEvidence(name, f"run {name}", "pass", 0, 1.0)
+                  for name in evidence.VERIFY_COMMANDS])
+    mapped = acmap.AcMap(
+        issue=12, repo=REPO, branch="story/12-x", sha=HEAD, base="origin/main@0000000",
+        sources=["the test command's full output"], acs=[
+            acmap.AcMapping(n, "passed", [acmap.MappedTest(
+                "tests/a.test.ts", n, f"#12 AC{n}: x", "passed", "output")]) for n in (1, 2)]
+        + [acmap.AcMapping(3, "missing", [])])
+    return evidence.to_block(ran) + "\n\n" + acmap.to_block(mapped)
+
+
+def checkpoint_comment(note, recorded=True):
+    """S10's checkpoint with ``note``; ``recorded``: with the evidence and map blocks."""
+    marker = CheckpointMarker("S10", "S11", "story/12-x", HEAD, 0, 0,
                               "2026-09-25T10:00:00+00:00")
     text = "**Factory checkpoint:** S10 complete. Next: S11. Branch: `story/12-x` @ `aaaaaaa`."
-    return {"id": 1, "body": compose(marker, text + ("\n\n" + note if note else ""))}
+    parts = [text] + ([note] if note else []) + ([recorded_blocks()] if recorded else [])
+    return {"id": 1, "body": compose(marker, "\n\n".join(parts))}
+
+
+def origin(argv, *, timeout, env=None, input=None):
+    """The target's origin: story/12-x is at HEAD."""
+    assert argv[3] == "ls-remote", argv
+    return ProcessResult([], 0, f"{HEAD}\trefs/heads/story/12-x\n", "")
 
 
 class FakeGitHub:
@@ -144,6 +173,7 @@ class CliTest(unittest.TestCase):
         with mock.patch.object(target, "get_target",
                                lambda: target.Target(Path("/t"), REPO)), \
                 mock.patch.object(cli, "Gh", lambda: Gh(transport=fake)), \
+                mock.patch.object(cli, "Git", lambda p: Git(p, transport=origin)), \
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = cli.main(["verdict", "check", "--issue", "12", *argv])
         return code, out.getvalue(), err.getvalue()
@@ -152,10 +182,24 @@ class CliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "v.md"
             path.write_text(GOOD, encoding="utf-8")
-            code, out, _ = self.run_cli(FakeGitHub(ISSUE, []), "--file", str(path))
-        self.assertEqual(code, 0)
+            code, out, _ = self.run_cli(FakeGitHub(ISSUE, [checkpoint_comment("")]),
+                                        "--file", str(path))
+        self.assertEqual(code, 0, out)
         self.assertIn("3 AC(s): 2 pass, 0 fail, 1 not-verifiable; suite pass", out)
         self.assertIn("OK: every AC has evidence and nothing failed.", out)
+        self.assertIn("AC-to-test map @ aaaaaaa: AC1 passed, AC2 passed, AC3 missing", out)
+
+    def test_without_an_ac_to_test_map_the_verdict_is_invalid(self):
+        """T6.2: the map is required; a verdict file alone, or a checkpoint without the
+        blocks, is never enough."""
+        for comments in ([], [checkpoint_comment(GOOD, recorded=False)]):
+            with self.subTest(checkpoint=bool(comments)), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "v.md"
+                path.write_text(GOOD, encoding="utf-8")
+                code, out, _ = self.run_cli(FakeGitHub(ISSUE, comments), "--file", str(path))
+                self.assertEqual(code, 1)
+                self.assertIn("no AC-to-test map is stored in the checkpoint", out)
+                self.assertIn("INVALID", out)
 
     def test_reads_the_verdict_from_the_checkpoint_note(self):
         code, out, _ = self.run_cli(FakeGitHub(ISSUE, [checkpoint_comment(GOOD)]))

@@ -439,12 +439,19 @@ class CheckpointEvidenceTest(unittest.TestCase):
         note = verdict.checkpoint_note(self.gh, REPO, 7)
         self.assertTrue(verdict.parse(note, [1, 2, 3]).ok)
 
-    def test_a_note_with_its_own_block_replaces_the_carried_one(self):
+    def test_a_note_may_not_supply_its_own_block(self):
+        """T6.2: only `verify run` / `verify map` write these blocks; a note that carries
+        one, or any one delimiter, is refused and the stored evidence stays."""
         checkpoint(self.gh)
         comments.set_checkpoint_evidence(self.gh, REPO, 7, evidence.to_block(self.result))
+        before = self.body()
         newer, _ = run(runner=FakeRunner({"npm test": (1, "boom\n")}))
-        checkpoint(self.gh, note=evidence.to_block(newer))
-        self.assertEqual(evidence.from_body(self.body()), newer)
+        for note in (evidence.to_block(newer), *comments.NOTE_DELIMITERS):
+            with self.subTest(note=note[:30]), \
+                    self.assertRaisesRegex(comments.CommentError, "may not contain"):
+                checkpoint(self.gh, note=f"S10 verdict\n{note}")
+        self.assertEqual(self.body(), before)
+        self.assertEqual(evidence.from_body(self.body()), self.result)
 
 
 class CliTest(unittest.TestCase):
