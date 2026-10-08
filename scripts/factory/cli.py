@@ -19,6 +19,7 @@ from factory import (
     issues,
     labels,
     pick,
+    prbody,
     questions,
     signals,
     state,
@@ -149,14 +150,16 @@ def build_parser() -> argparse.ArgumentParser:
     branch_parser.set_defaults(handler=_branch, needs_target=True)
 
     pr_parser = subparsers.add_parser(
-        "pr", help="open or update the PR of a factory branch (never a second one)",
-        description="Idempotent (T4.4): edits the open PR whose head is --head, or creates "
-                    "it if there is none. The body must carry its factory:pr or "
-                    "factory:planning marker. Never merges.")
-    pr_parser.add_argument("--head", required=True, metavar="BRANCH")
-    pr_parser.add_argument("--title", required=True)
-    pr_parser.add_argument("--body-file", required=True, metavar="F",
-                           help="UTF-8 file with the PR body")
+        "pr", help="open or update the PR of a factory branch (never a second one); "
+                   "render or check a story PR's body (T6.3)",
+        description="Without an action, idempotent (T4.4): edits the open PR whose head is "
+                    "--head, or creates it if there is none (--head, --title and "
+                    "--body-file are then required). The body must carry its factory:pr "
+                    "or factory:planning marker. Never merges. The actions `render` and "
+                    "`check` build and verify a story PR's body from the recorded facts.")
+    pr_parser.add_argument("--head", metavar="BRANCH")
+    pr_parser.add_argument("--title")
+    pr_parser.add_argument("--body-file", metavar="F", help="UTF-8 file with the PR body")
     pr_parser.add_argument("--base", metavar="BRANCH",
                            help="default: default_branch from .factory/config.json")
     pr_parser.add_argument("--draft", action="store_true",
@@ -164,6 +167,38 @@ def build_parser() -> argparse.ArgumentParser:
     pr_parser.add_argument("--label", action="append", default=[], metavar="LABEL")
     pr_parser.add_argument("--json", action="store_true", help="machine-readable output")
     pr_parser.set_defaults(handler=_pr, needs_target=True)
+    pr_sub = pr_parser.add_subparsers(dest="pr_action", metavar="<action>")
+    prender = pr_sub.add_parser(
+        "render", help="fill templates/pr.md for a story from the recorded facts",
+        description="Fills templates/pr.md for story issue N from the checkpoint's evidence "
+                    "(verify run), AC-to-test map (verify map) and AC verifier lines (S10), "
+                    "copied unchanged; the diff, file stats, commit bodies and changed "
+                    "manifests at the evidence's commit; and the approved config on origin. "
+                    "Computes gates Q1-Q8 (Q6: not checked, the story contract declares no "
+                    "areas), the changed existing tests (rule H3) and the new dependencies "
+                    "(rule S9). Only Summary, Risks and Follow-ups come from --notes. Refuses "
+                    "evidence that is not for the branch head. Exit 0: every gate passed "
+                    "and every changed test and dependency is declared. Exit 1: otherwise "
+                    "(the body is still written, stating the failures). Read-only on "
+                    "GitHub.")
+    prender.add_argument("--issue", type=_positive_int, required=True, metavar="N")
+    prender.add_argument("--notes", required=True, metavar="F",
+                         help="UTF-8 file with the model's sections: ## Summary (required), "
+                              "## Risks and ## Follow-ups")
+    prender.add_argument("--out", metavar="F",
+                         help="where to write the body (default: <temp dir>/pr-<N>.md)")
+    prender.add_argument("--json", action="store_true", help="machine-readable output")
+    pcheck = pr_sub.add_parser(
+        "check", help="check an open story PR's body against a fresh render",
+        description="Reads PR P, takes its Summary, Risks and Follow-ups sections, renders "
+                    "the body again from the facts as they are now, and compares the rest "
+                    "line by line. Exit 0: identical, and every gate passed. Exit 1: any "
+                    "other difference (a test result or gate that disagrees with the "
+                    "ledger, an edited fact), a failing gate, an undeclared changed test "
+                    "or dependency, or a PR head that is not the evidence's commit. "
+                    "Read-only.")
+    pcheck.add_argument("number", type=_positive_int, metavar="P", help="the PR number")
+    pcheck.add_argument("--json", action="store_true", help="machine-readable output")
 
     closeout_parser = subparsers.add_parser(
         "closeout", help="close out a story whose PR the human merged (station S12)",
@@ -538,6 +573,15 @@ def _branch(args: argparse.Namespace) -> int:
 
 
 def _pr(args: argparse.Namespace) -> int:
+    if args.pr_action == "render":
+        return _pr_render(args)
+    if args.pr_action == "check":
+        return _pr_check(args)
+    missing = [f"--{name.replace('_', '-')}" for name in ("head", "title", "body_file")
+               if getattr(args, name) is None]
+    if missing:
+        raise ensure.EnsureError("`pr` needs " + ", ".join(missing) + " (or an action: "
+                                 "`pr render`, `pr check`)")
     try:
         body = Path(args.body_file).read_text(encoding="utf-8")
     except OSError as err:
@@ -552,6 +596,39 @@ def _pr(args: argparse.Namespace) -> int:
         draft = " (draft)" if result.is_draft else ""
         print(f"{result.action} PR #{result.number}{draft}: {result.url}")
     return 0
+
+
+def _pr_render(args: argparse.Namespace) -> int:
+    try:
+        notes = Path(args.notes).read_text(encoding="utf-8")
+    except OSError as err:
+        raise prbody.PrBodyError(f"cannot read --notes {args.notes}: {err}") from None
+    sections = prbody.parse_notes(notes)
+    facts = prbody.collect(Gh(), Git(args.target.path), args.target.repo, args.issue)
+    rendered = prbody.render(facts, sections)
+    out = prbody.write(rendered, Path(args.out) if args.out else
+                       prbody.default_path(args.issue))
+    if args.json:
+        _print_safe(json.dumps({
+            "issue": args.issue, "path": str(out), "sha": facts.evidence.sha,
+            "gates": [{"gate": g.label, "status": g.status, "text": g.text}
+                      for g in rendered.gates],
+            "problems": rendered.problems, "warnings": rendered.warnings},
+            indent=2, ensure_ascii=False))
+    else:
+        _print_safe(prbody.report(rendered, args.issue, out))
+    return 1 if rendered.problems else 0
+
+
+def _pr_check(args: argparse.Namespace) -> int:
+    result = prbody.check(Gh(), Git(args.target.path), args.target.repo, args.number)
+    if args.json:
+        _print_safe(json.dumps({"pr": result.number, "issue": result.issue, "ok": result.ok,
+                                "differences": result.differences,
+                                "problems": result.problems}, indent=2, ensure_ascii=False))
+    else:
+        _print_safe(prbody.report_check(result))
+    return 0 if result.ok else 1
 
 
 def _closeout(args: argparse.Namespace) -> int:

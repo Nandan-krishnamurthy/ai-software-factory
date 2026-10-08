@@ -57,7 +57,7 @@ from pathlib import Path
 from typing import Any
 
 from factory.comments import EVIDENCE_END, EVIDENCE_START, evidence_block
-from factory.config import COMMAND_NAMES, CONFIG_RELPATH, load_config, parse_config
+from factory.config import COMMAND_NAMES, CONFIG_RELPATH, Config, load_config, parse_config
 from factory.errors import CommandNotFound, CommandTimeout, FactoryError, GitError
 from factory.gh import ProcessResult, run_command_line
 from factory.git import Git
@@ -244,6 +244,13 @@ def approved_commands(git: Git) -> tuple[dict[str, str | None], str]:
     """The ``commands`` of ``.factory/config.json`` on the default branch on ``origin``,
     and where they came from (``origin/main@abc1234``). Raises ``EvidenceError`` when
     there is no such config: nothing may run without approved commands."""
+    config, source = approved_config(git)
+    return {name: config.commands.get(name) for name in COMMAND_NAMES}, source
+
+
+def approved_config(git: Git) -> tuple[Config, str]:
+    """``.factory/config.json`` on the default branch on ``origin`` (only a merged PR
+    changes it), and where it came from (``origin/main@abc1234``)."""
     ref = default_ref(git)
     path = f"{ref}:{CONFIG_RELPATH.as_posix()}"
     try:
@@ -258,7 +265,7 @@ def approved_commands(git: Git) -> tuple[dict[str, str | None], str]:
         raise EvidenceError(f"{path} is not valid JSON: {err}") from None
     except FactoryError as err:
         raise EvidenceError(f"{path} is not a valid config: {err}") from None
-    return {name: config.commands.get(name) for name in COMMAND_NAMES}, f"{ref}@{sha[:7]}"
+    return config, f"{ref}@{sha[:7]}"
 
 
 def default_ref(git: Git) -> str:

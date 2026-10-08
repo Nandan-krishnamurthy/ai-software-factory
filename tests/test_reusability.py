@@ -7,8 +7,10 @@ must not name the Task Tracker test project, its stack or its owner. Docs and te
 they describe how the factory was proven.
 
 The one place allowed to name an ecosystem is codebase discovery (S01, T5.1), which must
-know the manifests of every stack it supports. That exception is narrow and checked: those
-files must also name the other stacks, so they stay multi-stack. The same holds for the
+know the manifests of every stack it supports, and the manifest reader of the PR body
+(T6.3), which lists the dependencies a story adds in every stack it supports. That
+exception is narrow and checked: those files must also name the other stacks, so they
+stay multi-stack. The same holds for the
 evidence ledger's summary parser (T6.1) and the AC-to-test map's result readers (T6.2),
 which must recognise the output and reports of every test runner they support: they may
 name test runners only alongside the others.
@@ -47,7 +49,8 @@ STACK_SPECIFIC = {
 # Node.js names that only multi-stack discovery may use (S01, T5.1).
 NODE = r"\bnpm\b|\byarn\b|\bpnpm\b|package\.json|package-lock|node_modules"
 DISCOVERY_FILES = {Path("scripts/factory/discovery.py"), Path("stations/S01-discovery.md"),
-                   Path("scripts/factory/cli.py")}  # cli.py: the `discover` help text
+                   Path("scripts/factory/cli.py"),  # cli.py: the `discover` help text
+                   Path("scripts/factory/manifests.py")}  # T6.3: manifests and lockfiles
 OTHER_STACKS = ("Python", "go.mod", "Cargo.toml", "Makefile")
 # Test-runner names that only the multi-runner summary parser (T6.1) and the AC-to-test
 # map's result readers (T6.2) may use.
@@ -109,6 +112,7 @@ class ReusabilityTest(unittest.TestCase):
                 ".claude/agents/x.md": "Evidence: `tests/tasks.test.ts` (`npm test`)",
                 "templates/x.md": "Store it in localStorage with Vite.",
                 "scripts/factory/discovery.py": "npm ci  # allowed here",
+                "scripts/factory/manifests.py": "package-lock.json  # allowed here",
                 "scripts/factory/evidence.py": "_VITEST = ...  # allowed here",
                 "scripts/factory/acmap.py": "Playwright JSON  # allowed here",
             }
@@ -126,6 +130,7 @@ class ReusabilityTest(unittest.TestCase):
             with self.subTest(expected=expected):
                 self.assertIn(expected, whys)
         self.assertNotIn("discovery.py", whys)
+        self.assertNotIn("manifests.py", whys)
         self.assertNotIn("evidence.py", whys)
         self.assertNotIn("acmap.py", whys)
 

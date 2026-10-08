@@ -1,0 +1,13 @@
+
+> task-tracker@0.1.0 build
+> vite build
+
+[36mvite v8.3.1 [32mbuilding client environment for production...[36m[39m
+transforming...
+✓ 14 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                 0.42 kB │ gzip: 0.29 kB
+dist/assets/index-BjTmjXBY.js  11.16 kB │ gzip: 3.97 kB
+
+[32m✓ built in 295ms[39m

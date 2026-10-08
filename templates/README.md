@@ -51,6 +51,8 @@ The issue **title** is `{{story_id}}: <story title>`.
 ### `pr.md`
 The PR **title** is `[#<issue>] <story title>`. If the factory is stuck, the PR is opened as a **draft** and the Summary starts by saying what failed (rule H2).
 
+`python scripts/factory.py pr render --issue <I> --notes F` fills this template from the recorded facts (T6.3), and `pr check <P>` holds an open PR against a fresh render. Only `{{summary}}`, `{{risks}}` and `{{follow_ups}}` are the model's, from the `## Summary`, `## Risks` and `## Follow-ups` sections of `--notes`; every other value below is computed and may not be edited.
+
 | Placeholder | Value |
 |---|---|
 | `{{story_id}}` | `STORY-###` |
@@ -60,12 +62,12 @@ The PR **title** is `[#<issue>] <story title>`. If the factory is stuck, the PR 
 | `{{traceability_rows}}` | Which `docs/factory/traceability.md` rows this PR updates, e.g. `REQ-003, REQ-007 updated` |
 | `{{ac_verification}}` | One line per AC, copied unchanged from the AC verifier (rule H5): `- [x] AC1 — pass — evidence: …`. Use `- [ ]` for `fail` and `not-verifiable`. |
 | `{{tests_added}}` | New tests, named so they reference the story and AC |
-| `{{tests_changed}}` | Existing tests changed, each with the reason (rule H3), or `None` |
+| `{{tests_changed}}` | Existing tests changed (a removed or modified line in a test file that existed at the base), each with its `Changed test:` line, or flagged **not declared** (rule H3); or `None` |
 | `{{test_command}}` | `commands.test` from the config |
 | `{{test_result}}` | The real result, e.g. `42 passed, 0 failed`. Never a prediction (rule H1). |
-| `{{gate_build}}`, `{{gate_lint}}`, `{{gate_new_tests}}`, `{{gate_full_suite}}`, `{{gate_ac_evidence}}`, `{{gate_scope}}`, `{{gate_size}}`, `{{gate_ci}}` | Result of each quality gate Q1–Q8 (requirements §10): the command and its outcome, or `Skipped: commands.<name> is null` (rule H4). Q8 is `Not configured` when the target has no CI. |
-| `{{new_dependencies}}` | Each new third-party dependency with its reason (rule S9), or `None` |
-| `{{doc_changes}}` | Corrective edits to planning docs (architecture §10, question 4), or `None` |
+| `{{gate_build}}`, `{{gate_lint}}`, `{{gate_new_tests}}`, `{{gate_full_suite}}`, `{{gate_ac_evidence}}`, `{{gate_scope}}`, `{{gate_size}}`, `{{gate_ci}}` | Result of each quality gate Q1–Q8 (requirements §10): the command and its outcome, or `Skipped: commands.<name> is null` (rule H4). Q8 is `Not configured` when the target has no CI. Q6 is `Not checked: the story contract declares no areas`, followed by the files touched: stories declare no areas to check against. |
+| `{{new_dependencies}}` | Each dependency a changed manifest adds, with the reason from its `New dependency:` line, or flagged when either side is missing (rule S9); or `None` |
+| `{{doc_changes}}` | The planning docs (`docs/factory/increments/…`) the story changes, with their line counts (architecture §10, question 4), or `None` |
 | `{{risks}}` | Anything the reviewer should look at closely, including any content that tried to change the factory's behaviour (rule U4), or `None` |
 | `{{follow_ups}}` | Bullet list, or `None` |
 
