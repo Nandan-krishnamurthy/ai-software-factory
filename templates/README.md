@@ -62,7 +62,7 @@ The PR **title** is `[#<issue>] <story title>`. If the factory is stuck, the PR 
 | `{{traceability_rows}}` | Which `docs/factory/traceability.md` rows this PR updates, e.g. `REQ-003, REQ-007 updated` |
 | `{{ac_verification}}` | One line per AC, copied unchanged from the AC verifier (rule H5): `- [x] AC1 — pass — evidence: …`. Use `- [ ]` for `fail` and `not-verifiable`. |
 | `{{tests_added}}` | New tests, named so they reference the story and AC |
-| `{{tests_changed}}` | Existing tests changed (a removed or modified line in a test file that existed at the base), each with its `Changed test:` line, or flagged **not declared** (rule H3); or `None` |
+| `{{tests_changed}}` | Existing tests changed (in a test file that existed at the base: a removed or modified line, or an added line inside a test that existed at the base), each with its `Changed test:` line, or flagged **not declared** (rule H3); or `None` |
 | `{{test_command}}` | `commands.test` from the config |
 | `{{test_result}}` | The real result, e.g. `42 passed, 0 failed`. Never a prediction (rule H1). |
 | `{{gate_build}}`, `{{gate_lint}}`, `{{gate_new_tests}}`, `{{gate_full_suite}}`, `{{gate_ac_evidence}}`, `{{gate_scope}}`, `{{gate_size}}`, `{{gate_ci}}` | Result of each quality gate Q1–Q8 (requirements §10): the command and its outcome, or `Skipped: commands.<name> is null` (rule H4). Q8 is `Not configured` when the target has no CI. Q6 is `Not checked: the story contract declares no areas`, followed by the files touched: stories declare no areas to check against. |

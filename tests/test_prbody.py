@@ -754,5 +754,140 @@ class CliTest(unittest.TestCase):
                       "`pr check`)", err)
 
 
+# ----------------------------------------------------------------------------- H3: additions
+
+
+BASE_PY = "import foo\n\n\ndef test_x():\n    assert foo() == 1\n"
+
+
+def change_test_file(story: Story, path: str, hunk: str, *, base: str | None, head: str,
+                     added: int, deleted: int = 0):
+    """Add a change to a test file to the story's diff. ``base`` None: a new file."""
+    story.edit(["-c", "core.quotepath=false", "diff", "--numstat"],
+               lambda out: out + f"{added}\t{deleted}\t{path}\0")
+    old = "/dev/null" if base is None else f"a/{path}"
+    story.edit(["-c", "core.quotepath=false", "diff", "--no-color"],
+               lambda out: out + f"diff --git a/{path} b/{path}\n--- {old}\n+++ b/{path}\n"
+                                 f"{hunk}")
+    base_sha = story.git_answers[story.key(["merge-base"])]["out"].strip()
+    if base is not None:
+        story.answer(["show", f"{base_sha}:{path}"], base)
+    story.answer(["show", f"{story.head}:{path}"], head)
+
+
+def declare(story: Story, line: str):
+    doctor_log(story, lambda out: out.replace(
+        "Factory-Station: S09", f"Changed test: {line}\n\nFactory-Station: S09", 1))
+
+
+def h3(story: Story) -> list[str]:
+    return [p for p in story.render().problems if p.startswith("rule H3")]
+
+
+class AdditionOnlyChangeTest(unittest.TestCase):
+    """An existing test that only gains lines has still changed (rule H3)."""
+
+    def adds_an_assertion(self) -> Story:
+        story = Story(28)
+        change_test_file(story, "tests/test_x.py", "@@ -5,0 +6 @@\n+    assert bar() == 2\n",
+                         base=BASE_PY, head=BASE_PY + "    assert bar() == 2\n", added=1)
+        return story
+
+    def test_an_added_assertion_without_its_line_fails_h3(self):
+        story = self.adds_an_assertion()
+        self.assertEqual(h3(story), ["rule H3: `test_x` in `tests/test_x.py` changed without "
+                                     "a `Changed test:` line"])
+        rendered = story.render()
+        self.assertIn("- Changed existing tests: 1\n  - `tests/test_x.py`: `test_x` — **not "
+                      "declared**: no `Changed test:` line names it (rule H3)", rendered.body)
+        result = story.check(rendered.body)
+        self.assertFalse(result.ok)
+        self.assertEqual(result.differences, [])  # the body is true; the change is not declared
+        self.assertIn(h3(story)[0], result.problems)
+
+    def test_an_added_assertion_with_its_line_is_accepted(self):
+        story = self.adds_an_assertion()
+        declare(story, "test_x — it also checks bar(), which the story adds")
+        rendered = story.render()
+        self.assertEqual(rendered.problems, [])
+        self.assertIn("- Changed existing tests: 1\n  - `tests/test_x.py`: test_x — it also "
+                      "checks bar(), which the story adds", rendered.body)
+        self.assertTrue(story.check(rendered.body).ok)
+
+    def test_an_addition_inside_an_existing_js_test_fails_h3(self):
+        story = Story(28)
+        base = text_of_accessibility(story)
+        lines = base.split("\n")
+        at = next(i for i, line in enumerate(lines)
+                  if line.startswith("test('#12 AC1: axe reports no violations in the "
+                                     "Active view'")) + 1  # the first line of its body
+        head = "\n".join(lines[:at + 1] + ["  await expect(page).toHaveTitle('Tasks');"]
+                         + lines[at + 1:])
+        story.edit(["show", f"{story.head}:tests/e2e/accessibility.spec.ts"], lambda _: head)
+        story.edit(["-c", "core.quotepath=false", "diff", "--no-color"], lambda out: out.replace(
+            "+++ b/tests/e2e/accessibility.spec.ts\n",
+            "+++ b/tests/e2e/accessibility.spec.ts\n"
+            f"@@ -{at + 1},0 +{at + 2} @@\n+  await expect(page).toHaveTitle('Tasks');\n", 1))
+        self.assertEqual(h3(story), ["rule H3: `#12 AC1: axe reports no violations in the "
+                                     "Active view` in `tests/e2e/accessibility.spec.ts` changed "
+                                     "without a `Changed test:` line"])
+
+    def test_removed_and_modified_lines_still_work(self):
+        story = Story(28)
+        change_test_file(story, "tests/test_x.py",
+                         "@@ -5 +5 @@\n-    assert foo() == 1\n+    assert foo() == 2\n",
+                         base=BASE_PY, head=BASE_PY.replace("== 1", "== 2"), added=1, deleted=1)
+        changed, _ = prbody.changed_tests(story.facts().git)
+        self.assertEqual([(c.file, c.name) for c in changed], [("tests/test_x.py", "test_x")])
+        self.assertEqual(len(h3(story)), 1)  # one test, flagged once
+        declare(story, "test_x — foo() now returns 2")
+        self.assertEqual(h3(story), [])
+        removed = Story(28)  # a removal alone
+        change_test_file(removed, "tests/test_x.py", "@@ -5 +4,0 @@\n-    assert foo() == 1\n",
+                         base=BASE_PY, head=BASE_PY.replace("    assert foo() == 1\n", ""),
+                         added=0, deleted=1)
+        self.assertEqual(h3(removed), ["rule H3: `test_x` in `tests/test_x.py` changed without "
+                                       "a `Changed test:` line"])
+
+    def test_a_new_test_file_is_not_a_changed_test(self):
+        story = Story(28)
+        new = "def test_y():\n    assert baz() == 3\n"
+        change_test_file(story, "tests/test_y.py", "@@ -0,0 +1,2 @@\n+def test_y():\n"
+                         "+    assert baz() == 3\n", base=None, head=new, added=2)
+        self.assertEqual(prbody.changed_tests(story.facts().git), ([], []))
+        self.assertIn("- Changed existing tests: None", story.render().body)
+
+    def test_a_new_test_in_an_existing_file_is_not_a_changed_test(self):
+        story = Story(28)
+        added = "\n\ndef test_y():\n    assert baz() == 3\n"
+        change_test_file(story, "tests/test_x.py", "@@ -5,0 +6,4 @@\n+\n+\n+def test_y():\n"
+                         "+    assert baz() == 3\n", base=BASE_PY, head=BASE_PY + added,
+                         added=4)
+        self.assertEqual(h3(story), [])
+
+    def test_additions_outside_any_test_or_blank_are_not_changed_tests(self):
+        story = Story(28)
+        head = BASE_PY.replace("import foo\n", "import foo\nimport bar\n").replace(
+            "    assert foo() == 1\n", "\n    assert foo() == 1\n")
+        change_test_file(story, "tests/test_x.py", "@@ -1,0 +2 @@\n+import bar\n"
+                         "@@ -4,0 +6 @@\n+\n", base=BASE_PY, head=head, added=2)
+        self.assertEqual(h3(story), [])
+
+    def test_the_real_new_tests_of_27_in_existing_files_are_not_changed_tests(self):
+        """#27 added tests to three existing files; only its two edited tests changed."""
+        facts = Story(27).facts().git
+        self.assertEqual(sorted(facts.test_texts), ["src/app/controller.test.ts",
+                                                    "src/domain/task.test.ts",
+                                                    "src/ui/render.test.ts"])
+        changed, _ = prbody.changed_tests(facts)
+        self.assertEqual([c.name[:6] for c in changed], ["#3 AC3", "#4 AC4"])
+
+
+def text_of_accessibility(story: Story) -> str:
+    base_sha = story.git_answers[story.key(["merge-base"])]["out"].strip()
+    return story.git_answers[json.dumps(
+        ["show", f"{base_sha}:tests/e2e/accessibility.spec.ts"])]["out"]
+
+
 if __name__ == "__main__":
     unittest.main()

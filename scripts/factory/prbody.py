@@ -30,13 +30,14 @@ The quality gates, computed:
   ``@generated`` / ``Code generated … DO NOT EDIT`` header).
 * **Q8 CI:** ``Not configured`` unless ``ci.required``; then the check runs of the commit.
 
-**Changed tests and new dependencies.** A removed or modified line in a test file that
-existed at the base is a change to the test that encloses it (found by indentation in the
-base file), or to the file when no test encloses it. Each must be named by a
-``Changed test:`` line in a commit body, or it is flagged (rule H3). A dependency that a
-changed manifest adds must have a ``New dependency:`` line, and every such line must name
-a dependency a manifest adds (rule S9). Only removed or modified lines count: a test
-that only gains lines is not a changed test.
+**Changed tests and new dependencies.** In a test file that existed at the base, a
+removed or modified line is a change to the test that encloses it (found by indentation
+in the base file), or to the file when no test encloses it; an added line is a change to
+the test that encloses it in the head file, when that test existed at the base (a new
+test, a new file, a blank line or an addition outside any test is not). Each change must
+be named by a ``Changed test:`` line in a commit body, or it is flagged (rule H3). A
+dependency that a changed manifest adds must have a ``New dependency:`` line, and every
+such line must name a dependency a manifest adds (rule S9).
 
 ``pr check <P>`` reads the open PR, takes its three model sections, renders the body
 again from the facts as they are now, and fails on any other difference: a test result,
@@ -100,6 +101,8 @@ class GitFacts:
     base_texts: dict[str, str | None]  # old path -> text at the merge base (None: new)
     head_texts: dict[str, str | None]  # path -> text at the head (manifests only)
     generated: set[str]
+    # path -> text at the head, for existing test files the branch adds lines to
+    test_texts: dict[str, str | None] = field(default_factory=dict)
 
 
 @dataclass
@@ -183,10 +186,14 @@ def git_facts(git: Git, base_ref: str, sha: str) -> GitFacts:
     hunks = parse_hunks(diff)
     base_texts: dict[str, str | None] = {}
     head_texts: dict[str, str | None] = {}
+    test_texts: dict[str, str | None] = {}
     for f in files:
-        removed = hunks.get(f.path, FileHunks()).removed
-        if acmap.is_test_file(f.old_path) and removed:
+        h = hunks.get(f.path, FileHunks())
+        added = any(text.strip() for _, text in h.added)
+        if acmap.is_test_file(f.old_path) and not h.new_file and (h.removed or added):
             base_texts[f.old_path] = _show(git, merge_base, f.old_path)
+            if added:  # where the added lines are, to find the tests they belong to
+                test_texts[f.path] = _show(git, sha, f.path)
         if manifests.is_manifest(f.path) or manifests.is_manifest(f.old_path):
             base_texts[f.old_path] = _show(git, merge_base, f.old_path)  # None: new
             head_texts[f.path] = _show(git, sha, f.path)  # None: deleted
@@ -194,7 +201,8 @@ def git_facts(git: Git, base_ref: str, sha: str) -> GitFacts:
     generated = _generated_attr(git, sha, paths) if paths else set()
     generated |= {path for path, h in hunks.items()
                   if any(n <= 5 and _GENERATED_HEADER.search(text) for n, text in h.added)}
-    return GitFacts(merge_base, diff, files, parse_log(log), base_texts, head_texts, generated)
+    return GitFacts(merge_base, diff, files, parse_log(log), base_texts, head_texts, generated,
+                    test_texts)
 
 
 def _show(git: Git, rev: str, path: str) -> str | None:
@@ -359,20 +367,43 @@ def commit_lines(commits: list[Commit], prefix: str) -> list[str]:
             if line.strip().startswith(prefix)]
 
 
+def test_names(lines: list[str]) -> set[str]:
+    """Every test declared in a test file."""
+    return {name for i in range(len(lines)) if (name := _declaration(lines, i)) is not None}
+
+
+def _lines(text: str | None) -> list[str]:
+    return (text or "").replace("\r\n", "\n").split("\n")
+
+
 def changed_tests(facts: GitFacts) -> tuple[list[ChangedTest], list[str]]:
     """Every existing test the branch changes, with the ``Changed test:`` line naming it,
-    and the declared lines that name no change found."""
+    and the declared lines that name no change found.
+
+    In a test file that existed at the base, a removed or modified line changes the test
+    that encloses it in the base file, or the file when no test does. An added line
+    changes the test that encloses it in the head file, if that test existed at the base:
+    a new test, a new file, a blank line or an addition outside any test is no change to
+    an existing test."""
     declared = commit_lines(facts.commits, "Changed test:")
     used: set[str] = set()
     found: list[ChangedTest] = []
     hunks = parse_hunks(facts.diff)
     for f in facts.files:
         h = hunks.get(f.path)
-        if not h or not h.removed or not acmap.is_test_file(f.old_path):
+        if not h or h.new_file or not acmap.is_test_file(f.old_path):
             continue
-        lines = (facts.base_texts.get(f.old_path) or "").replace("\r\n", "\n").split("\n")
-        names = list(dict.fromkeys(enclosing_test(lines, n) for n, _ in h.removed))
-        for name in names:
+        added = [n for n, text in h.added if text.strip()]
+        if not h.removed and not added:
+            continue
+        base = _lines(facts.base_texts.get(f.old_path))
+        names = [enclosing_test(base, n) for n, _ in h.removed]
+        if added:
+            existing = test_names(base)
+            head = _lines(facts.test_texts.get(f.path))
+            names += [name for n in added
+                      if (name := enclosing_test(head, n)) is not None and name in existing]
+        for name in dict.fromkeys(names):
             key = name if name is not None else f.old_path
             match = next((d for d in declared if key in d), None)
             if match is not None:
