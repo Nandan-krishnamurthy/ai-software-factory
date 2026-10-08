@@ -2,6 +2,8 @@
 
 * ``run_process`` is the single place ``subprocess`` is called (``git.py`` reuses it).
   Every call has a timeout, never reads the parent's stdin, and decodes output as UTF-8.
+  ``run_command_line`` is its sibling for the target's own configured commands
+  (``verify run``): command lines, which it runs with bash (``bash -c``).
 * ``Gh`` wraps the ``gh`` CLI: argument lists only, JSON parsing, typed errors.
   ``Gh._env`` is the one place auth is injected (``GH_TOKEN`` from a named env var),
   which is what the future bot mode needs (architecture §9.4).
@@ -12,6 +14,7 @@
 import json
 import os
 import re
+import shutil
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -84,6 +87,99 @@ def run_process(
             argv, None, "", str(exc), detail=f"executable {argv[0]!r} not found"
         ) from None
     return ProcessResult(argv, completed.returncode, completed.stdout or "", completed.stderr or "")
+
+
+def run_command_line(
+    command: str,
+    *,
+    timeout: float,
+    cwd: str | Path,
+    env: Mapping[str, str] | None = None,
+) -> ProcessResult:
+    """Run one of the target's configured commands (``commands.*`` in its config) with
+    bash, exactly as written (rule H4), and capture stdout and stderr merged in order, as
+    ``stdout``.
+
+    The command line is passed to ``bash -c`` as one argument (an argument list, no
+    platform shell in between). Bash on every platform matters: the guard checks
+    configured commands as bash (``evidence.guard_vetter``), so the language it analyses is
+    the language that runs them. On a timeout the whole process tree is killed (a test
+    runner's child processes would otherwise keep the pipe open) and ``CommandTimeout``
+    carries the output captured so far.
+    """
+    if timeout is None or timeout <= 0:
+        raise ValueError("every external command needs a positive timeout")
+    argv = [bash_executable(), "-c", command]
+    options: dict[str, Any] = (
+        {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt"
+        else {"start_new_session": True})
+    try:
+        process = subprocess.Popen(
+            argv,
+            cwd=cwd,
+            env=dict(env) if env is not None else None,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            **options,
+        )
+    except FileNotFoundError as exc:
+        raise CommandNotFound(argv, None, "", str(exc),
+                              detail=f"bash {argv[0]!r} not found") from None
+    try:
+        output, _ = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_tree(process)
+        try:
+            output, _ = process.communicate(timeout=10)
+        except subprocess.TimeoutExpired:  # a stray grandchild still holds the pipe
+            output = ""
+        raise CommandTimeout(argv, None, output or "", "",
+                             detail=f"timed out after {timeout:g}s") from None
+    return ProcessResult(argv, process.returncode, output or "", "")
+
+
+def bash_executable() -> str:
+    """The bash that runs configured commands. On Windows it is Git for Windows' own
+    ``bin/bash.exe``, found next to ``git.exe`` (the factory already needs git), and never
+    a ``bash`` from ``PATH``, which can be WSL's ``bash.exe`` in ``System32``. Raises
+    ``CommandNotFound`` rather than falling back to another shell."""
+    if os.name == "nt":
+        git = shutil.which("git")
+        if git:
+            # <Git>/cmd/git.exe or <Git>/mingw64/bin/git.exe -> <Git>/bin/bash.exe
+            for parent in list(Path(git).resolve().parents)[:3]:
+                candidate = parent / "bin" / "bash.exe"
+                if candidate.is_file():
+                    return str(candidate)
+        raise CommandNotFound(["bash"], None, "", "", detail=(
+            "Git Bash (bin/bash.exe of Git for Windows, next to git.exe) was not found; "
+            "configured commands run only with the bash the guard checks them as"))
+    found = shutil.which("bash")
+    if not found:
+        raise CommandNotFound(["bash"], None, "", "", detail=(
+            "bash was not found on PATH; configured commands run only with the bash the "
+            "guard checks them as"))
+    return found
+
+
+def _kill_tree(process: subprocess.Popen) -> None:
+    """Kill ``process`` and every process it started."""
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(process.pid)],
+                       stdin=subprocess.DEVNULL, capture_output=True, timeout=30, check=False)
+    else:
+        try:
+            os.killpg(process.pid, 9)  # its own session (start_new_session=True)
+        except ProcessLookupError:
+            pass
+    try:
+        process.kill()
+    except OSError:
+        pass
 
 
 def _as_text(data: str | bytes | None) -> str:

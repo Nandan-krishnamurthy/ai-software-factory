@@ -13,6 +13,7 @@ from factory import (
     discovery,
     doctor,
     ensure,
+    evidence,
     increments,
     issues,
     labels,
@@ -192,6 +193,42 @@ def build_parser() -> argparse.ArgumentParser:
                                                    "the checkpoint comment's note)")
     vcheck.set_defaults(handler=_verdict_check, needs_target=True)
 
+    verify_parser = subparsers.add_parser(
+        "verify", help="run the target's quality commands and record the evidence (T6.1)")
+    verify_sub = verify_parser.add_subparsers(dest="verify_command", metavar="<action>")
+    verify_sub.required = True
+    vrun = verify_sub.add_parser(
+        "run", help="run build, lint, typecheck and test; record the evidence",
+        description="Runs commands.build, lint, typecheck and test from the target's "
+                    ".factory/config.json on the default branch on origin (the approved "
+                    "config, never the story branch's), in order, each exactly as "
+                    "written, with bash, on the target's current commit (the working "
+                    "tree must be clean). Records "
+                    "each command, exit code, duration, the last 50 output lines and a "
+                    "parsed summary; a null command is recorded as skipped. Writes the "
+                    "evidence to --out and into the issue's checkpoint note. Exit 0: "
+                    "every configured command passed. Exit 1: one failed, timed out or "
+                    "could not run, or the branch changes the approved commands (the "
+                    "evidence is still recorded).")
+    vrun.add_argument("--issue", type=_positive_int, required=True, metavar="N")
+    vrun.add_argument("--out", metavar="F",
+                      help="where to write the evidence JSON (default: "
+                           "<temp dir>/evidence-<N>.json)")
+    vrun.add_argument("--timeout", type=_positive_float, default=evidence.DEFAULT_TIMEOUT,
+                      metavar="SECONDS", help="per command (default: %(default)g)")
+    vrun.add_argument("--json", action="store_true", help="print the evidence as JSON")
+    vrun.set_defaults(handler=_verify_run, needs_target=True)
+    vcheck_ev = verify_sub.add_parser(
+        "check", help="check that recorded evidence is current and passing",
+        description="Reads the evidence from --file, or else from the issue's checkpoint "
+                    "note. Exit 0 only if it is for the issue, for the head of its branch "
+                    "on origin, with an unchanged tree, the branch does not change the "
+                    "approved commands, and every configured command passed. Read-only.")
+    vcheck_ev.add_argument("--issue", type=_positive_int, required=True, metavar="N")
+    vcheck_ev.add_argument("--file", metavar="F",
+                           help="evidence JSON (default: the checkpoint comment's note)")
+    vcheck_ev.set_defaults(handler=_verify_check, needs_target=True)
+
     comment_parser = subparsers.add_parser(
         "comment", help="post a marked factory comment on an issue or PR (rule S14)",
         description="Post a comment carrying a factory marker. --kind reply adds a new "
@@ -318,6 +355,13 @@ def _command_name(text: str) -> str:
         raise argparse.ArgumentTypeError(
             f"{text!r} is not one of: " + ", ".join(sorted(c[1:] for c in commands.COMMANDS)))
     return name
+
+
+def _positive_float(text: str) -> float:
+    value = float(text)
+    if not value > 0:
+        raise argparse.ArgumentTypeError("must be a positive number")
+    return value
 
 
 def _non_negative_int(text: str) -> int:
@@ -510,6 +554,54 @@ def _verdict_check(args: argparse.Namespace) -> int:
     result = verdict.parse(text, verdict.issue_acs(issue.get("body") or ""))
     print(verdict.render(result))
     return 0 if result.ok else 1
+
+
+def _verify_run(args: argparse.Namespace) -> int:
+    repo, path = args.target.repo, args.target.path
+    gh = Gh()
+    # The evidence goes into the checkpoint note: make sure it can, before a long run.
+    comments.check_target_kind(gh, repo, args.issue, expect_pr=False)
+    if comments.find_checkpoint(comments.list_comments(gh, repo, args.issue)) is None:
+        raise evidence.EvidenceError(f"issue #{args.issue} has no checkpoint comment yet "
+                                     "(S07 writes the first one); nothing was run")
+    result = evidence.run_verification(
+        path, issue=args.issue, repo=repo, git=Git(path),
+        vet=evidence.guard_vetter(path), timeout=args.timeout)
+    out = evidence.write(result, Path(args.out) if args.out else
+                         evidence.default_path(args.issue))
+    comments.set_checkpoint_evidence(gh, repo, args.issue, evidence.to_block(result))
+    _print_safe(json.dumps(result.to_dict(), indent=2) if args.json
+                else evidence.render(result, out))
+    return 1 if result.failures() or result.unapproved else 0
+
+
+def _verify_check(args: argparse.Namespace) -> int:
+    repo, git = args.target.repo, Git(args.target.path)
+    expected_branch = None
+    if args.file:
+        result = evidence.read(Path(args.file))
+    else:
+        found = comments.find_checkpoint(comments.list_comments(Gh(), repo, args.issue))
+        if found is None:
+            raise evidence.EvidenceError(f"issue #{args.issue} has no checkpoint comment")
+        result = evidence.from_body(found[0].get("body") or "")
+        if result is None:
+            raise evidence.EvidenceError(f"issue #{args.issue}'s checkpoint has no evidence; "
+                                         "run `verify run` first")
+        expected_branch = found[1].branch
+    problems = evidence.check(result, issue=args.issue,
+                              branch_head=evidence.remote_head(git, result.branch),
+                              expected_branch=expected_branch)
+    _print_safe(evidence.render_check(result, problems))
+    return 1 if problems else 0
+
+
+def _print_safe(text: str) -> None:
+    """Print text that quotes the target's own commands and output, which may hold
+    characters the console's encoding cannot show (cp1252 on Windows): never crash on
+    them after the commands have run."""
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    print(text.encode(encoding, errors="replace").decode(encoding))
 
 
 def _route(args: argparse.Namespace) -> int:
