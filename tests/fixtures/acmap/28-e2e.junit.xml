@@ -1,0 +1,26 @@
+<testsuites id="" name="" tests="11" failures="0" skipped="0" errors="0" time="11.003433999999999">
+<testsuite name="accessibility.spec.ts" timestamp="2026-10-08T09:35:46.313Z" hostname="chromium" tests="11" failures="0" skipped="0" time="17.626" errors="0">
+<testcase name="#12 AC1: axe reports no violations in the Active view" classname="accessibility.spec.ts" time="2.494">
+</testcase>
+<testcase name="#12 AC1: axe reports no violations in the Completed view" classname="accessibility.spec.ts" time="2.407">
+</testcase>
+<testcase name="#12 AC1: axe reports no violations with a task in edit mode" classname="accessibility.spec.ts" time="3.456">
+</testcase>
+<testcase name="#12 AC2: the whole task journey works with the keyboard only" classname="accessibility.spec.ts" time="1.925">
+</testcase>
+<testcase name="#12 AC3: the checkbox, Edit and Delete names include the task title" classname="accessibility.spec.ts" time="0.471">
+</testcase>
+<testcase name="#12 AC4: the empty-title message is in a live region the field refers to" classname="accessibility.spec.ts" time="0.553">
+</testcase>
+<testcase name="#12 AC5: every focused element shows a visible focus indicator" classname="accessibility.spec.ts" time="0.966">
+</testcase>
+<testcase name="overdue label › #28 AC1: the Overdue label has its own style with AA contrast" classname="accessibility.spec.ts" time="0.692">
+</testcase>
+<testcase name="overdue label › #28 AC2: axe reports no violations with an overdue task in the Active view" classname="accessibility.spec.ts" time="2.142">
+</testcase>
+<testcase name="overdue label › #28 AC3: axe reports no violations with a past-dated task in the Completed view" classname="accessibility.spec.ts" time="2.009">
+</testcase>
+<testcase name="overdue label › #28 AC4: the overdue row is read with its title and &quot;Overdue&quot;" classname="accessibility.spec.ts" time="0.511">
+</testcase>
+</testsuite>
+</testsuites>

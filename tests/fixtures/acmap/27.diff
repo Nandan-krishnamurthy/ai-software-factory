@@ -1,0 +1,295 @@
+diff --git a/.factory/log.md b/.factory/log.md
+index 4ed37cc..3ea90eb 100644
+--- a/.factory/log.md
++++ b/.factory/log.md
+@@ -65,0 +66,4 @@
++2026-10-07T09:28:34Z S07 002-add-due-dates #27 branch story/27-overdue-label
++2026-10-07T09:30:15Z S08 002-add-due-dates #27 implement
++2026-10-07T10:21:22Z S09 002-add-due-dates #27 tests pass (unit 117 passed; e2e 70 passed)
++2026-10-07T10:25:53Z S11 002-add-due-dates #27 PR #29
+diff --git a/docs/factory/traceability.md b/docs/factory/traceability.md
+index b12bf27..4e4d7f9 100644
+--- a/docs/factory/traceability.md
++++ b/docs/factory/traceability.md
+@@ -32,4 +32,4 @@ Status is one of: `Not started`, `In progress`, `Implemented`, `Deferred`.
+-| REQ-022 | STORY-013 | — | — | Not started |
+-| REQ-023 | STORY-013 | — | — | Not started |
+-| REQ-024 | STORY-013 | — | — | Not started |
+-| REQ-025 | STORY-013 | — | — | Not started |
++| REQ-022 | STORY-013 (#27) | #29 | `#27 AC1: an active task due before today is marked "Overdue"`; `#27 AC1: an open task due before today is overdue`; `#27 AC1: today is the local calendar day, just after and just before midnight`; `#27 AC1: an active task due before today shows "Overdue" after its due date`; `#27 AC1: the state carries the local date of the injected clock` | Implemented |
++| REQ-023 | STORY-013 (#27) | #29 | `#27 AC2: tasks due today, tomorrow or never are not marked`; `#27 AC2: a task due today, later, or with no due date is not overdue`; `#27 AC2: tasks due today, later or never show no label` | Implemented |
++| REQ-024 | STORY-013 (#27) | #29 | `#27 AC3: completing removes the label, and reopening shows it again`; `#27 AC3: a completed task is never overdue`; `#27 AC3: a completed task in the Completed view shows no label` | Implemented |
++| REQ-025 | STORY-013 (#27) | #29 | `#27 AC4: editing the due date shows or removes the label at once`; `#27 AC4: every rendered state reads the clock again` | Implemented |
+diff --git a/src/app/controller.test.ts b/src/app/controller.test.ts
+index 38c7779..9ffb843 100644
+--- a/src/app/controller.test.ts
++++ b/src/app/controller.test.ts
+@@ -30 +30,6 @@ describe('controller.addTask', () => {
+-    expect(controller.state()).toEqual({ tasks: [], validationMessage: TITLE_REQUIRED, view: 'active' });
++    expect(controller.state()).toEqual({
++      tasks: [],
++      validationMessage: TITLE_REQUIRED,
++      view: 'active',
++      today: '2026-09-25',
++    });
+@@ -87 +92,6 @@ describe('controller persistence', () => {
+-    expect(persistent().controller.state()).toEqual({ tasks: [], validationMessage: null, view: 'active' });
++    expect(persistent().controller.state()).toEqual({
++      tasks: [],
++      validationMessage: null,
++      view: 'active',
++      today: '2026-09-25',
++    });
+@@ -272,0 +283,23 @@ describe('controller deleting', () => {
++
++describe('controller today', () => {
++  it('#27 AC1: the state carries the local date of the injected clock', () => {
++    const { controller } = setup();
++    expect(controller.state().today).toBe('2026-09-25');
++  });
++
++  it('#27 AC4: every rendered state reads the clock again', () => {
++    let clock = new Date(2026, 9, 7, 23, 59);
++    const render = vi.fn<(state: AppState) => void>();
++    const controller = createController({
++      tasks: [],
++      storage: { setItem: vi.fn() },
++      render,
++      now: () => clock,
++      newId: () => 'id-1',
++    });
++    expect(controller.state().today).toBe('2026-10-07');
++    clock = new Date(2026, 9, 8, 0, 1);
++    controller.addTask('Pay rent', { dueDate: '2026-10-07' });
++    expect(render).toHaveBeenLastCalledWith(expect.objectContaining({ today: '2026-10-08' }));
++  });
++});
+diff --git a/src/app/controller.ts b/src/app/controller.ts
+index 4762e69..0282dd8 100644
+--- a/src/app/controller.ts
++++ b/src/app/controller.ts
+@@ -4,0 +5 @@ import {
++  localDate,
+@@ -21,0 +23,2 @@ export interface AppState {
++  /** Today's local date (`YYYY-MM-DD`), read on every update, for the overdue label (REQ-022). */
++  readonly today?: string;
+@@ -55 +58 @@ export function createController({ tasks, storage, render, now, newId }: Control
+-  let current: AppState = { tasks, validationMessage: null, view: 'active' };
++  let current: AppState = { tasks, validationMessage: null, view: 'active', today: localDate(now()) };
+@@ -64 +67,2 @@ export function createController({ tasks, storage, render, now, newId }: Control
+-    current = next;
++    // Today is read on every update, so each action refreshes the overdue labels (REQ-025).
++    current = { ...next, today: localDate(now()) };
+diff --git a/src/domain/task.test.ts b/src/domain/task.test.ts
+index 87931b0..e88feab 100644
+--- a/src/domain/task.test.ts
++++ b/src/domain/task.test.ts
+@@ -7,0 +8,2 @@ import {
++  isOverdue,
++  localDate,
+@@ -187,0 +190,32 @@ describe('deleteTask', () => {
++
++describe('localDate and isOverdue', () => {
++  const task = (dueDate: string | null, completed = false): Task => ({
++    id: 'a',
++    title: 'Pay rent',
++    dueDate,
++    priority: null,
++    completed,
++    createdAt: '',
++  });
++
++  it('#27 AC1: today is the local calendar day, just after and just before midnight', () => {
++    expect(localDate(new Date(2026, 9, 7, 0, 0, 1))).toBe('2026-10-07');
++    expect(localDate(new Date(2026, 9, 7, 23, 59, 59))).toBe('2026-10-07');
++    expect(localDate(new Date(2026, 0, 5, 12))).toBe('2026-01-05');
++  });
++
++  it('#27 AC1: an open task due before today is overdue', () => {
++    expect(isOverdue(task('2026-10-06'), '2026-10-07')).toBe(true);
++    expect(isOverdue(task('2025-12-31'), '2026-01-01')).toBe(true);
++  });
++
++  it('#27 AC2: a task due today, later, or with no due date is not overdue', () => {
++    expect(isOverdue(task('2026-10-07'), '2026-10-07')).toBe(false);
++    expect(isOverdue(task('2026-10-08'), '2026-10-07')).toBe(false);
++    expect(isOverdue(task(null), '2026-10-07')).toBe(false);
++  });
++
++  it('#27 AC3: a completed task is never overdue', () => {
++    expect(isOverdue(task('2026-10-06', true), '2026-10-07')).toBe(false);
++  });
++});
+diff --git a/src/domain/task.ts b/src/domain/task.ts
+index d6be367..dc39f0a 100644
+--- a/src/domain/task.ts
++++ b/src/domain/task.ts
+@@ -47,0 +48,11 @@ export function isCalendarDate(value: unknown): value is string {
++/** The local calendar day of `now` as `YYYY-MM-DD`; local parts, not `toISOString` (UTC). */
++export function localDate(now: Date): string {
++  const pad = (value: number) => String(value).padStart(2, '0');
++  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
++}
++
++/** An open task whose due date is before `today` (`YYYY-MM-DD`); ISO dates compare as strings. */
++export function isOverdue(task: Task, today: string): boolean {
++  return !task.completed && task.dueDate !== null && task.dueDate < today;
++}
++
+diff --git a/src/ui/render.test.ts b/src/ui/render.test.ts
+index 9d53135..5b65435 100644
+--- a/src/ui/render.test.ts
++++ b/src/ui/render.test.ts
+@@ -326,0 +327,50 @@ describe('inline editing', () => {
++
++describe('render overdue label', () => {
++  const task = (id: string, dueDate: string | null, completed = false) => ({
++    id,
++    title: `Task ${id}`,
++    dueDate,
++    priority: null,
++    completed,
++    createdAt: '',
++  });
++  const overdue = (id: string) => {
++    const row = [...root.querySelectorAll('#task-list li')].find(
++      (li) => li.querySelector('.task-title')!.textContent === `Task ${id}`,
++    )!;
++    return row.querySelector('.task-overdue');
++  };
++
++  it('#27 AC1: an active task due before today shows "Overdue" after its due date', () => {
++    render(root, { tasks: [task('a', '2026-10-06')], validationMessage: null, today: '2026-10-07' });
++    const label = overdue('a')!;
++    expect(label.textContent).toBe('Overdue');
++    expect(label.previousElementSibling!.className).toBe('task-due');
++  });
++
++  it('#27 AC2: tasks due today, later or never show no label', () => {
++    const tasks = [task('a', '2026-10-07'), task('b', '2026-10-08'), task('c', null)];
++    render(root, { tasks, validationMessage: null, today: '2026-10-07' });
++    expect(['a', 'b', 'c'].map(overdue)).toEqual([null, null, null]);
++  });
++
++  it('#27 AC3: a completed task in the Completed view shows no label', () => {
++    render(root, {
++      tasks: [task('a', '2026-10-06', true)],
++      validationMessage: null,
++      view: 'completed',
++      today: '2026-10-07',
++    });
++    expect(overdue('a')).toBeNull();
++  });
++
++  it('#27 AC5: without today no label is shown, and the due text and order are unchanged', () => {
++    const tasks = [task('b', '2026-10-08'), task('a', '2026-10-06')];
++    render(root, { tasks, validationMessage: null });
++    expect(overdue('a')).toBeNull();
++    render(root, { tasks, validationMessage: null, today: '2026-10-07' });
++    const rows = [...root.querySelectorAll('#task-list li')];
++    expect(rows.map((li) => li.querySelector('.task-title')!.textContent)).toEqual(['Task a', 'Task b']);
++    expect(rows[0].querySelector('.task-due')!.textContent).toMatch(/^Due /);
++  });
++});
+diff --git a/src/ui/render.ts b/src/ui/render.ts
+index 362f2e9..b52006a 100644
+--- a/src/ui/render.ts
++++ b/src/ui/render.ts
+@@ -4 +4 @@ import { sortTasks } from '../domain/sort';
+-import type { Priority, Task } from '../domain/task';
++import { isOverdue, type Priority, type Task } from '../domain/task';
+@@ -112 +112 @@ export function render(root: HTMLElement, state: AppState): void {
+-    task.id === state.editing?.id ? editItem(task, state.editing.error) : taskItem(task),
++    task.id === state.editing?.id ? editItem(task, state.editing.error) : taskItem(task, state.today),
+@@ -139 +139 @@ function viewButton(view: View, text: string): HTMLButtonElement {
+-function taskItem(task: Task): HTMLLIElement {
++function taskItem(task: Task, today: string | undefined): HTMLLIElement {
+@@ -158,0 +159,7 @@ function taskItem(task: Task): HTMLLIElement {
++  // Text, not colour alone, marks an open task whose due date has passed (REQ-022, REQ-024).
++  if (today && isOverdue(task, today)) {
++    const overdue = document.createElement('span');
++    overdue.className = 'task-overdue';
++    overdue.textContent = 'Overdue';
++    item.append(' ', overdue);
++  }
+diff --git a/tests/e2e/overdue.spec.ts b/tests/e2e/overdue.spec.ts
+new file mode 100644
+index 0000000..aaac50a
+--- /dev/null
++++ b/tests/e2e/overdue.spec.ts
+@@ -0,0 +1,75 @@
++import { expect, test, type Page } from '@playwright/test';
++
++const list = (page: Page) => page.getByRole('list', { name: 'Tasks' });
++const titles = (page: Page) => list(page).locator('.task-title');
++const row = (page: Page, name: string) =>
++  list(page).getByRole('listitem').filter({ has: page.getByText(name, { exact: true }) });
++const overdue = (page: Page, name: string) => row(page, name).locator('.task-overdue');
++
++async function addTask(page: Page, name: string, due = '') {
++  await page.getByLabel('Task title').fill(name);
++  await page.getByLabel('Due date', { exact: true }).fill(due);
++  await page.getByLabel('Task title').press('Enter');
++  await expect(titles(page).getByText(name, { exact: true })).toHaveCount(1);
++}
++
++async function editDue(page: Page, name: string, due: string) {
++  await list(page).getByRole('button', { name: `Edit ${name}`, exact: true }).click();
++  await list(page).getByLabel('New due date').fill(due);
++  await list(page).getByRole('button', { name: 'Save' }).click();
++  await expect(list(page).getByLabel('New due date')).toHaveCount(0);
++}
++
++test.beforeEach(async ({ page }) => {
++  // Today is 2026-10-07 on the device, whatever the real date is.
++  await page.clock.setFixedTime(new Date(2026, 9, 7, 10, 0));
++  await page.goto('/');
++});
++
++test('#27 AC1: an active task due before today is marked "Overdue"', async ({ page }) => {
++  await addTask(page, 'Pay rent', '2026-10-06');
++  await expect(overdue(page, 'Pay rent')).toHaveText('Overdue');
++});
++
++test('#27 AC2: tasks due today, tomorrow or never are not marked', async ({ page }) => {
++  await addTask(page, 'Due today', '2026-10-07');
++  await addTask(page, 'Due tomorrow', '2026-10-08');
++  await addTask(page, 'No date');
++  for (const name of ['Due today', 'Due tomorrow', 'No date']) {
++    await expect(overdue(page, name)).toHaveCount(0);
++  }
++});
++
++test('#27 AC3: completing removes the label, and reopening shows it again', async ({ page }) => {
++  await addTask(page, 'Pay rent', '2026-10-06');
++  await page.getByRole('checkbox', { name: 'Done: Pay rent', exact: true }).click();
++  await page.getByRole('button', { name: 'Completed', exact: true }).click();
++  await expect(titles(page)).toHaveText(['Pay rent']);
++  await expect(overdue(page, 'Pay rent')).toHaveCount(0);
++  await page.getByRole('checkbox', { name: 'Done: Pay rent', exact: true }).click();
++  await page.getByRole('button', { name: 'Active', exact: true }).click();
++  await expect(overdue(page, 'Pay rent')).toHaveText('Overdue');
++});
++
++test('#27 AC4: editing the due date shows or removes the label at once', async ({ page }) => {
++  await addTask(page, 'Pay rent', '2026-10-06');
++  await addTask(page, 'Call mum', '2026-10-09');
++  await editDue(page, 'Pay rent', '2026-10-08');
++  await expect(overdue(page, 'Pay rent')).toHaveCount(0);
++  await editDue(page, 'Pay rent', '2026-10-01');
++  await expect(overdue(page, 'Pay rent')).toHaveText('Overdue');
++  await editDue(page, 'Pay rent', '');
++  await expect(overdue(page, 'Pay rent')).toHaveCount(0);
++  await expect(overdue(page, 'Call mum')).toHaveCount(0);
++  await editDue(page, 'Call mum', '2026-10-05');
++  await expect(overdue(page, 'Call mum')).toHaveText('Overdue');
++});
++
++test('#27 AC5: the order and the due text are unchanged by the label', async ({ page }) => {
++  await addTask(page, 'Later', '2026-10-20');
++  await addTask(page, 'Late', '2026-10-01');
++  await addTask(page, 'Undated');
++  await expect(titles(page)).toHaveText(['Late', 'Later', 'Undated']);
++  await expect(row(page, 'Late').locator('time')).toHaveText(/^Due .*2026/);
++  await expect(row(page, 'Late').locator('time')).toHaveAttribute('datetime', '2026-10-01');
++});

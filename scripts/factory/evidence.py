@@ -36,13 +36,21 @@ The evidence is written to ``<SCRATCH>/evidence-<N>.json`` and into the issue's
 checkpoint note (``comments.set_checkpoint_evidence``). ``verify check`` reads it back
 and refuses evidence that is not for the story branch's current head on ``origin``,
 that is malformed, or in which a command failed.
+
+**What ``verify map`` needs (T6.2).** The test command's *full* output is kept beside the
+evidence file (``evidence-<N>.test.log``), and its SHA-256 is recorded in the evidence,
+so ``verify map`` can find every test's result and prove the file is the one that ran.
+``--report PATH`` names a JUnit or JSON report the target's test command already writes:
+it is copied beside the evidence (``evidence-<N>.report<k>.<ext>``) with its SHA-256, but
+only if the run created or changed it, so a file written beforehand never counts.
 """
 
+import hashlib
 import json
 import re
 import tempfile
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -60,8 +68,10 @@ TAIL_LINES = 50
 MAX_LINE = 1000  # a longer output line is cut, so one huge line cannot flood the ledger
 DEFAULT_TIMEOUT = 1800.0  # seconds per command
 STATUSES = ("pass", "fail", "timeout", "error", "skipped")
-# Room left in the checkpoint comment for the station line and the S10 verdict.
+# Room left in the checkpoint comment for the station line, the AC-to-test map and the
+# S10 verdict.
 NOTE_BUDGET = 40000
+MAX_REPORT_BYTES = 20 * 1024 * 1024  # a larger report is not captured
 
 Runner = Callable[..., ProcessResult]
 Vetter = Callable[[str], str | None]  # returns the guard's reason to block, or None
@@ -81,6 +91,8 @@ class CommandEvidence:
     tail: list[str] = field(default_factory=list)
     summary: list[dict] | None = None
     detail: str = ""
+    output_sha256: str | None = None  # of the full output, as UTF-8 (T6.2)
+    output_lines: int | None = None
 
 
 @dataclass
@@ -97,15 +109,26 @@ class Evidence:
     config_source: str = ""  # the approved config the commands came from: origin/main@abc1234
     unapproved: list[str] = field(default_factory=list)  # commands.* changed on the branch
     tails_omitted: bool = False
+    # Test reports the run wrote (``--report``): {"path", "status", "sha256", "bytes"}.
+    reports: list[dict] = field(default_factory=list)
     schema: int = SCHEMA
+    # Local only, never in the JSON or the note: the full outputs by command name, and the
+    # captured reports' contents by path. ``write`` stores them beside the evidence file.
+    outputs: dict[str, str] = field(default_factory=dict, repr=False, compare=False)
+    report_data: dict[str, bytes] = field(default_factory=dict, repr=False, compare=False)
 
     def failures(self) -> list[str]:
         """One line per command that did not pass (a skipped command is not a failure)."""
         return [f"commands.{c.name} {_describe(c)}" for c in self.commands
                 if c.status not in ("pass", "skipped")]
 
+    def command(self, name: str) -> CommandEvidence | None:
+        return next((c for c in self.commands if c.name == name), None)
+
     def to_dict(self) -> dict:
-        return asdict(self)
+        data = asdict(self)
+        del data["outputs"], data["report_data"]
+        return data
 
 
 # ----------------------------------------------------------------------------- running
@@ -122,9 +145,13 @@ def run_verification(
     timeout: float = DEFAULT_TIMEOUT,
     clock: Callable[[], float] = time.monotonic,
     now: Callable[[], datetime] = lambda: datetime.now(UTC),
+    reports: Sequence[str] = (),
 ) -> Evidence:
     """Run the approved quality commands on the target's current commit and record the
-    results. Nothing runs if any check before the run fails."""
+    results. Nothing runs if any check before the run fails. ``reports``: paths, relative
+    to the target, of test reports the commands write; each is captured only if the run
+    created or changed it."""
+    report_paths = [_report_path(target_path, r) for r in reports]
     dirty = _status_lines(git)
     if dirty:
         raise EvidenceError("the target has uncommitted changes, so the evidence could not "
@@ -151,31 +178,73 @@ def run_verification(
             raise EvidenceError(f"commands.{name} is refused by the factory guard: "
                                 f"{reason}; nothing was run")
 
+    before = {rel: _digest_file(path) for rel, path in report_paths}
     started = now()
     runner = runner or run_command_line
-    results = [_run_one(name, commands.get(name), target_path, runner, timeout, clock)
-               for name in VERIFY_COMMANDS]
+    outputs: dict[str, str] = {}
+    results = [_run_one(name, commands.get(name), target_path, runner, timeout, clock,
+                        outputs) for name in VERIFY_COMMANDS]
+    captured, report_data = _capture_reports(report_paths, before)
     return Evidence(
         issue=issue, repo=repo, branch=branch, sha=sha,
         started_at=started.isoformat(timespec="seconds"),
         finished_at=now().isoformat(timespec="seconds"),
         commands=results, sha_after=git.rev_parse("HEAD"),
         changed_files=_status_lines(git), config_source=source, unapproved=unapproved,
+        reports=captured, outputs=outputs, report_data=report_data,
     )
+
+
+def _report_path(target_path: Path, rel: str) -> tuple[str, Path]:
+    """A ``--report`` path: relative, inside the target, and not ``.git``."""
+    path = Path(rel)
+    if not rel.strip() or path.is_absolute() or path.drive:
+        raise EvidenceError(f"--report {rel!r} must be a path relative to the target")
+    root = target_path.resolve()
+    full = (root / path).resolve()
+    if full == root or root not in full.parents or ".git" in full.relative_to(root).parts:
+        raise EvidenceError(f"--report {rel!r} is not a file inside the target")
+    return full.relative_to(root).as_posix(), full
+
+
+def _digest_file(path: Path) -> str | None:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
+    except OSError:
+        return None
+
+
+def _capture_reports(paths: list[tuple[str, Path]], before: dict[str, str | None]
+                     ) -> tuple[list[dict], dict[str, bytes]]:
+    """Each report as the run left it. Only a file the run created or changed is
+    ``captured``; one it left as it was is ``unchanged``, so a report written before the
+    run (by anyone) is never taken for the run's."""
+    captured, data = [], {}
+    for rel, path in paths:
+        entry: dict = {"path": rel, "status": "missing", "sha256": None, "bytes": None}
+        try:
+            content = path.read_bytes() if path.is_file() else None
+        except OSError:
+            content = None
+        if content is not None and len(content) > MAX_REPORT_BYTES:
+            entry["status"] = "too large"
+        elif content is not None:
+            digest = hashlib.sha256(content).hexdigest()
+            entry.update(sha256=digest, bytes=len(content))
+            if digest == before.get(rel):
+                entry["status"] = "unchanged"
+            else:
+                entry["status"] = "captured"
+                data[rel] = content
+        captured.append(entry)
+    return captured, data
 
 
 def approved_commands(git: Git) -> tuple[dict[str, str | None], str]:
     """The ``commands`` of ``.factory/config.json`` on the default branch on ``origin``,
     and where they came from (``origin/main@abc1234``). Raises ``EvidenceError`` when
     there is no such config: nothing may run without approved commands."""
-    try:
-        ref = git.run(["rev-parse", "--abbrev-ref", "origin/HEAD"]).strip()
-    except GitError:
-        raise EvidenceError("origin/HEAD is not set, so the default branch's approved "
-                            "config cannot be found; run `git remote set-head origin "
-                            "--auto` in the target") from None
-    if not ref.startswith("origin/") or ref == "origin/HEAD":
-        raise EvidenceError(f"origin/HEAD does not name a branch on origin ({ref!r})")
+    ref = default_ref(git)
     path = f"{ref}:{CONFIG_RELPATH.as_posix()}"
     try:
         sha = git.rev_parse(ref)
@@ -190,6 +259,19 @@ def approved_commands(git: Git) -> tuple[dict[str, str | None], str]:
     except FactoryError as err:
         raise EvidenceError(f"{path} is not a valid config: {err}") from None
     return {name: config.commands.get(name) for name in COMMAND_NAMES}, f"{ref}@{sha[:7]}"
+
+
+def default_ref(git: Git) -> str:
+    """The default branch on ``origin`` as a ref (``origin/main``), from ``origin/HEAD``."""
+    try:
+        ref = git.run(["rev-parse", "--abbrev-ref", "origin/HEAD"]).strip()
+    except GitError:
+        raise EvidenceError("origin/HEAD is not set, so the default branch's approved "
+                            "config cannot be found; run `git remote set-head origin "
+                            "--auto` in the target") from None
+    if not ref.startswith("origin/") or ref == "origin/HEAD":
+        raise EvidenceError(f"origin/HEAD does not name a branch on origin ({ref!r})")
+    return ref
 
 
 def unapproved_changes(target_path: Path, approved: Mapping[str, str | None]) -> list[str]:
@@ -220,27 +302,33 @@ def cmd_syntax(command: str) -> str | None:
 
 
 def _run_one(name: str, command: str | None, cwd: Path, runner: Runner, timeout: float,
-             clock: Callable[[], float]) -> CommandEvidence:
+             clock: Callable[[], float], outputs: dict[str, str]) -> CommandEvidence:
     if not command:
         return CommandEvidence(name, None, "skipped", detail=f"commands.{name} is null")
     start = clock()
     try:
         result = runner(command, cwd=cwd, timeout=timeout)
     except CommandTimeout as err:
-        output = err.stdout + err.stderr
+        output = outputs[name] = err.stdout + err.stderr
         return CommandEvidence(name, command, "timeout", None, _seconds(clock() - start),
                                tail_lines(output), parse_summary(output),
-                               err.detail or f"timed out after {timeout:g}s")
+                               err.detail or f"timed out after {timeout:g}s",
+                               *_fingerprint(output))
     except CommandNotFound as err:
         return CommandEvidence(name, command, "error", None, _seconds(clock() - start),
                                detail=err.detail or str(err))
-    output = result.stdout + (f"\n{result.stderr}" if result.stderr else "")
+    output = outputs[name] = result.stdout + (f"\n{result.stderr}" if result.stderr else "")
     summary = parse_summary(output)
     status, detail = ("pass", "") if result.returncode == 0 else ("fail", "")
     if status == "pass" and reports_failures(summary):
         status, detail = "fail", "exit 0, but the runner's summary reports failures"
     return CommandEvidence(name, command, status, result.returncode, _seconds(clock() - start),
-                           tail_lines(output), summary, detail)
+                           tail_lines(output), summary, detail, *_fingerprint(output))
+
+
+def _fingerprint(output: str) -> tuple[str, int]:
+    """The SHA-256 of the full output (UTF-8) and its number of lines."""
+    return hashlib.sha256(output.encode("utf-8")).hexdigest(), len(output.splitlines())
 
 
 def _seconds(value: float) -> float:
@@ -400,10 +488,73 @@ def default_path(issue: int) -> Path:
 
 
 def write(evidence: Evidence, path: Path) -> Path:
+    """Write the evidence JSON to ``path``, and beside it the test command's full output
+    and the captured reports, the local files ``verify map`` reads (T6.2)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(evidence.to_dict(), indent=2, ensure_ascii=False) + "\n",
                     encoding="utf-8")
+    if "test" in evidence.outputs:
+        # Bytes, not text: no newline translation, so the file hashes as recorded.
+        output_path(path).write_bytes(evidence.outputs["test"].encode("utf-8"))
+    for index, report in enumerate(evidence.reports, start=1):
+        if report["path"] in evidence.report_data:
+            report_copy_path(path, index, report["path"]).write_bytes(
+                evidence.report_data[report["path"]])
     return path
+
+
+def output_path(evidence_path: Path) -> Path:
+    """Where the test command's full output is kept: ``evidence-<N>.test.log``."""
+    return evidence_path.with_suffix(".test.log")
+
+
+def report_copy_path(evidence_path: Path, index: int, report: str) -> Path:
+    """Where the ``index``-th captured report is kept: ``evidence-<N>.report<k>.<ext>``."""
+    suffix = Path(report).suffix.lower()
+    return evidence_path.with_suffix(f".report{index}{suffix if suffix.isascii() else ''}")
+
+
+def recorded_output(evidence: Evidence, evidence_path: Path) -> tuple[str | None, str]:
+    """The test command's full output from beside the evidence file, if its SHA-256 is
+    the recorded one, and a note on where it came from. Without the file (another
+    machine, or evidence from an older ledger) it falls back to the recorded tail.
+    Raises ``EvidenceError`` if the file is not the output that was recorded."""
+    test = evidence.command("test")
+    if test is None or test.status in ("skipped", "error"):
+        return None, f"the test command was {'not run' if test is None else test.status}"
+    path = output_path(evidence_path)
+    if test.output_sha256 and path.is_file():
+        data = path.read_bytes()
+        if hashlib.sha256(data).hexdigest() != test.output_sha256:
+            raise EvidenceError(f"{path} is not the test output the evidence recorded (its "
+                                "SHA-256 differs); run `verify run` again")
+        return data.decode("utf-8"), f"the test command's full output ({test.output_lines} lines)"
+    lines = "\n".join(test.tail)
+    return lines, (f"only the last {len(test.tail)} lines of the test output (the full "
+                   f"output is not at {path})")
+
+
+def recorded_reports(evidence: Evidence, evidence_path: Path
+                     ) -> tuple[list[tuple[str, bytes]], list[str]]:
+    """The captured reports from beside the evidence file whose SHA-256 is the recorded
+    one, and a note for each report that cannot be used. Raises ``EvidenceError`` if a
+    copy is not the report that was recorded."""
+    found, notes = [], []
+    for index, report in enumerate(evidence.reports, start=1):
+        if report.get("status") != "captured":
+            notes.append(f"report {report.get('path')} was not used: "
+                         f"{report.get('status')} after the run")
+            continue
+        path = report_copy_path(evidence_path, index, report["path"])
+        if not path.is_file():
+            notes.append(f"report {report['path']} was not used: its copy {path} is missing")
+            continue
+        data = path.read_bytes()
+        if hashlib.sha256(data).hexdigest() != report.get("sha256"):
+            raise EvidenceError(f"{path} is not the report {report['path']} the evidence "
+                                "recorded (its SHA-256 differs); run `verify run` again")
+        found.append((report["path"], data))
+    return found, notes
 
 
 def read(path: Path) -> Evidence:
@@ -420,11 +571,17 @@ def from_dict(data: Any) -> Evidence:
     """Rebuild evidence from its JSON form, refusing anything malformed."""
     if not isinstance(data, dict) or data.get("schema") != SCHEMA:
         raise EvidenceError(f"not evidence of schema {SCHEMA}")
+    local = {"outputs", "report_data"} & set(data)
+    if local:
+        raise EvidenceError(f"malformed evidence: unexpected {', '.join(sorted(local))}")
     try:
         commands = [CommandEvidence(**c) for c in data["commands"]]
         evidence = Evidence(**{**data, "commands": commands})
     except (KeyError, TypeError) as err:
         raise EvidenceError(f"malformed evidence: {err}") from None
+    if not isinstance(evidence.reports, list) or not all(
+            isinstance(r, dict) and isinstance(r.get("path"), str) for r in evidence.reports):
+        raise EvidenceError("malformed evidence: reports must be a list of {path, …}")
     names = [c.name for c in evidence.commands]
     if names != list(VERIFY_COMMANDS):
         raise EvidenceError(f"evidence must cover {', '.join(VERIFY_COMMANDS)} in order; "
