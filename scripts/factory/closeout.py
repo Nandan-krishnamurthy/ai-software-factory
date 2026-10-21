@@ -7,13 +7,17 @@ anything and never picks a story (D1, D2).
 
 * ``inspect()`` is read-only. It confirms the merge and reports what S12 needs: the PR,
   its branch, its final head commit (to delete the local branch safely), the merge
-  commit, and the stories that close-out unblocks.
+  commit, the stories that close-out unblocks, and whether it completes the increment.
 * ``finish()`` checks the merge again, closes the issue if the merge did not (a PR
   without ``Closes #<I>``), and then sets ``status:done``. The label is set **last**: it
   is what moves the state engine on from CLOSEOUT_PENDING, so an interrupted run is
   simply run again.
 
-``plan()`` and ``newly_unblocked()`` are pure.
+``next_step`` is the line S12's close-out summary ends with. It is decided here, not by
+the model: when no other story of the increment is open, the increment is complete and the
+human's next step is ``/factory-start`` (M5 follow-up 2); otherwise it is ``continue``.
+
+``plan()``, ``newly_unblocked()`` and ``open_in_increment()`` are pure.
 """
 
 from dataclasses import dataclass
@@ -25,6 +29,7 @@ from factory.issues import fetch_all_issues
 from factory.markers import PrMarker, StoryMarker, find
 
 DONE = "status:done"
+CONTINUE = "Say continue (`/factory-continue`) to start the next story."
 _PR_FIELDS = ["number", "state", "body", "headRefName", "headRefOid", "mergeCommit",
               "mergedAt", "url"]
 
@@ -46,6 +51,21 @@ class Closeout:
     merge_sha: str
     merged_at: str
     unblocked: tuple[pick_mod.StoryIssue, ...]  # ready stories this close-out unblocks
+    increment: str = ""
+    still_open: tuple[int, ...] = ()  # the increment's other open story issues
+
+    @property
+    def increment_complete(self) -> bool:
+        """No other story of the increment is open: this close-out is its last."""
+        return not self.still_open
+
+    @property
+    def next_step(self) -> str:
+        """The line the close-out summary ends with: what the human does next."""
+        if self.increment_complete:
+            return (f"Increment {self.increment} is complete: no open story remains. Run "
+                    "`/factory-start` with new requirements to plan the next increment.")
+        return CONTINUE
 
     def to_dict(self) -> dict:
         return {"issue": self.issue, "story": self.story_id, "issue_open": self.issue_open,
@@ -53,7 +73,9 @@ class Closeout:
                 "branch": self.branch, "head_sha": self.head_sha,
                 "merge_sha": self.merge_sha, "merged_at": self.merged_at,
                 "unblocked": [{"number": s.number, "story": s.story_id, "title": s.title}
-                              for s in self.unblocked]}
+                              for s in self.unblocked],
+                "increment": self.increment, "increment_complete": self.increment_complete,
+                "still_open": list(self.still_open), "next_step": self.next_step}
 
 
 # ----------------------------------------------------------------------------- pure
@@ -77,6 +99,14 @@ def newly_unblocked(number: int, stories: list[pick_mod.StoryIssue],
     return tuple(sorted(found, key=pick_mod.StoryIssue.sort_key))
 
 
+def open_in_increment(number: int, increment: str,
+                      stories: list[pick_mod.StoryIssue]) -> tuple[int, ...]:
+    """The open story issues of ``increment`` other than ``number`` (the one being closed
+    out), in number order."""
+    return tuple(sorted(s.number for s in stories
+                        if s.open and s.increment == increment and s.number != number))
+
+
 def plan(number: int, issue: dict, prs: list[dict], all_issues: list[dict]) -> Closeout:
     """What close-out of story issue ``number`` involves. Refuses without a merged PR."""
     if "pull_request" in issue:
@@ -97,7 +127,8 @@ def plan(number: int, issue: dict, prs: list[dict], all_issues: list[dict]) -> C
         pr=pr["number"], pr_url=pr.get("url", ""), branch=pr.get("headRefName", ""),
         head_sha=pr.get("headRefOid", ""),
         merge_sha=(pr.get("mergeCommit") or {}).get("oid", ""), merged_at=pr["mergedAt"],
-        unblocked=newly_unblocked(number, stories, is_open))
+        unblocked=newly_unblocked(number, stories, is_open), increment=marker.increment,
+        still_open=open_in_increment(number, marker.increment, stories))
 
 
 # ----------------------------------------------------------------------------- GitHub
@@ -135,4 +166,10 @@ def render(closeout: Closeout) -> str:
                                                      for s in c.unblocked))
     else:
         lines.append("  unblocks no other story")
+    if c.increment_complete:
+        lines.append(f"  last story of increment {c.increment}: no open story remains")
+    else:
+        lines.append(f"  increment {c.increment} still has open stories: "
+                     + ", ".join(f"#{n}" for n in c.still_open))
+    lines.append(f"Next step: {c.next_step}")
     return "\n".join(lines)

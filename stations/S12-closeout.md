@@ -16,18 +16,18 @@ Close out a story after the human has merged its PR. Their merge is the approval
 - `git -C <T> status --porcelain` prints nothing. Otherwise report the files and stop; never discard the human's changes.
 
 ## Inputs
-- `python scripts/factory.py closeout --issue <I> --json`: confirms that the story's PR is merged, and gives the PR, its branch `<B>`, its final head commit (`head_sha`), the merge commit (`merge_sha`) and the stories this close-out unblocks. Read-only.
+- `python scripts/factory.py closeout --issue <I> --json`: confirms that the story's PR is merged, and gives the PR, its branch `<B>`, its final head commit (`head_sha`), the merge commit (`merge_sha`), the stories this close-out unblocks, whether it is the increment's last story (`increment_complete`), and the summary's closing line (`next_step`). Read-only.
 - `gh issue view <I> --repo <R> --json comments`: whether this close-out's summary is already posted (a previous run was interrupted).
 
 ## Steps
-1. **Confirm the merge.** Run `python scripts/factory.py closeout --issue <I> --json`. If it refuses, report its message exactly and stop: close-out runs only after a merge that the human made. Note `pr` (it must be `<P>`), `branch` (`<B>`), `head_sha`, `merge_sha` and `unblocked`.
+1. **Confirm the merge.** Run `python scripts/factory.py closeout --issue <I> --json`. If it refuses, report its message exactly and stop: close-out runs only after a merge that the human made. Note `pr` (it must be `<P>`), `branch` (`<B>`), `head_sha`, `merge_sha`, `unblocked` and `next_step`.
 2. **Local clone back to `<D>`:** run `git -C <T> fetch origin --prune`, `git -C <T> switch <D>` and `git -C <T> pull --ff-only`. The merged story is now in the local `<D>`.
 3. **Delete the local story branch, but only the merged work.** If `git -C <T> branch --list <B>` lists it, compare `git -C <T> rev-parse <B>` with `head_sha`:
    - If they are equal, the branch holds exactly what the human reviewed and merged: run `git -C <T> branch -D <B>`. If the human squashed or rebased, git sees the branch as not merged, so `-d` would refuse.
    - If they differ, the branch has commits that are not in the PR: keep it, and say so in the summary.
 
    The remote branch is GitHub's to delete when the PR merges (requirements §9). If it still exists, mention it in the summary and leave it.
-4. **Summary.** Unless this close-out's summary is already on the issue, write `<SCRATCH>/closeout-<I>.md`. It says that PR #`<P>` was merged by the human (with the merge commit), which stories are now unblocked (from `unblocked`, as `#<n> <title>`, or "none"), and anything from step 3. It ends with: say continue (`/factory-continue`) to start the next story. Then run `python scripts/factory.py comment --issue <I> --kind reply --body-file <SCRATCH>/closeout-<I>.md`.
+4. **Summary.** Unless this close-out's summary is already on the issue, write `<SCRATCH>/closeout-<I>.md`. It says that PR #`<P>` was merged by the human (with the merge commit), which stories are now unblocked (from `unblocked`, as `#<n> <title>`, or "none"), and anything from step 3. Its last line is `next_step` from step 1, copied unchanged. It is decided by the code, never by you: on the increment's last story (`increment_complete`) it says the increment is complete and to run `/factory-start`; otherwise it says continue (`/factory-continue`) to start the next story. Then run `python scripts/factory.py comment --issue <I> --kind reply --body-file <SCRATCH>/closeout-<I>.md`.
 5. **Mark the story done:** run `python scripts/factory.py closeout --issue <I> --finish`. It checks the merge again, closes the issue if the merge did not, and sets `status:done`. That label moves the state on from `CLOSEOUT_PENDING`, so every step above runs again if this station is interrupted before it.
 6. **Checkpoint**, as a record. See Checkpoint.
 7. Stop at **Gate C**. Never run `pick` here: the next story starts only when the human says continue.

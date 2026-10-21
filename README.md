@@ -69,6 +69,18 @@ This starts **one** story: picks the next unblocked issue, creates its branch, i
 - **Request changes:** comment `/changes` with your feedback, then run `/factory-resume`. The factory reworks the **same** PR and replies to each point.
 - **Reject:** close the PR without merging. The factory then waits for your decision (`NEEDS_HUMAN`).
 
+While a story PR is at Gate B, `/factory-status` also shows the latest evidence the factory recorded for it (each quality command's result, and whether it is for the PR's head) and the AC verifier's verdict.
+
+After you merge the last story of an increment, the close-out summary says the increment is complete and to run `/factory-start` with new requirements. After any other story it says to continue.
+
+### Tracing a line back to its requirement
+
+```
+python scripts/factory.py trace src/ui/render.ts:42
+```
+
+From any line in the active target, `trace` follows the chain line → commit → PR → `Closes #<I>` → the issue's **Traces to** → `REQ-###` → PRD section, and the REQ's row in `docs/factory/traceability.md`. It prints a link for every hop and how long it took. It works for merge-commit, squash and rebase merges. `--ref <commit>` traces the file as it is at that commit (default `HEAD`), and `--json` gives the same chain as JSON. It changes nothing, and exits 1 naming the hop it could not follow.
+
 ### Commands
 
 | Command | What it does | Stops at |

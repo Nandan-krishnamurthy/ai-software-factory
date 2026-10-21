@@ -15,10 +15,11 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from factory import cli, status, target
+from factory import cli, evidence, status, target
 from factory import state as st
+from factory.comments import compose
 from factory.gh import Gh
-from factory.markers import PlanningMarker, ReplyMarker, build
+from factory.markers import CheckpointMarker, PlanningMarker, ReplyMarker, build
 from factory.state import derive_state
 from tests.test_state import (
     CONFIG,
@@ -47,6 +48,37 @@ TRACEABILITY = """# Traceability
 STORY_PHASE = {st.IDLE_AT_GATE_C, st.STORY_IN_PROGRESS, st.GATE_B_WAITING_REVIEW,
                st.GATE_B_CHANGES_REQUESTED, st.GATE_B_APPROVED_UNMERGED, st.CLOSEOUT_PENDING,
                st.INCREMENT_COMPLETE, st.NEEDS_HUMAN, st.INCONSISTENT}
+HEAD = "c" * 40
+VERDICT = """\
+- [x] AC1 — pass — evidence: `tests/a.test.ts › #10 AC1: adds a task` passed
+- [ ] AC2 — not-verifiable — manual steps: press Tab to the Add button; the ring shows
+Suite: pass — `npm test` → 14 passed, 0 failed
+"""
+
+
+def checkpoint(note=VERDICT, sha=HEAD, recorded=True):
+    """The checkpoint comment body of story #10 after S10: the verdict, then the evidence
+    `verify run` stored for ``sha`` (``recorded=False``: none)."""
+    marker = CheckpointMarker("S10", "S11", "story/10-x", sha, 0, 0, "2026-09-25T10:00:00+00:00")
+    text = f"**Factory checkpoint:** S10 complete. Next: S11. Branch: `story/10-x` @ `{sha[:7]}`."
+    ran = evidence.Evidence(
+        issue=10, repo="owner/app", branch="story/10-x", sha=sha,
+        started_at="2026-09-25T09:00:00", finished_at="2026-09-25T09:01:00", sha_after=sha,
+        config_source="origin/main@0000000",
+        commands=[evidence.CommandEvidence(name, f"run {name}", "pass", 0, 1.0)
+                  for name in ("build", "lint", "test")]
+        + [evidence.CommandEvidence("typecheck", None, "skipped", detail="null")])
+    ran.commands.sort(key=lambda c: evidence.VERIFY_COMMANDS.index(c.name))
+    parts = [text] + ([note] if note else []) + ([evidence.to_block(ran)] if recorded else [])
+    return compose(marker, "\n\n".join(parts))
+
+
+# Gate B snapshots: evidence for the PR's head, stale evidence, and nothing recorded yet.
+REVIEWS = {
+    st.GATE_B_WAITING_REVIEW: status.review_evidence(20, 10, checkpoint(), HEAD),
+    st.GATE_B_CHANGES_REQUESTED: status.review_evidence(20, 10, checkpoint(), "d" * 40),
+    st.GATE_B_APPROVED_UNMERGED: status.review_evidence(20, 10, None, HEAD),
+}
 
 
 def slug(row: str) -> str:
@@ -61,7 +93,7 @@ def report_for(row: str) -> status.Report:
     assert result["state"] == state, (row, result["state"])
     matrix = TRACEABILITY if state in STORY_PHASE else None
     comments = 2 if state in (st.GATE_A_WAITING, st.GATE_B_WAITING_REVIEW) else 0
-    return status.build(result, snapshot, matrix, comments)
+    return status.build(result, snapshot, matrix, comments, REVIEWS.get(state))
 
 
 class RenderedSnapshotTest(unittest.TestCase):
@@ -211,6 +243,74 @@ class CollectTest(unittest.TestCase):
         self.assertEqual([r.req for r in report.requirements],
                          [f"REQ-00{n}" for n in range(1, 7)])
         self.assertTrue(all(not r.done for r in report.requirements))  # no PR exists
+
+
+class ReviewEvidenceTest(unittest.TestCase):
+    """T6.4: at Gate B the report shows the latest evidence and verdict of the story."""
+
+    def test_current_evidence_and_verdict(self):
+        review = status.review_evidence(20, 10, checkpoint(), HEAD)
+        self.assertEqual(review.lines(), [
+            "Evidence (issue #10): build pass, lint pass, typecheck skipped, test pass "
+            "@ ccccccc, the PR's head.",
+            "Verdict: AC1 pass, AC2 not-verifiable; Suite: pass — `npm test` → 14 passed, "
+            "0 failed."])
+        self.assertTrue(review.current)
+
+    def test_stale_evidence_names_the_prs_head(self):
+        review = status.review_evidence(20, 10, checkpoint(), "d" * 40)
+        self.assertFalse(review.current)
+        self.assertIn("but the PR's head is ddddddd: stale", review.lines()[0])
+
+    def test_nothing_recorded_is_not_an_error(self):
+        for body in (None, checkpoint(note="", recorded=False)):
+            with self.subTest(checkpoint=body is not None):
+                review = status.review_evidence(20, 10, body, HEAD)
+                self.assertEqual(review.lines(), ["Evidence (issue #10): no evidence recorded.",
+                                                  "Verdict: no verdict recorded."])
+                self.assertIsNone(review.current)
+
+    def test_evidence_without_a_verdict_and_a_failing_command(self):
+        body = checkpoint(note="").replace('"status":"pass","exit_code":0,"duration_s":1.0,'
+                                           '"tail":[]', '"status":"fail","exit_code":1,'
+                                           '"duration_s":1.0,"tail":[]', 1)
+        review = status.review_evidence(20, 10, body, HEAD)
+        self.assertTrue(review.evidence.startswith("build fail (exit 1)"), review.evidence)
+        self.assertEqual(review.verdict, status.NO_VERDICT)
+
+    def test_malformed_evidence_and_verdict_are_reported_not_raised(self):
+        body = checkpoint(note="- [x] AC1 — pass —\nSuite: pass — ")
+        broken = body.replace(f'"sha":"{HEAD}","started_at"', '"sha":"nope","started_at"')
+        review = status.review_evidence(20, 10, broken, HEAD)
+        self.assertTrue(review.evidence.startswith("unreadable ("), review.evidence)
+        self.assertIn("format problem(s): `verdict check` would refuse it", review.verdict)
+
+    def test_only_at_gate_b(self):
+        review = status.review_evidence(20, 10, checkpoint(), HEAD)
+        for row in ("IDLE_AT_GATE_C", "STORY_IN_PROGRESS", "CLOSEOUT_PENDING"):
+            with self.subTest(state=row):
+                result = derive_state(STATE_TABLE[row][0]).to_dict()
+                self.assertIsNone(status.build(result, review=review).review)
+
+    def test_collect_reads_the_pr_head_and_the_issue_checkpoint(self):
+        snapshot = STATE_TABLE["GATE_B_APPROVED_UNMERGED"][0]
+        result = derive_state(snapshot).to_dict()
+        calls = []
+
+        def transport(argv, *, timeout, cwd=None, env=None, input=None):
+            calls.append(argv[1:])
+            if argv[1:3] == ["pr", "view"]:
+                return FakeRepo.ok({"headRefOid": HEAD})
+            assert argv[2] == "repos/owner/app/issues/10/comments", argv
+            return FakeRepo.ok([[{"id": 1, "body": checkpoint()}]])
+
+        with mock.patch.object(st, "collect_snapshot", lambda gh, repo: snapshot), \
+                mock.patch.object(st, "_file_text", lambda *a: None):
+            report = status.collect(Gh(transport=transport), "owner/app")
+        self.assertEqual(report.state["state"], result["state"])
+        self.assertTrue(report.review.current)
+        self.assertEqual(report.to_dict()["review"]["verdict"], report.review.verdict)
+        self.assertEqual(calls[0][:3], ["pr", "view", "20"])
 
 
 class StatusCliTest(unittest.TestCase):

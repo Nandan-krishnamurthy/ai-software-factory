@@ -25,6 +25,7 @@ from factory import (
     state,
     status,
     target,
+    trace,
     verdict,
 )
 from factory.config import load_config
@@ -212,6 +213,21 @@ def build_parser() -> argparse.ArgumentParser:
                                  help="close the issue if needed and set status:done")
     closeout_parser.add_argument("--json", action="store_true", help="machine-readable output")
     closeout_parser.set_defaults(handler=_closeout, needs_target=True)
+
+    trace_parser = subparsers.add_parser(
+        "trace", help="follow a line of code to its PR, issue, REQ and PRD section",
+        description="Follows git blame -> PR (GitHub's commit-to-PR API, or the merge "
+                    "commit) -> Closes #<I> -> Traces to -> REQ -> PRD section, and the "
+                    "REQ's row in docs/factory/traceability.md, in the active target. "
+                    "Prints a link for each hop and the time taken. Read-only; exits 1 if "
+                    "a hop cannot be followed.")
+    trace_parser.add_argument("spec", metavar="FILE:LINE",
+                              help="a file in the target (relative to its root) and a line")
+    trace_parser.add_argument("--ref", default="HEAD",
+                              help="the commit whose version of the file to trace "
+                                   "(default: HEAD)")
+    trace_parser.add_argument("--json", action="store_true", help="machine-readable output")
+    trace_parser.set_defaults(handler=_trace, needs_target=True)
 
     verdict_parser = subparsers.add_parser(
         "verdict", help="check the AC verifier's per-AC verdict for a story")
@@ -629,6 +645,16 @@ def _pr_check(args: argparse.Namespace) -> int:
     else:
         _print_safe(prbody.report_check(result))
     return 0 if result.ok else 1
+
+
+def _trace(args: argparse.Namespace) -> int:
+    result = trace.trace(Gh(), Git(args.target.path), args.target.repo, args.target.path,
+                         args.spec, args.ref)
+    if args.json:
+        _print_safe(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
+    else:
+        _print_safe(trace.render(result))
+    return 0 if result.complete else 1
 
 
 def _closeout(args: argparse.Namespace) -> int:

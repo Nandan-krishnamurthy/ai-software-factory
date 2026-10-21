@@ -5,6 +5,9 @@ Waiting on: you
 Allowed: /factory-status
 PR #20 (STORY-001) is approved. Please merge it: the factory never merges.
 
+Evidence (issue #10): no evidence recorded.
+Verdict: no verdict recorded.
+
 Stories in 001-initial: 0 of 2 done, in flight #10, 1 not started.
 
 Requirements: 0 of 6 Done, 1 deferred. Done = Implemented and every listed PR merged.

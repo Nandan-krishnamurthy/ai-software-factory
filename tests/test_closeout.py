@@ -21,9 +21,9 @@ MERGED_AT = "2026-09-25T11:41:18Z"
 
 
 def story_issue(number, n, *, state="open", labels=("factory:story", "status:ready"),
-                blocked_by="None"):
-    body = (build(StoryMarker(f"STORY-{n:03d}", "001-initial"))
-            + f"\n**STORY-{n:03d}** · Increment `001-initial` · Milestone M1\n\n"
+                blocked_by="None", increment="001-initial"):
+    body = (build(StoryMarker(f"STORY-{n:03d}", increment))
+            + f"\n**STORY-{n:03d}** · Increment `{increment}` · Milestone M1\n\n"
             + f"## Dependencies\nBlocked by: {blocked_by}\n")
     return {"number": number, "title": f"STORY-{n:03d}: story {n}", "state": state,
             "labels": [{"name": x} for x in labels], "body": body}
@@ -125,6 +125,61 @@ class PureTest(unittest.TestCase):
                 self.assertIn(message, str(ctx.exception))
 
 
+class LastStoryTest(unittest.TestCase):
+    """T6.4 (M5 follow-up 2): the close-out summary's last line is decided by the code. On
+    the increment's last story it names /factory-start; otherwise it says continue."""
+
+    def plan(self, others):
+        issue = story_issue(2, 1, state="closed", labels=("factory:story", "status:in-review"))
+        return closeout.plan(2, issue, [story_pr(14, 1)], [issue, *others])
+
+    def test_the_last_story_names_factory_start(self):
+        done = ("factory:story", "status:done")
+        cases = {
+            "the only story": [],
+            "every other story is done": [story_issue(3, 2, state="closed", labels=done)],
+            # Another increment's open story does not keep this one open.
+            "an open story of another increment": [story_issue(9, 8, increment="002-next")],
+        }
+        for case, others in cases.items():
+            with self.subTest(case):
+                result = self.plan(others)
+                self.assertTrue(result.increment_complete)
+                self.assertEqual(result.still_open, ())
+                self.assertEqual(result.next_step,
+                                 "Increment 001-initial is complete: no open story remains. "
+                                 "Run `/factory-start` with new requirements to plan the next "
+                                 "increment.")
+                self.assertNotIn("/factory-continue", result.next_step)
+                self.assertIn("last story of increment 001-initial", closeout.render(result))
+                self.assertEqual(result.to_dict()["next_step"], result.next_step)
+
+    def test_a_story_that_is_not_the_last_says_continue(self):
+        cases = {
+            "a ready story": [story_issue(3, 2)],
+            # Open even though it is blocked: S12 says continue, and the state engine then
+            # reports NEEDS_HUMAN if nothing is ready.
+            "a blocked story": [story_issue(3, 2, blocked_by="#99")],
+            "a story in progress": [story_issue(
+                3, 2, labels=("factory:story", "status:in-progress"))],
+        }
+        for case, others in cases.items():
+            with self.subTest(case):
+                result = self.plan(others)
+                self.assertFalse(result.increment_complete)
+                self.assertEqual(result.still_open, (3,))
+                self.assertEqual(result.next_step, closeout.CONTINUE)
+                self.assertIn("/factory-continue", result.next_step)
+                self.assertNotIn("/factory-start", result.next_step)
+                self.assertIn("still has open stories: #3", closeout.render(result))
+
+    def test_the_issue_being_closed_out_never_counts_as_open(self):
+        # Before --finish the merge may not have closed it (a PR without "Closes #2").
+        issue = story_issue(2, 1, labels=("factory:story", "status:in-review"))
+        result = closeout.plan(2, issue, [story_pr(14, 1)], [issue])
+        self.assertTrue(result.increment_complete)
+
+
 class GitHubTest(unittest.TestCase):
     def test_inspect_reports_and_changes_nothing(self):
         fake = repo_after_merge()
@@ -134,7 +189,9 @@ class GitHubTest(unittest.TestCase):
             "issue": 2, "story": "STORY-001", "issue_open": False, "done": False, "pr": 14,
             "pr_url": "https://x/pull/14", "branch": "story/2-x", "head_sha": "a" * 40,
             "merge_sha": "b" * 40, "merged_at": MERGED_AT,
-            "unblocked": [{"number": 3, "story": "STORY-002", "title": "STORY-002: story 2"}]})
+            "unblocked": [{"number": 3, "story": "STORY-002", "title": "STORY-002: story 2"}],
+            "increment": "001-initial", "increment_complete": False, "still_open": [3, 4],
+            "next_step": closeout.CONTINUE})
 
     def test_finish_closes_the_issue_first_and_sets_done_last(self):
         fake = repo_after_merge(issue_state="open")  # the PR had no "Closes #2"
@@ -185,6 +242,7 @@ class CliTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("now unblocked: #3 (STORY-002)", out)
         self.assertIn("#2: +status:done, -status:in-review", out)
+        self.assertIn(f"Next step: {closeout.CONTINUE}", out)
 
     def test_refusal_is_reported(self):
         code, _, err = self.run_cli(repo_after_merge(), "--issue", "3", "--finish")
