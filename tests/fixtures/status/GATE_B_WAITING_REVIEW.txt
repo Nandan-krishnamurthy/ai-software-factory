@@ -6,6 +6,9 @@ Waiting on: you
 Allowed: /factory-status
 Waiting for you to review PR #20 (STORY-001): merge it to approve, or comment /changes.
 
+Evidence (issue #10): build pass, lint pass, typecheck skipped, test pass @ ccccccc, the PR's head.
+Verdict: AC1 pass, AC2 not-verifiable; Suite: pass — `npm test` → 14 passed, 0 failed.
+
 Stories in 001-initial: 0 of 2 done, in flight #10, 1 not started.
 
 Requirements: 0 of 6 Done, 1 deferred. Done = Implemented and every listed PR merged.

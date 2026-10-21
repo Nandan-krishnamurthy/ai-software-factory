@@ -69,6 +69,20 @@ This starts **one** story: picks the next unblocked issue, creates its branch, i
 - **Request changes:** comment `/changes` with your feedback, then run `/factory-resume`. The factory reworks the **same** PR and replies to each point.
 - **Reject:** close the PR without merging. The factory then waits for your decision (`NEEDS_HUMAN`).
 
+While a story PR is at Gate B, `/factory-status` also shows the latest evidence the factory recorded for it (each quality command's result, and whether it is for the PR's head) and the AC verifier's verdict.
+
+After you merge the last story of an increment, the close-out summary says the increment is complete and to run `/factory-start` with new requirements. After any other story it says to continue.
+
+### Tracing a line back to its requirement
+
+```
+python scripts/factory.py trace src/ui/render.ts:42
+```
+
+From any line in the active target, `trace` follows the chain line → commit → PR → `Closes #<I>` → the issue's **Traces to** → `REQ-###` → PRD section, and the REQ's row in `docs/factory/traceability.md`. It prints a link for every hop and how long it took. The file may be relative to the target's root or absolute (`C:/…`, or `/c/…` in Git Bash). `--ref <commit>` traces the file as it is at that commit (default `HEAD`), and `--json` gives the same chain as JSON. It changes nothing, and exits 1 naming the hop it could not follow. A GitHub error such as a wrong repo or no access (HTTP 404) also exits 1, with the reason.
+
+It finds the PR with GitHub's commit-to-PR API, falling back to the `Merge pull request #<P>` merge commit. This is verified against live GitHub for merge-commit merges, which is how the factory's PRs have been merged so far. For squash and rebase merges, `trace` relies on GitHub associating the PR with the commit it wrote; that is tested only against GitHub-shaped answers, not yet against a real squash or rebase merge.
+
 ### Commands
 
 | Command | What it does | Stops at |

@@ -164,11 +164,13 @@ In bot mode, a GitHub approval gives `GATE_B_APPROVED_UNMERGED`. That mode is no
 
 `docs/factory/traceability.md` gives the same chain in one table (REQ → stories → PRs → tests).
 
+**One command (T6.4):** with the target active, `python scripts/factory.py trace <file>:<line>` follows steps 1–5 by itself: blame, the PR (from GitHub's commit-to-PR API, or the merge commit; verified live for merge-commit merges, while squash and rebase merges are tested only against GitHub-shaped answers), `Closes #<I>`, **Traces to**, the `REQ-###` line and its PRD section, and the REQ's row in `docs/factory/traceability.md`. It prints a link for each hop and its own elapsed time. Use it to check each hop of the manual walk. It does not replace the walk: the timed walk by a human reviewer is part of the M6 demo.
+
 **Expect:** each hop is found from the previous one without searching the repo, and the whole walk takes **under 60 seconds**.
 
 **Record:** the line, each hop, and the time. Repeat for 3 lines from different increments.
 
-**Status:** the chain was verified on 2026-10-07: the `DATE_FORMAT` line in `src/ui/render.ts` → commit `3469b7c` → PR #25 → issue #13 (STORY-012) → REQ-019 → PRD §Non-functional requirements "Performance". It has not been **timed** yet; do that in the M5 demo, including a line from increment 002.
+**Status:** the chain was verified on 2026-10-07: the `DATE_FORMAT` line in `src/ui/render.ts` → commit `3469b7c` → PR #25 → issue #13 (STORY-012) → REQ-019 → PRD §Non-functional requirements "Performance". On 2026-10-21, `trace` (T6.4) followed the same chain in one command in 3.6 s, and reached the REQ and PRD for every changed hunk of PR #29 and PR #30 (increment 002). The walk by a human reviewer has still not been **timed**; that is part of the M6 demo.
 
 ---
 

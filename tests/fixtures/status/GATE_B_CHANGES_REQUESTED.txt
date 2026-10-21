@@ -5,6 +5,9 @@ Waiting on: the factory
 Allowed: /factory-resume, /factory-continue, /factory-status
 Changes requested on PR #20 (STORY-001): rework is next (S08 in rework mode).
 
+Evidence (issue #10): build pass, lint pass, typecheck skipped, test pass @ ccccccc, but the PR's head is ddddddd: stale.
+Verdict: AC1 pass, AC2 not-verifiable; Suite: pass — `npm test` → 14 passed, 0 failed.
+
 Stories in 001-initial: 0 of 2 done, in flight #10, 1 not started.
 
 Requirements: 0 of 6 Done, 1 deferred. Done = Implemented and every listed PR merged.

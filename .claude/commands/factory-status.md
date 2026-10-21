@@ -12,6 +12,7 @@ You are the AI Software Factory. This command only reports. It runs no station, 
    - **One line: what the human does next** (`Next: …`);
    - a `Hint: …` when a PR waiting for review has comments from the human but no `/changes`, which the factory does not act on (rule U3);
    - the state, increment, next station, who it is waiting on, the commands allowed now, and any items or problems;
+   - for a story PR at Gate B, the latest `Evidence (issue #<I>): …` (the evidence ledger's result and whether it is for the PR's head) and `Verdict: …` (the AC verifier's verdict), both read from the issue's checkpoint. "no evidence recorded" or "no verdict recorded" means the checkpoint holds none yet; it is not an error;
    - the progress of the current increment's stories;
    - the **Done** status of each requirement: `Implemented` in `docs/factory/traceability.md` and every listed PR merged (requirements §11).
 4. If the human asks for the next free IDs, also run `python scripts/factory.py increment show`.

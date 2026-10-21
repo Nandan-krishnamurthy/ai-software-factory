@@ -10,16 +10,23 @@ The first line always answers "what do I do next?" for the state the engine deri
 * the **Done** status of each requirement (requirements §11): a ``REQ`` is Done when its
   row in ``docs/factory/traceability.md`` on the default branch says ``Implemented`` and
   every PR listed for it is merged. This is worked out from GitHub, never written down;
-* any ``problems`` or ``items`` of the state, as they are.
+* any ``problems`` or ``items`` of the state, as they are;
+* for a story PR at **Gate B**, the latest evidence and verdict (T6.4): the evidence
+  ledger's headline from the issue's checkpoint (``verify run``), whether it is for the
+  PR's head, and the AC verifier's verdict stored there (S10). Until the stations record
+  them, it says "no evidence recorded" or "no verdict recorded"; that is not an error.
 
-``build`` and ``render`` are pure; ``collect`` reads GitHub.
+``build``, ``review_evidence`` and ``render`` are pure; ``collect`` reads GitHub.
 """
 
 import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from factory import evidence as ev
 from factory import state as st
+from factory import verdict as vd
+from factory.errors import FactoryError
 from factory.gh import Gh
 from factory.signals import Verdict, fetch_pr, signals_for
 
@@ -29,6 +36,10 @@ _ROW = re.compile(r"^\|\s*(REQ-\d{3,})\s*\|(.*)\|\s*$")
 _PR_REF = re.compile(r"#(\d+)")
 _IMPLEMENTED, _DEFERRED = "Implemented", "Deferred"
 _REVIEW_STATES = {st.GATE_A_WAITING, st.GATE_B_WAITING_REVIEW}
+GATE_B_STATES = {st.GATE_B_WAITING_REVIEW, st.GATE_B_CHANGES_REQUESTED,
+                 st.GATE_B_APPROVED_UNMERGED}
+NO_EVIDENCE, NO_VERDICT = "no evidence recorded", "no verdict recorded"
+_VERDICT_LINE = re.compile(r"^\s*(?:- \[[ xX]\]\s*AC\d+|Suite:)", re.M)
 _IN_FLIGHT = {st.IN_PROGRESS, st.IN_REVIEW, st.CHANGES_REQUESTED}  # the story lock
 
 
@@ -62,6 +73,39 @@ class Progress:
 
 
 @dataclass(frozen=True)
+class ReviewEvidence:
+    """What the checkpoint of a story at Gate B records, for the reviewer."""
+    pr: int
+    issue: int
+    evidence: str  # the ledger's headline, or NO_EVIDENCE, or why it cannot be read
+    evidence_sha: str | None = None
+    head: str | None = None  # the PR's head commit
+    verdict: str = NO_VERDICT  # the AC verifier's verdict, in one line
+
+    @property
+    def current(self) -> bool | None:
+        """The evidence is for the PR's head (``None``: no evidence, or head unknown)."""
+        if not self.evidence_sha or not self.head:
+            return None
+        return self.evidence_sha == self.head
+
+    def lines(self) -> list[str]:
+        text = self.evidence
+        if self.evidence_sha:
+            text += f" @ {self.evidence_sha[:7]}"
+            if self.current is True:
+                text += ", the PR's head"
+            elif self.current is False:
+                text += f", but the PR's head is {self.head[:7]}: stale"
+        return [f"Evidence (issue #{self.issue}): {text}.", f"Verdict: {self.verdict}."]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"pr": self.pr, "issue": self.issue, "evidence": self.evidence,
+                "evidence_sha": self.evidence_sha, "head": self.head,
+                "current": self.current, "verdict": self.verdict}
+
+
+@dataclass(frozen=True)
 class Report:
     next_action: str
     state: dict[str, Any]  # the ``state --json`` object
@@ -69,6 +113,7 @@ class Report:
     progress: Progress | None = None
     requirements: tuple[Requirement, ...] | None = None  # None: no traceability.md yet
     notes: tuple[str, ...] = field(default=())
+    review: ReviewEvidence | None = None  # a story PR at Gate B
 
     def to_dict(self) -> dict[str, Any]:
         reqs = self.requirements
@@ -81,6 +126,7 @@ class Report:
             "requirements": [r.to_dict() for r in reqs] if reqs is not None else None,
             "requirements_done": sum(r.done for r in reqs) if reqs is not None else None,
             "notes": list(self.notes),
+            "review": self.review.to_dict() if self.review else None,
         }
 
 
@@ -169,6 +215,42 @@ def requirement_status(rows: list[tuple[str, str, tuple[int, ...]]],
     return tuple(found)
 
 
+def review_evidence(pr: int, issue: int, checkpoint: str | None,
+                    head: str | None) -> ReviewEvidence:
+    """The evidence and verdict a story's checkpoint comment body records, for its PR at
+    Gate B. ``checkpoint`` is ``None`` when the issue has no checkpoint comment."""
+    if checkpoint is None:
+        return ReviewEvidence(pr, issue, NO_EVIDENCE, head=head)
+    checkpoint = checkpoint.replace("\r\n", "\n")
+    sha = None
+    try:
+        recorded = ev.from_body(checkpoint)
+    except FactoryError as err:
+        text = f"unreadable ({err})"
+    else:
+        text = NO_EVIDENCE if recorded is None else ev.headline(recorded)
+        sha = recorded.sha if recorded else None
+    return ReviewEvidence(pr, issue, text, sha, head, verdict_line(checkpoint))
+
+
+def verdict_line(checkpoint: str) -> str:
+    """The AC verifier's verdict in the checkpoint's note (S10), in one line."""
+    parts = checkpoint.split("\n\n", 1)  # the marker and station line, then the note
+    note = parts[1] if len(parts) == 2 else ""
+    if not _VERDICT_LINE.search(note):
+        return NO_VERDICT
+    parsed = vd.parse(note)
+    text = ", ".join(f"AC{a.number} {a.verdict}" for a in parsed.acs) or "no AC lines"
+    if parsed.suite:
+        suite = parsed.suite_text if len(parsed.suite_text) <= 100 \
+            else parsed.suite_text[:99] + "…"
+        text += f"; Suite: {parsed.suite}" + (f" — {suite}" if suite else "")
+    if parsed.problems:
+        text += (f" ({len(parsed.problems)} format problem(s): `verdict check` would refuse "
+                 "it)")
+    return text
+
+
 def progress(snap: st.Snapshot, increment: str | None) -> Progress | None:
     stories = [i for i in snap.issues if i.story is not None and i.story.increment == increment]
     if increment is None or not stories:
@@ -180,7 +262,8 @@ def progress(snap: st.Snapshot, increment: str | None) -> Progress | None:
 
 
 def build(result: dict[str, Any], snap: st.Snapshot | None = None,
-          traceability: str | None = None, comments_in_round: int = 0) -> Report:
+          traceability: str | None = None, comments_in_round: int = 0,
+          review: ReviewEvidence | None = None) -> Report:
     """Pure: the report for a ``state --json`` object and what ``collect`` read."""
     details = result["details"]
     hint = None
@@ -194,7 +277,8 @@ def build(result: dict[str, Any], snap: st.Snapshot | None = None,
     if result["state"] == st.PLANNING and details.get("missing"):
         notes += ("Planning documents still to write: " + ", ".join(details["missing"]),)
     return Report(next_action(result), result, hint,
-                  progress(snap, result.get("increment")) if snap else None, reqs, notes)
+                  progress(snap, result.get("increment")) if snap else None, reqs, notes,
+                  review if result["state"] in GATE_B_STATES else None)
 
 
 def render(report: Report) -> str:
@@ -216,6 +300,8 @@ def render(report: Report) -> str:
     for item in data["details"].get("items", ()):
         lines.append(f"  - {item}")
     lines.extend(report.notes)
+    if report.review:
+        lines += ["", *report.review.lines()]
 
     if report.progress:
         p = report.progress
@@ -248,8 +334,9 @@ def render(report: Report) -> str:
 
 
 def collect(gh: Gh, repo: str) -> Report:
-    """Read the state, the traceability matrix on the default branch and, for a PR waiting
-    for review, its human comments in the current round."""
+    """Read the state, the traceability matrix on the default branch, for a PR waiting
+    for review its human comments in the current round, and for a story PR at Gate B its
+    head and the issue's checkpoint."""
     snap = st.collect_snapshot(gh, repo)
     result = st.derive_state(snap).to_dict()
     traceability = None
@@ -267,4 +354,10 @@ def collect(gh: Gh, repo: str) -> Report:
             gate = signals_for(config)
             if gate.verdict(pr) == Verdict.PENDING:
                 comments = len(gate.feedback(pr))
-    return build(result, snap, traceability, comments)
+    review = None
+    if result["state"] in GATE_B_STATES:
+        number, issue = result["details"]["pr"], result["details"]["issue"]
+        head = gh.json(["pr", "view", str(number), "--repo", repo],
+                       fields=["headRefOid"]).get("headRefOid")
+        review = review_evidence(number, issue, vd.checkpoint_body(gh, repo, issue), head)
+    return build(result, snap, traceability, comments, review)
