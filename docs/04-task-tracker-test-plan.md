@@ -164,7 +164,7 @@ In bot mode, a GitHub approval gives `GATE_B_APPROVED_UNMERGED`. That mode is no
 
 `docs/factory/traceability.md` gives the same chain in one table (REQ → stories → PRs → tests).
 
-**One command (T6.4):** with the target active, `python scripts/factory.py trace <file>:<line>` follows steps 1–5 by itself: blame, the PR (from GitHub's commit-to-PR API, so squash and rebase merges work too), `Closes #<I>`, **Traces to**, the `REQ-###` line and its PRD section, and the REQ's row in `docs/factory/traceability.md`. It prints a link for each hop and its own elapsed time. Use it to check each hop of the manual walk. It does not replace the walk: the timed walk by a human reviewer is part of the M6 demo.
+**One command (T6.4):** with the target active, `python scripts/factory.py trace <file>:<line>` follows steps 1–5 by itself: blame, the PR (from GitHub's commit-to-PR API, or the merge commit; verified live for merge-commit merges, while squash and rebase merges are tested only against GitHub-shaped answers), `Closes #<I>`, **Traces to**, the `REQ-###` line and its PRD section, and the REQ's row in `docs/factory/traceability.md`. It prints a link for each hop and its own elapsed time. Use it to check each hop of the manual walk. It does not replace the walk: the timed walk by a human reviewer is part of the M6 demo.
 
 **Expect:** each hop is found from the previous one without searching the repo, and the whole walk takes **under 60 seconds**.
 

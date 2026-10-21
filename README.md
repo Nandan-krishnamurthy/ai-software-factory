@@ -79,7 +79,9 @@ After you merge the last story of an increment, the close-out summary says the i
 python scripts/factory.py trace src/ui/render.ts:42
 ```
 
-From any line in the active target, `trace` follows the chain line → commit → PR → `Closes #<I>` → the issue's **Traces to** → `REQ-###` → PRD section, and the REQ's row in `docs/factory/traceability.md`. It prints a link for every hop and how long it took. It works for merge-commit, squash and rebase merges. `--ref <commit>` traces the file as it is at that commit (default `HEAD`), and `--json` gives the same chain as JSON. It changes nothing, and exits 1 naming the hop it could not follow.
+From any line in the active target, `trace` follows the chain line → commit → PR → `Closes #<I>` → the issue's **Traces to** → `REQ-###` → PRD section, and the REQ's row in `docs/factory/traceability.md`. It prints a link for every hop and how long it took. The file may be relative to the target's root or absolute (`C:/…`, or `/c/…` in Git Bash). `--ref <commit>` traces the file as it is at that commit (default `HEAD`), and `--json` gives the same chain as JSON. It changes nothing, and exits 1 naming the hop it could not follow. A GitHub error such as a wrong repo or no access (HTTP 404) also exits 1, with the reason.
+
+It finds the PR with GitHub's commit-to-PR API, falling back to the `Merge pull request #<P>` merge commit. This is verified against live GitHub for merge-commit merges, which is how the factory's PRs have been merged so far. For squash and rebase merges, `trace` relies on GitHub associating the PR with the commit it wrote; that is tested only against GitHub-shaped answers, not yet against a real squash or rebase merge.
 
 ### Commands
 

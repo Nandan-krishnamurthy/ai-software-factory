@@ -14,6 +14,7 @@ Offline: the histories are temporary git repositories, and GitHub's answers are 
 import contextlib
 import io
 import json
+import os
 import re
 import tempfile
 import unittest
@@ -60,6 +61,36 @@ class ParseTest(unittest.TestCase):
                     f"{root.parent / 'other' / 'a.py'}:1"):
             with self.subTest(bad), self.assertRaises(trace.TraceError):
                 trace.parse_spec(bad, root)
+
+    def test_git_bash_paths(self):
+        """T6.4 review: on Windows, Git Bash writes ``C:\\Projects\\app`` as ``/c/Projects/app``,
+        which neither git nor pathlib there understands."""
+        cases = {
+            "/c/Projects/app/src/a.ts": "C:/Projects/app/src/a.ts",
+            "/D/work/app": "D:/work/app",
+            "/c": "C:",
+            "src/a.ts": "src/a.ts",                    # relative: unchanged
+            "C:/Projects/app/a.ts": "C:/Projects/app/a.ts",
+            r"C:\Projects\app\a.ts": r"C:\Projects\app\a.ts",
+            "/cache/a.ts": "/cache/a.ts",              # not a drive letter
+            "/tmp/a.ts": "/tmp/a.ts",
+        }
+        for given, expected in cases.items():
+            with self.subTest(given):
+                self.assertEqual(trace.from_git_bash(given, windows=True), expected)
+                self.assertEqual(trace.from_git_bash(given, windows=False), given)
+
+    @unittest.skipUnless(os.name == "nt", "Git Bash paths name Windows drives")
+    def test_git_bash_absolute_spec_on_windows(self):
+        root = Path(tempfile.gettempdir()).resolve() / "app"
+        drive, rest = root.as_posix().split(":", 1)  # C, /Users/.../app
+        bash = f"/{drive.lower()}{rest}"
+        self.assertEqual(trace.parse_spec(f"{bash}/src/a.ts:12", root), ("src/a.ts", 12))
+        self.assertEqual(trace.parse_spec(f"{root.as_posix()}/src/a.ts:12", root),
+                         ("src/a.ts", 12))
+        self.assertEqual(trace.parse_spec("src/a.ts:12", root), ("src/a.ts", 12))
+        with self.assertRaises(trace.TraceError):  # still refused outside the target
+            trace.parse_spec(f"/{drive.lower()}/elsewhere/a.ts:1", root)
 
     def test_blame(self):
         porcelain = ("a" * 40 + " 3 5 1\nauthor x\nsummary feat: a thing (#27)\n"
@@ -247,27 +278,33 @@ class Repo:
         return first, second
 
 
+NOT_FOUND = ProcessResult([], 1, "", "gh: Not Found (HTTP 404)")
+
+
 class GitHub:
     """GitHub's answers, in the recorded shape: the PRs of each commit, PRs, issues."""
 
-    def __init__(self, commit_prs: dict[str, list[dict]], prs=(), issues=None):
+    def __init__(self, commit_prs: dict[str, list[dict]], prs=(), issues=None, fail=None):
         self.commit_prs = commit_prs
         self.prs = {p["number"]: p for p in prs}
         self.issues = {1: {"number": 1, "state": "open", "body": STORY_BODY}} \
             if issues is None else issues
+        self.fail = fail or {}  # endpoint -> gh's stderr for a failed call
         self.calls: list[str] = []
 
     def __call__(self, argv, *, timeout, cwd=None, env=None, input=None):
         endpoint = argv[2]
         self.calls.append(endpoint)
+        if endpoint in self.fail:
+            return ProcessResult([], 1, "", self.fail[endpoint])
         if m := re.fullmatch(rf"repos/{REPO}/commits/(\w+)/pulls", endpoint):
-            if m[1] not in self.commit_prs:
-                return ProcessResult([], 1, "", "gh: No commit found for SHA (HTTP 422)")
+            if m[1] not in self.commit_prs:  # GitHub's answer for a commit it does not have
+                return ProcessResult([], 1, "", f"gh: No commit found for SHA: {m[1]} "
+                                                "(HTTP 422)")
             return self.ok(self.commit_prs[m[1]])
-        if m := re.fullmatch(rf"repos/{REPO}/pulls/(\d+)", endpoint):
-            return self.ok(self.prs[int(m[1])])
-        if m := re.fullmatch(rf"repos/{REPO}/issues/(\d+)", endpoint):
-            return self.ok(self.issues[int(m[1])])
+        if m := re.fullmatch(rf"repos/{REPO}/(pulls|issues)/(\d+)", endpoint):
+            found = (self.prs if m[1] == "pulls" else self.issues).get(int(m[2]))
+            return self.ok(found) if found else NOT_FOUND
         raise AssertionError(f"unexpected call {argv}")
 
     @staticmethod
@@ -320,9 +357,9 @@ class HistoryShapeTest(unittest.TestCase):
         self.assert_reaches_the_prd(t, merge, trace.API)
 
     def test_merge_commit_found_by_the_fallback(self):
-        # GitHub lists no PR for the commit: the merge commit's subject names it.
+        # GitHub has the commit but lists no PR for it: the merge commit's subject names it.
         first, second, merge = self.merge_commit()
-        github = GitHub({}, prs=[pr(merge_sha=merge)])
+        github = GitHub({first: []}, prs=[pr(merge_sha=merge)])
         t = self.run_trace(github, "src/app.py:2")
         self.assertEqual(t.commit, first)
         self.assert_reaches_the_prd(t, merge, trace.MERGE_COMMIT)
@@ -364,12 +401,12 @@ class HistoryShapeTest(unittest.TestCase):
         self.assertEqual(t.commit, rebased)
         self.assert_reaches_the_prd(t, rebased, trace.API)
 
-    def test_a_squash_unknown_to_github_is_broken_at_the_pr(self):
+    def test_a_squash_github_lists_no_pr_for_is_broken_at_the_pr(self):
         self.repo.story_commits()
         self.repo.git.run(["switch", "-q", "main"])
         self.repo.git.run(["merge", "-q", "--squash", "story/1-greet"])
         squash = self.repo.commit("Greet the user (#5)")
-        t = self.run_trace(GitHub({}))
+        t = self.run_trace(GitHub({squash: []}))
         self.assertFalse(t.complete)
         self.assertIsNone(t.pr)
         self.assertEqual(t.gaps(), [
@@ -443,7 +480,64 @@ class HistoryShapeTest(unittest.TestCase):
                     self.assertTrue(text.startswith("Target: "))
                     self.assertIn("→ PR #5 → issue #1 → REQ-001 → PRD.", text)
                 else:
-                    self.assertIn("lists no merged PR", text)
+                    self.assertIn("is not on GitHub", text)
+
+    def test_github_errors(self):
+        """T6.4 review: only a commit GitHub does not have (HTTP 422) is a broken hop, and
+        then without the fallback; a 404 or any other error stops the trace and says why."""
+        first, second, merge = self.merge_commit()
+        pulls = f"repos/{REPO}/commits/{second}/pulls"
+
+        # 422: never pushed. The local merge commit names PR #5, but no PR on GitHub can
+        # hold a commit GitHub does not have, so the fallback is not used.
+        github = GitHub({}, prs=[pr(merge_sha=merge)])
+        t = self.run_trace(github)
+        self.assertEqual(t.gaps(), [f"commit {second[:7]} is not on GitHub ({REPO} has no such "
+                                    "commit): push it, or trace a --ref that is on GitHub"])
+        self.assertNotIn(f"repos/{REPO}/pulls/5", github.calls)
+
+        errors = {
+            "gh: Not Found (HTTP 404)": (f"GitHub refused `gh api {pulls}` (HTTP 404: {REPO} "
+                                         "does not exist or gh cannot read it; check the "
+                                         "target's repo and `gh auth status`)"),
+            "gh: Server Error (HTTP 500)": (f"GitHub refused `gh api {pulls}` (HTTP 500: gh: "
+                                            "Server Error (HTTP 500))"),
+            # A 422 that is not "No commit found" is an error too, not a missing commit.
+            "gh: Validation Failed (HTTP 422)": (f"GitHub refused `gh api {pulls}` (HTTP 422: "
+                                                 "gh: Validation Failed (HTTP 422))"),
+            "error connecting to api.github.com": (f"GitHub refused `gh api {pulls}` (error "
+                                                   "connecting to api.github.com)"),
+        }
+        for stderr, message in errors.items():
+            with self.subTest(stderr), self.assertRaises(trace.TraceError) as ctx:
+                self.run_trace(GitHub({}, prs=[pr(merge_sha=merge)], fail={pulls: stderr}))
+            self.assertEqual(str(ctx.exception), message)
+
+        # On the command line: exit 1 and the reason on stderr.
+        github = GitHub({}, fail={pulls: "gh: Not Found (HTTP 404)"})
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.object(target, "get_target",
+                               lambda: target.Target(self.repo.root, REPO)), \
+                mock.patch.object(cli, "Gh", lambda: Gh(transport=github)), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.assertEqual(cli.main(["trace", "src/app.py:3"]), 1)
+        self.assertIn(f"error: GitHub refused `gh api {pulls}` (HTTP 404", err.getvalue())
+
+    def test_a_pr_or_issue_github_does_not_have_is_a_broken_hop(self):
+        first, second, merge = self.merge_commit()
+        # The fallback names PR #5, which GitHub does not have.
+        t = self.run_trace(GitHub({second: []}))
+        self.assertEqual(t.gaps(), [f"PR #5, named by merge commit {merge[:7]}, is not on "
+                                    f"GitHub in {REPO}"])
+        # The PR closes issue #1, which GitHub does not have.
+        t = self.run_trace(GitHub({second: [pr(merge_sha=merge)]}, issues={}))
+        self.assertEqual(t.gaps(), [f"issue #1, which PR #5 closes, is not on GitHub in {REPO}"])
+        # Any other error on those calls stops the trace.
+        issue = f"repos/{REPO}/issues/1"
+        with self.assertRaises(trace.TraceError) as ctx:
+            self.run_trace(GitHub({second: [pr(merge_sha=merge)]},
+                                  fail={issue: "gh: Forbidden (HTTP 403)"}))
+        self.assertIn(f"`gh api {issue}` (HTTP 403", str(ctx.exception))
 
 
 if __name__ == "__main__":

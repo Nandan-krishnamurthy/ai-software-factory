@@ -6,10 +6,14 @@ Each hop is found from the previous one, never by searching:
 1. ``git blame`` of the line at ``--ref`` (default ``HEAD``) names the commit that last
    changed it.
 2. The PR that brought that commit in. GitHub's commit-to-PR API
-   (``repos/<R>/commits/<sha>/pulls``) knows squash, rebase and merge-commit merges. If it
+   (``repos/<R>/commits/<sha>/pulls``) lists the merged PR that brought a commit in; for
+   squash and rebase merges that is the commit GitHub wrote. If GitHub has the commit but
    lists no merged PR, a deterministic fallback for merge commits: the first
    ``Merge pull request #<P>`` commit on the ancestry path from the commit to ``--ref``
-   that brought it in through its second parent.
+   that brought it in through its second parent. If GitHub does not have the commit
+   (HTTP 422, never pushed), the hop is broken: no PR on GitHub can hold it. Any other
+   GitHub error, such as a 404 for a wrong repo or no access, stops the trace with a
+   ``TraceError`` that says so, rather than being read as "no PR".
 3. The PR body's ``Closes #<I>``.
 4. The issue's ``factory:story`` marker (story and increment) and its **Traces to** REQs.
 5. Each REQ's definition, ``- **REQ-###** (PRD §<section>, …): …``, in an increment's
@@ -25,6 +29,7 @@ traced. The result also gives the command's own elapsed time.
 The parsers and ``match_prd`` are pure; ``trace`` does the I/O.
 """
 
+import os
 import re
 import time
 from collections.abc import Callable
@@ -50,6 +55,8 @@ _MERGE_SUBJECT = re.compile(r"^Merge pull request #(\d+) from ")
 _REQ = re.compile(r"\bREQ-\d{3,}\b")
 _HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
 _QUOTES = "\"'“”‘’`"
+_NO_COMMIT = "No commit found for SHA"  # GitHub's 422 for a commit it does not have
+_GIT_BASH_DRIVE =re.compile(r"^/([A-Za-z])(?=/|$)")  # /c/... in Git Bash on Windows
 
 
 class TraceError(FactoryError):
@@ -160,13 +167,23 @@ class Trace:
 # ----------------------------------------------------------------------------- pure
 
 
+def from_git_bash(path: str, windows: bool = os.name == "nt") -> str:
+    """On Windows, the Windows path a Git Bash absolute path names (``/d/work/app/a.ts`` is
+    ``D:/work/app/a.ts``); git and ``pathlib`` there do not understand the first.
+    Any other path, and every path elsewhere, is returned unchanged."""
+    if not windows:
+        return path
+    return _GIT_BASH_DRIVE.sub(lambda m: f"{m[1].upper()}:", path, count=1)
+
+
 def parse_spec(spec: str, root: Path) -> tuple[str, int]:
     """``<file>:<line>`` as a repo-relative POSIX path and a line number. The file may be
-    absolute (inside the target) or relative to the target's root."""
+    absolute (inside the target; on Windows also as Git Bash writes it, ``/c/…``) or
+    relative to the target's root."""
     m = _SPEC.match(spec.strip())
     if not m or int(m["line"]) < 1:
         raise TraceError(f"expected <file>:<line> with a line number from 1, got {spec!r}")
-    path = Path(m["path"])
+    path = Path(from_git_bash(m["path"]))
     if path.is_absolute():
         try:
             path = path.resolve().relative_to(root.resolve())
@@ -316,20 +333,55 @@ def merge_commit_pr(git: Git, sha: str, ref: str) -> tuple[int, str] | None:
     return None
 
 
-def _commit_prs(gh: Gh, repo: str, sha: str) -> list[dict]:
+def _http_status(err: GhError) -> str | None:
+    m = re.search(r"\(HTTP (\d{3})\)", err.stderr)
+    return m[1] if m else None
+
+
+def _api_error(err: GhError, endpoint: str, repo: str) -> TraceError:
+    """A GitHub error ``trace`` cannot route around, said plainly."""
+    status = _http_status(err)
+    if status == "404":
+        why = (f"HTTP 404: {repo} does not exist or gh cannot read it; check the target's "
+               "repo and `gh auth status`")
+    else:
+        detail = (err.stderr.strip().splitlines() or [""])[-1] or str(err)
+        why = f"HTTP {status}: {detail}" if status else detail
+    return TraceError(f"GitHub refused `gh api {endpoint}` ({why})")
+
+
+def _commit_prs(gh: Gh, repo: str, sha: str) -> list[dict] | None:
+    """The PRs GitHub associates with the commit, or ``None`` when GitHub does not have the
+    commit at all (HTTP 422 "No commit found for SHA": it was never pushed). Every other
+    error raises: a 404 means the repo is wrong or gh cannot read it, which must not look
+    like "no PR"."""
+    endpoint = f"repos/{repo}/commits/{sha}/pulls"
     try:
-        found = gh.api(f"repos/{repo}/commits/{sha}/pulls")
+        found = gh.api(endpoint)
     except GhError as err:
-        if "HTTP 422" in err.stderr or "HTTP 404" in err.stderr:  # commit not on GitHub
-            return []
-        raise
+        if _http_status(err) == "422" and _NO_COMMIT in err.stderr:
+            return None
+        raise _api_error(err, endpoint, repo) from None
     return found if isinstance(found, list) else []
+
+
+def _get_or_none(gh: Gh, repo: str, endpoint: str) -> dict | None:
+    """``gh api endpoint`` for one PR or issue named by an earlier hop, or ``None`` when
+    GitHub has no such item (HTTP 404, the repo itself having just answered)."""
+    try:
+        found = gh.api(endpoint)
+    except GhError as err:
+        if _http_status(err) == "404":
+            return None
+        raise _api_error(err, endpoint, repo) from None
+    return found if isinstance(found, dict) else None
 
 
 def trace(gh: Gh, git: Git, repo: str, root: Path, spec: str, ref: str = "HEAD", *,
           clock: Callable[[], float] = time.perf_counter) -> Trace:
     """Follow the chain for ``spec`` (``<file>:<line>``). A hop that cannot be followed is
-    recorded in ``broken``; only a line that cannot be blamed at all raises."""
+    recorded in ``broken``. ``TraceError`` is raised for a line that cannot be blamed at
+    all, and for a GitHub error other than a missing commit, PR or issue."""
     started = clock()
     path, number = parse_spec(spec, root)
     try:
@@ -351,16 +403,25 @@ def trace(gh: Gh, git: Git, repo: str, root: Path, spec: str, ref: str = "HEAD",
 
 
 def _follow(gh: Gh, git: Git, repo: str, t: Trace) -> None:
-    pr = first_merged(_commit_prs(gh, repo, t.commit))
+    listed = _commit_prs(gh, repo, t.commit)
+    if listed is None:  # no PR on GitHub can hold it, so no merge commit can name one
+        t.broken = (f"commit {t.commit[:7]} is not on GitHub ({repo} has no such commit): "
+                    "push it, or trace a --ref that is on GitHub")
+        return
+    pr = first_merged(listed)
     t.found_by = API
-    if pr is None:
+    if pr is None:  # GitHub has the commit but lists no merged PR for it
         fallback = merge_commit_pr(git, t.commit, t.ref)
         if fallback is None:
             t.broken = (f"commit {t.commit[:7]}: {API} lists no merged PR for it, and no "
                         f"`Merge pull request #<P>` commit up to {t.ref[:7]} brought it in")
             return
-        pr = gh.api(f"repos/{repo}/pulls/{fallback[0]}")
+        pr = _get_or_none(gh, repo, f"repos/{repo}/pulls/{fallback[0]}")
         t.found_by = MERGE_COMMIT
+        if pr is None:
+            t.broken = (f"PR #{fallback[0]}, named by merge commit {fallback[1][:7]}, is not "
+                        f"on GitHub in {repo}")
+            return
         if not pr.get("merged_at"):
             t.broken = f"PR #{fallback[0]} (from {MERGE_COMMIT}) is not merged on GitHub"
             return
@@ -371,7 +432,10 @@ def _follow(gh: Gh, git: Git, repo: str, t: Trace) -> None:
     if t.issue is None:
         t.broken = f"PR #{t.pr} closes no issue (no `Closes #<I>` in its body)"
         return
-    issue = gh.api(f"repos/{repo}/issues/{t.issue}")
+    issue = _get_or_none(gh, repo, f"repos/{repo}/issues/{t.issue}")
+    if issue is None:
+        t.broken = f"issue #{t.issue}, which PR #{t.pr} closes, is not on GitHub in {repo}"
+        return
     marker = find(issue.get("body"), StoryMarker)
     if marker is None:
         t.broken = f"issue #{t.issue} is not a factory story (no factory:story marker)"

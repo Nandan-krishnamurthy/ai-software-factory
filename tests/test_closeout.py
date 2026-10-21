@@ -12,9 +12,11 @@ import unittest
 from unittest import mock
 
 from factory import cli, closeout, target
+from factory import state as st
 from factory.gh import Gh, ProcessResult
 from factory.markers import PrMarker, StoryMarker, build
 from factory.pick import parse_issues
+from tests import test_state as ts
 
 REPO = "owner/app"
 MERGED_AT = "2026-09-25T11:41:18Z"
@@ -145,9 +147,9 @@ class LastStoryTest(unittest.TestCase):
             with self.subTest(case):
                 result = self.plan(others)
                 self.assertTrue(result.increment_complete)
-                self.assertEqual(result.still_open, ())
+                self.assertEqual(result.remaining, ())
                 self.assertEqual(result.next_step,
-                                 "Increment 001-initial is complete: no open story remains. "
+                                 "Increment 001-initial is complete: every story is done. "
                                  "Run `/factory-start` with new requirements to plan the next "
                                  "increment.")
                 self.assertNotIn("/factory-continue", result.next_step)
@@ -167,11 +169,45 @@ class LastStoryTest(unittest.TestCase):
             with self.subTest(case):
                 result = self.plan(others)
                 self.assertFalse(result.increment_complete)
-                self.assertEqual(result.still_open, (3,))
+                self.assertEqual(result.remaining, (3,))
                 self.assertEqual(result.next_step, closeout.CONTINUE)
                 self.assertIn("/factory-continue", result.next_step)
                 self.assertNotIn("/factory-start", result.next_step)
-                self.assertIn("still has open stories: #3", closeout.render(result))
+                self.assertIn("has stories not done: #3", closeout.render(result))
+
+    def test_a_story_closed_without_done_keeps_the_increment_open(self):
+        # Closed by hand, with no merged PR: the state engine reports NEEDS_HUMAN after this
+        # close-out, where /factory-start is not allowed, so S12 must not name it.
+        result = self.plan([story_issue(3, 2, state="closed")])
+        self.assertFalse(result.increment_complete)
+        self.assertEqual(result.remaining, (3,))
+        self.assertNotIn("/factory-start", result.next_step)
+        self.assertIn("has stories not done: #3", closeout.render(result))
+
+    def test_it_agrees_with_the_state_engine(self):
+        """For each other story, ``increment_complete`` is True exactly when the state engine
+        reports INCREMENT_COMPLETE once this close-out has set status:done."""
+        done = ("factory:story", "status:done")
+        others = {  # (other story #11 for close-out, the same for the state engine)
+            "done": (("closed", done), ("CLOSED", done)),
+            "closed without done": (("closed", ("factory:story", "status:ready")),
+                                    ("CLOSED", ("factory:story", "status:ready"))),
+            "open and ready": (("open", ("factory:story", "status:ready")),
+                               ("OPEN", ("factory:story", "status:ready"))),
+        }
+        for case, ((state, labels), (st_state, st_labels)) in others.items():
+            with self.subTest(case):
+                issue = story_issue(10, 1, state="closed",
+                                    labels=("factory:story", "status:in-review"))
+                result = closeout.plan(10, issue, [story_pr(10, 1)],
+                                       [issue, story_issue(11, 2, state=state, labels=labels)])
+                after = ts.snap(**{**ts.MERGED_PLANNING, "issues": (
+                    ts.issue(10, 1, labels=done, state="CLOSED"),
+                    ts.issue(11, 2, labels=st_labels, state=st_state)),
+                    "prs": (ts.planning_pr(5, "MERGED"), ts.story_pr(20, 1, "MERGED"))})
+                engine = st.derive_state(after).state
+                self.assertEqual(result.increment_complete, engine == st.INCREMENT_COMPLETE,
+                                 (case, engine))
 
     def test_the_issue_being_closed_out_never_counts_as_open(self):
         # Before --finish the merge may not have closed it (a PR without "Closes #2").
@@ -190,7 +226,7 @@ class GitHubTest(unittest.TestCase):
             "pr_url": "https://x/pull/14", "branch": "story/2-x", "head_sha": "a" * 40,
             "merge_sha": "b" * 40, "merged_at": MERGED_AT,
             "unblocked": [{"number": 3, "story": "STORY-002", "title": "STORY-002: story 2"}],
-            "increment": "001-initial", "increment_complete": False, "still_open": [3, 4],
+            "increment": "001-initial", "increment_complete": False, "remaining": [3, 4],
             "next_step": closeout.CONTINUE})
 
     def test_finish_closes_the_issue_first_and_sets_done_last(self):
