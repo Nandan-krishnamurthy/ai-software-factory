@@ -2,9 +2,10 @@
 
 | | |
 |---|---|
-| **Status** | Proposed, for review before implementation |
+| **Status** | M0–M5 implemented: tasks T0.1–T5.4 are merged, and the milestone demo records are in [progress.md](progress.md) (M1, M2, M4 and M5; M3 has no separate record). This plan covers M0–M5 only. |
 | **Date** | 2026-09-24 |
 | **Based on** | [01-factory-requirements.md](01-factory-requirements.md) (v3, D1–D5), [02-factory-architecture.md](02-factory-architecture.md) |
+| **Next milestones** | M6–M9 (T6.1–T9.9) are in [05-roadmap-m6-m9.md](05-roadmap-m6-m9.md). They follow this plan's task format and §3 Definition of Done, and run strictly in order after M5. |
 
 ---
 
