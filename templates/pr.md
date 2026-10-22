@@ -45,3 +45,5 @@ Traceability matrix: {{traceability_rows}}
 - **To request changes:** comment on this PR with `/changes` on the first line, followed by your feedback. Then run `/factory-resume`. The factory reworks this same PR and replies to each point.
 - **To approve:** merge this PR yourself. Your merge is the approval. The factory never merges.
 - After merging, run `/factory-resume` to close out the story. The factory will not start the next story until you run `/factory-continue`.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)

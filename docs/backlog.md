@@ -29,19 +29,19 @@ This is the backlog that [03-factory-plan.md](03-factory-plan.md) §5 refers to 
 ### <a id="b-01"></a>B-01 Walking-skeleton story: its commands are unapproved until its PR merges
 - **What:** `verify run` runs only the commands in `.factory/config.json` on the default branch on `origin`. On a project's walking-skeleton story, the commands are first set on the story branch, so `verify run` reports them as unapproved until that PR is merged.
 - **Source:** [PR #36](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/36), "Impact for T6.5". The PR suggests, as an example only, letting the skeleton story's evidence follow its merge.
-- **Status:** verified · **Owner:** T6.5 · **State:** open, not decided
+- **Status:** verified · **Owner:** T6.5 · **State:** resolved by the T6.5 PR: the command is pending, not run before the merge, and S12 runs it on the default branch afterwards (decision 4 in [task-log.md](task-log.md#t65-stations-s09s11-use-the-verification-engine))
 
 ### <a id="b-02"></a>B-02 S10/S11 stop fail-closed until the stations run the engine
 - **What:** `verdict check` requires the AC-to-test map, but no station runs `verify run` or `verify map` yet. On a live target, S10 reports `INVALID` and stops with `factory:needs-human`. This was accepted for the interval between T6.2 and T6.5.
 - **Source:** [PR #37](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/37), "Interim effect until T6.5 (accepted)"; approved at `12c41339#617` (see [task-log.md](task-log.md#t62-deterministic-ac--test-mapping))
-- **Status:** verified · **Owner:** T6.5 · **State:** open; ends when T6.5 lands
+- **Status:** verified · **Owner:** T6.5 · **State:** resolved by the T6.5 PR: S09 runs `verify run` and S10 runs `verify map`
 
 ### <a id="b-03"></a>B-03 Bookkeeping commits move the branch head past the evidence
 - **What:** `pr render` and `pr check` require the evidence to be for the story branch's head on `origin`, and `pr render` reads the traceability rows from the diff at the evidence commit. [S11](../stations/S11-pr.md) commits the traceability rows and a `.factory/log.md` line after opening the PR (steps 5–6). That moves the head past the evidence, so `pr render`/`pr check` must run after that commit, with `verify run`/`verify map` run again.
   - **Analysis, 2026-10-21:** [S09](../stations/S09-test.md) also commits a `.factory/log.md` line after running the commands (steps 5–6).
   - **Analysis, 2026-10-21:** the traceability row names the PR number, which exists only once the PR is open.
 - **Source:** [PR #38](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/38), "Not in this PR"; the station files
-- **Status:** verified (the S11 ordering); analysis (S09, and the PR-number dependency) · **Owner:** T6.5 · **State:** open, not decided
+- **Status:** verified (the S11 ordering); analysis (S09, and the PR-number dependency) · **Owner:** T6.5 · **State:** resolved by the T6.5 PR: S09 commits before `verify run`; S11 records the evidence and the map again after its traceability commit (decision 1)
 
 ### <a id="b-04"></a>B-04 The rendered PR body versus an attribution footer: unresolved
 - **What:**
@@ -49,24 +49,36 @@ This is the backlog that [03-factory-plan.md](03-factory-plan.md) §5 refers to 
   - **Observed:** the Claude Code sessions that build this factory are instructed by their environment, not by a rule in this repository, to end the pull-request descriptions they create with an attribution line.
   - **The conflict:** once S11 opens story PRs with `pr render` output, the two can conflict for story PRs.
 - **Source:** [PR #38](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/38), "Limitations" item 6; the conflict was raised on 2026-10-21 (`c878c238`)
-- **Status:** verified (the `pr check` behaviour); observed (the attribution instruction) · **Owner:** T6.5 · **State:** **open, unresolved by decision** (`c878c238#1586`: "Do not decide or implement its resolution during the documentation migration")
+- **Status:** verified (the `pr check` behaviour); observed (the attribution instruction) · **Owner:** T6.5 · **State:** resolved by the T6.5 PR: the attribution line is part of `templates/pr.md` (decision 2)
 
 ### <a id="b-05"></a>B-05 S09's stuck path fills the PR template by hand
 - **What:**
   - **Verified:** the roadmap's T6.5 requires a station lint that "checks that S09–S11 contain no hand-written gate results". [S09](../stations/S09-test.md)'s **Stuck** stop condition (step 2) tells the model to fill `templates/pr.md` by hand, where "every gate shows its real result".
   - **Verified:** `pr render` refuses to render without an S10 verdict, so it cannot produce that draft PR as it stands.
 - **Source:** analysis of the committed station text and of [PR #38](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/38) ("`render` refuses … a missing verdict"), 2026-10-21
-- **Status:** analysis · **Owner:** T6.5 · **State:** open, not decided
+- **Status:** analysis · **Owner:** T6.5 · **State:** resolved by the T6.5 PR: `pr render --stuck` (decision 3)
 
 ### <a id="b-06"></a>B-06 S11 step 1 changes the branch head and re-runs the commands by hand
 - **What:** [S11](../stations/S11-pr.md) step 1 merges new default-branch commits into the story branch and then re-runs the commands by hand. With the verification engine, that merge commit makes the evidence, the map and the verdict stale.
 - **Source:** analysis of the committed station text, 2026-10-21
-- **Status:** analysis · **Owner:** T6.5 · **State:** open, not decided
+- **Status:** analysis · **Owner:** T6.5 · **State:** resolved by the T6.5 PR: new default-branch commits send the story back to S09 (decision 1)
 
 ### <a id="b-07"></a>B-07 Where "rule H1 is enforced by code wherever it can be"
 - **What:** T6.5's acceptance criterion "Rule H1 is enforced by code wherever it can be" does not say which code paths must enforce it.
 - **Source:** [05-roadmap-m6-m9.md](05-roadmap-m6-m9.md), T6.5 acceptance criteria; analysis, 2026-10-21
-- **Status:** analysis · **Owner:** T6.5 · **State:** open, not decided
+- **Status:** analysis · **Owner:** T6.5 · **State:** resolved by the T6.5 PR, as proposed there for review: the station lint, and `factory.py pr` refusing a story PR body that is not the render
+
+## Handed on by T6.5
+
+### <a id="b-26"></a>B-26 The stations capture no test report, so a unit-only AC may not map
+- **What:** S09 runs `verify run` without `--report`, because nothing records which report file a target's test command writes. With a runner whose default output lists no passing test by name (Vitest's default reporter), a test that passed has no result in the map. An AC covered only by such tests is `missing`, and the verifier's `pass` for it is `INVALID`, which stops S10 for the human. An AC that also has an end-to-end test listed by name is not affected.
+- **Source:** [PR #37](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/37), "Limitations" 1 and 2 (T6.2); the T6.5 station text
+- **Status:** verified (the limitation); analysis (its effect on the M6 demo) · **Owner:** unassigned (likely before or during the M6 demo) · **State:** open
+
+### <a id="b-27"></a>B-27 A stuck rework leaves a ready PR ready
+- **What:** `factory.py pr --draft` makes a PR a draft only when it creates it; an existing PR keeps its state. When a story gets stuck during rework, its PR is already ready for review, so the stuck path updates its body (which states the failures) but does not make it a draft, as rule H2 asks.
+- **Source:** `factory.py pr --help` ("an existing PR keeps its state"); the S09 stuck path, unchanged in this respect by T6.5
+- **Status:** analysis · **Owner:** unassigned · **State:** open
 
 ## Specification gaps
 

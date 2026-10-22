@@ -26,6 +26,14 @@ change, never from the story branch's working tree, which the model can edit. A
 ``commands.*`` value that differs on the branch is recorded, and ``verify check`` rejects
 the evidence: the branch's change was not what ran.
 
+**A command the branch introduces is pending, not rejected (T6.5).** A command that is
+``null`` in the approved config and set on the branch (the walking-skeleton story sets up
+the project's tooling) is recorded in ``pending`` with its text, and is not run: it is
+approved when the human merges the PR, and S12 runs it on the default branch after the
+merge. It is still checked like a command that runs (cmd.exe syntax and the guard), so a
+command that could never run is refused before the PR. A pending command is not a problem
+for ``verify check``; a changed or removed one still is.
+
 **The guard checks the language that runs.** Commands run with bash on every platform
 (``gh.run_command_line``), and before anything runs each one is checked by the factory
 guard as a bash command, so a configured command can never become a merge path (rule
@@ -108,6 +116,9 @@ class Evidence:
     changed_files: list[str] = field(default_factory=list)
     config_source: str = ""  # the approved config the commands came from: origin/main@abc1234
     unapproved: list[str] = field(default_factory=list)  # commands.* changed on the branch
+    # Commands null in the approved config that the branch sets: name -> the branch's text.
+    # Not run; approved by the merge (T6.5).
+    pending: dict[str, str] = field(default_factory=dict)
     tails_omitted: bool = False
     # Test reports the run wrote (``--report``): {"path", "status", "sha256", "bytes"}.
     reports: list[dict] = field(default_factory=list)
@@ -166,16 +177,19 @@ def run_verification(
         raise EvidenceError("the target has no commits") from None
     commands, source = approved_commands(git)
     unapproved = unapproved_changes(target_path, commands)
-    for name in VERIFY_COMMANDS:
-        command = commands.get(name)
+    pending = introduced_commands(target_path, commands)
+    checked = [(name, commands.get(name), "") for name in VERIFY_COMMANDS]
+    checked += [(name, command, " (introduced by this branch)")
+                for name, command in pending.items()]
+    for name, command, origin in checked:
         if not command:
             continue
         if reason := cmd_syntax(command):
-            raise EvidenceError(f"commands.{name} uses {reason}; configured commands run with "
-                                "bash, the language the guard checks, so write it in bash "
-                                "syntax; nothing was run")
+            raise EvidenceError(f"commands.{name}{origin} uses {reason}; configured commands "
+                                "run with bash, the language the guard checks, so write it "
+                                "in bash syntax; nothing was run")
         if vet is not None and (reason := vet(command)):
-            raise EvidenceError(f"commands.{name} is refused by the factory guard: "
+            raise EvidenceError(f"commands.{name}{origin} is refused by the factory guard: "
                                 f"{reason}; nothing was run")
 
     before = {rel: _digest_file(path) for rel, path in report_paths}
@@ -191,7 +205,7 @@ def run_verification(
         finished_at=now().isoformat(timespec="seconds"),
         commands=results, sha_after=git.rev_parse("HEAD"),
         changed_files=_status_lines(git), config_source=source, unapproved=unapproved,
-        reports=captured, outputs=outputs, report_data=report_data,
+        pending=pending, reports=captured, outputs=outputs, report_data=report_data,
     )
 
 
@@ -282,13 +296,26 @@ def default_ref(git: Git) -> str:
 
 
 def unapproved_changes(target_path: Path, approved: Mapping[str, str | None]) -> list[str]:
-    """The ``commands.*`` that the story branch's config changes from the approved ones."""
+    """The ``commands.*`` that the story branch's config changes from the approved ones,
+    not counting those it introduces (``introduced_commands``)."""
     try:
         branch = load_config(target_path).commands
     except FactoryError:
         return [f"{CONFIG_RELPATH.as_posix()} (missing or invalid on the branch)"]
     return [f"commands.{name}" for name in COMMAND_NAMES
-            if branch.get(name) != approved.get(name)]
+            if branch.get(name) != approved.get(name) and approved.get(name) is not None]
+
+
+def introduced_commands(target_path: Path, approved: Mapping[str, str | None]
+                        ) -> dict[str, str]:
+    """The commands that are ``null`` in the approved config and set on the story branch,
+    with the branch's text: pending until the human merges the PR."""
+    try:
+        branch = load_config(target_path).commands
+    except FactoryError:
+        return {}
+    return {name: value for name in COMMAND_NAMES
+            if approved.get(name) is None and (value := branch.get(name)) is not None}
 
 
 # cmd.exe syntax that bash, and so the guard, reads differently.
@@ -589,6 +616,10 @@ def from_dict(data: Any) -> Evidence:
     if not isinstance(evidence.reports, list) or not all(
             isinstance(r, dict) and isinstance(r.get("path"), str) for r in evidence.reports):
         raise EvidenceError("malformed evidence: reports must be a list of {path, …}")
+    if not isinstance(evidence.pending, dict) or not all(
+            name in COMMAND_NAMES and isinstance(text, str) and text
+            for name, text in evidence.pending.items()):
+        raise EvidenceError("malformed evidence: pending must map command names to commands")
     names = [c.name for c in evidence.commands]
     if names != list(VERIFY_COMMANDS):
         raise EvidenceError(f"evidence must cover {', '.join(VERIFY_COMMANDS)} in order; "
@@ -598,6 +629,9 @@ def from_dict(data: Any) -> Evidence:
             raise EvidenceError(f"commands.{c.name}: unknown status {c.status!r}")
         if (c.status == "skipped") != (c.command is None):
             raise EvidenceError(f"commands.{c.name}: only a null command may be skipped")
+        if c.name in evidence.pending and c.status != "skipped":
+            raise EvidenceError(f"commands.{c.name} is pending, so the approved command is "
+                                "null and nothing may have run")
     if not re.fullmatch(r"[0-9a-f]{40}", str(evidence.sha)):
         raise EvidenceError("the evidence does not name a full commit SHA")
     return evidence
@@ -720,6 +754,8 @@ def render(evidence: Evidence, path: Path | None = None) -> str:
         lines.append("  changed during the run: " + ", ".join(evidence.changed_files))
     if evidence.unapproved:
         lines.append("  NOT run, changed on this branch: " + ", ".join(evidence.unapproved))
+    lines += [f"  pending    introduced by this branch, not run until the merge: "
+              f"commands.{name} `{text}`" for name, text in evidence.pending.items()]
     if path is not None:
         lines.append(f"Written to {path} and to the checkpoint note.")
     failures = evidence.failures()
@@ -728,16 +764,30 @@ def render(evidence: Evidence, path: Path | None = None) -> str:
     elif evidence.unapproved:
         lines.append("NOT ACCEPTED: the approved commands passed, but this branch changes "
                      + ", ".join(evidence.unapproved) + "; that change was not verified.")
+    elif evidence.pending:
+        verb = "is" if len(evidence.pending) == 1 else "are"
+        lines.append(f"OK, PENDING APPROVAL: every approved command passed; "
+                     f"{pending_text(evidence)} {verb} introduced by this branch, approved "
+                     "by the merge, and run on the default branch at close-out (S12).")
     else:
         lines.append("OK: every configured command passed.")
     return "\n".join(lines)
+
+
+def pending_text(evidence: Evidence) -> str:
+    """``commands.test`` / ``commands.build and commands.test``: the pending commands."""
+    names = [f"commands.{name}" for name in evidence.pending]
+    return (", ".join(names[:-1]) + " and " + names[-1]) if len(names) > 1 else "".join(names)
 
 
 def render_check(evidence: Evidence, problems: list[str]) -> str:
     lines = [f"Evidence for #{evidence.issue} on {evidence.branch} @ {evidence.sha[:7]}: "
              f"{headline(evidence)}"]
     lines += [f"  problem: {p}" for p in problems]
-    lines.append("REJECTED: the evidence cannot be used for this story as it is now."
-                 if problems else "OK: the evidence is for the branch head and every "
-                                  "configured command passed.")
+    if problems:
+        lines.append("REJECTED: the evidence cannot be used for this story as it is now.")
+    else:
+        lines.append("OK: the evidence is for the branch head and every configured command "
+                     "passed." + (f" Pending until the merge: {pending_text(evidence)}."
+                                  if evidence.pending else ""))
     return "\n".join(lines)

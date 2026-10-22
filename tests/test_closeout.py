@@ -11,11 +11,13 @@ import re
 import unittest
 from unittest import mock
 
-from factory import cli, closeout, target
+from factory import cli, closeout, evidence, target
 from factory import state as st
+from factory.comments import compose
 from factory.gh import Gh, ProcessResult
-from factory.markers import PrMarker, StoryMarker, build
+from factory.markers import CheckpointMarker, PrMarker, StoryMarker, build
 from factory.pick import parse_issues
+from tests import test_evidence as te
 from tests import test_state as ts
 
 REPO = "owner/app"
@@ -45,6 +47,7 @@ class FakeGitHub:
     def __init__(self, issues, prs):
         self.issues = {i["number"]: i for i in issues}
         self.prs = prs
+        self.comments: dict[int, list[dict]] = {}
         self.writes: list[tuple[str, str]] = []
 
     def __call__(self, argv, *, timeout, cwd=None, env=None, input=None):
@@ -73,6 +76,8 @@ class FakeGitHub:
                 name = m[2].replace("%3A", ":")
                 issue["labels"] = [x for x in issue["labels"] if x["name"] != name]
             return self.ok(issue["labels"])
+        if m := re.fullmatch(rf"repos/{REPO}/issues/(\d+)/comments", endpoint):
+            return self.ok([self.comments.get(int(m[1]), [])])
         raise AssertionError(f"unexpected call {args}")
 
     @staticmethod
@@ -227,7 +232,7 @@ class GitHubTest(unittest.TestCase):
             "merge_sha": "b" * 40, "merged_at": MERGED_AT,
             "unblocked": [{"number": 3, "story": "STORY-002", "title": "STORY-002: story 2"}],
             "increment": "001-initial", "increment_complete": False, "remaining": [3, 4],
-            "next_step": closeout.CONTINUE})
+            "next_step": closeout.CONTINUE, "verify_after_merge": None})
 
     def test_finish_closes_the_issue_first_and_sets_done_last(self):
         fake = repo_after_merge(issue_state="open")  # the PR had no "Closes #2"
@@ -257,6 +262,58 @@ class GitHubTest(unittest.TestCase):
             closeout.finish(Gh(transport=fake), REPO, 2)
         self.assertEqual(fake.writes, [])
         self.assertEqual(fake.labels(2), {"factory:story", "status:in-review"})
+
+
+def recorded(branch, *, approved, on_branch, runner=None):
+    """Evidence of a `verify run` on ``branch``: ``approved`` commands on origin/main,
+    ``on_branch`` in the working tree."""
+    result, _ = te.run(approved=approved, branch=on_branch, runner=runner,
+                       repo=te.FakeGitRepo(branch=branch, approved=approved))
+    return result
+
+
+SKELETON = te.COMMANDS
+NOTHING = dict.fromkeys(te.COMMANDS)
+
+
+class AfterMergeTest(unittest.TestCase):
+    """T6.5 (B-01): commands a story introduced run on the default branch at close-out."""
+
+    def test_a_story_that_introduced_commands_must_run_them(self):
+        ev = recorded("story/2-x", approved=NOTHING, on_branch=SKELETON)
+        self.assertEqual(closeout.after_merge(ev, "story/2-x"),
+                         "commands.install, commands.build, commands.typecheck and "
+                         "commands.test were introduced by the story's PR and approved by "
+                         "the merge, and have not run yet")
+
+    def test_a_failed_run_on_the_default_branch_is_asked_for_again(self):
+        ev = recorded("main", approved=SKELETON, on_branch="same",
+                      runner=te.FakeRunner({"npm test": (1, "1 failed\n")}))
+        self.assertEqual(closeout.after_merge(ev, "story/2-x"),
+                         "the last run on main failed: commands.test failed (exit 1)")
+
+    def test_nothing_to_do(self):
+        cases = {"no evidence": (None, "story/2-x"),
+                 "the story's commands were approved": (
+                     recorded("story/2-x", approved=SKELETON, on_branch="same"), "story/2-x"),
+                 "the run on main passed": (
+                     recorded("main", approved=SKELETON, on_branch="same"), "story/2-x")}
+        for name, (ev, branch) in cases.items():
+            with self.subTest(name):
+                self.assertIsNone(closeout.after_merge(ev, branch))
+
+    def test_inspect_reads_the_checkpoint_evidence(self):
+        fake = repo_after_merge()
+        ev = recorded("story/2-x", approved={**SKELETON, "test": None}, on_branch=SKELETON)
+        fake.comments[2] = [{"id": 1, "body": compose(
+            CheckpointMarker("S11", "GATE_B", "story/2-x", "a" * 40, 0, 0,
+                             "2026-10-22T10:00:00+00:00"),
+            "note\n\n" + evidence.to_block(ev))}]
+        result = closeout.inspect(Gh(transport=fake), REPO, 2)
+        self.assertEqual(result.verify_after_merge, "commands.test was introduced by the "
+                         "story's PR and approved by the merge, and has not run yet")
+        self.assertIn("run `verify run` on the default branch first: commands.test was",
+                      closeout.render(result))
 
 
 class CliTest(unittest.TestCase):

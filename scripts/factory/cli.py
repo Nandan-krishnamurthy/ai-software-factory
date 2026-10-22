@@ -32,6 +32,7 @@ from factory.config import load_config
 from factory.errors import FactoryError
 from factory.gh import Gh
 from factory.git import Git
+from factory.markers import PrMarker, find
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -156,8 +157,11 @@ def build_parser() -> argparse.ArgumentParser:
         description="Without an action, idempotent (T4.4): edits the open PR whose head is "
                     "--head, or creates it if there is none (--head, --title and "
                     "--body-file are then required). The body must carry its factory:pr "
-                    "or factory:planning marker. Never merges. The actions `render` and "
-                    "`check` build and verify a story PR's body from the recorded facts.")
+                    "or factory:planning marker. A story PR's body (factory:pr) must be "
+                    "exactly what `pr render` makes from the recorded facts, apart from "
+                    "its Summary, Risks and Follow-ups; any other difference is refused "
+                    "(rule H1). Never merges. The actions `render` and `check` build and "
+                    "verify a story PR's body from the recorded facts.")
     pr_parser.add_argument("--head", metavar="BRANCH")
     pr_parser.add_argument("--title")
     pr_parser.add_argument("--body-file", metavar="F", help="UTF-8 file with the PR body")
@@ -180,7 +184,9 @@ def build_parser() -> argparse.ArgumentParser:
                     "(rule S9). Only Summary, Risks and Follow-ups come from --notes. Refuses "
                     "evidence that is not for the branch head. Exit 0: every gate passed "
                     "and every changed test and dependency is declared. Exit 1: otherwise "
-                    "(the body is still written, stating the failures). Read-only on "
+                    "(the body is still written, stating the failures). With --stuck, the "
+                    "body of a stuck story's draft PR (rule H2): it may have no AC verifier "
+                    "lines, and exit 0 means only that the body was written. Read-only on "
                     "GitHub.")
     prender.add_argument("--issue", type=_positive_int, required=True, metavar="N")
     prender.add_argument("--notes", required=True, metavar="F",
@@ -188,6 +194,9 @@ def build_parser() -> argparse.ArgumentParser:
                               "## Risks and ## Follow-ups")
     prender.add_argument("--out", metavar="F",
                          help="where to write the body (default: <temp dir>/pr-<N>.md)")
+    prender.add_argument("--stuck", action="store_true",
+                         help="the stuck story's draft PR: no verdict needed, and the "
+                              "failures it states do not change the exit status")
     prender.add_argument("--json", action="store_true", help="machine-readable output")
     pcheck = pr_sub.add_parser(
         "check", help="check an open story PR's body against a fresh render",
@@ -602,6 +611,20 @@ def _pr(args: argparse.Namespace) -> int:
         body = Path(args.body_file).read_text(encoding="utf-8")
     except OSError as err:
         raise ensure.EnsureError(f"cannot read --body-file {args.body_file}: {err}") from None
+    if find(body, PrMarker) is not None:
+        # A story PR's facts come from the factory's code, never from hand-written text
+        # (rule H1, T6.5): the body must be `pr render`'s, apart from the model sections.
+        differences = prbody.unrendered(Gh(), Git(args.target.path), args.target.repo,
+                                        args.head, body, stuck=args.draft)
+        if differences:
+            shown = "\n".join(f"  {line}" for line in differences[:10])
+            more = (f"\n  … and {len(differences) - 10} more" if len(differences) > 10
+                    else "")
+            raise ensure.EnsureError(
+                "the story PR body is not the factory's render of the recorded facts; "
+                "publish the file `pr render` wrote, changing only Summary, Risks and "
+                f"Follow-ups (through --notes). Lines that differ (- render, + body):\n"
+                f"{shown}{more}")
     result = ensure.ensure_pr(Gh(), args.target.repo, head=args.head, base=_base_branch(args),
                               title=args.title, body=body, draft=args.draft,
                               labels=tuple(args.label))
@@ -620,7 +643,8 @@ def _pr_render(args: argparse.Namespace) -> int:
     except OSError as err:
         raise prbody.PrBodyError(f"cannot read --notes {args.notes}: {err}") from None
     sections = prbody.parse_notes(notes)
-    facts = prbody.collect(Gh(), Git(args.target.path), args.target.repo, args.issue)
+    facts = prbody.collect(Gh(), Git(args.target.path), args.target.repo, args.issue,
+                           stuck=args.stuck)
     rendered = prbody.render(facts, sections)
     out = prbody.write(rendered, Path(args.out) if args.out else
                        prbody.default_path(args.issue))
@@ -633,7 +657,7 @@ def _pr_render(args: argparse.Namespace) -> int:
             indent=2, ensure_ascii=False))
     else:
         _print_safe(prbody.report(rendered, args.issue, out))
-    return 1 if rendered.problems else 0
+    return 1 if rendered.problems and not args.stuck else 0
 
 
 def _pr_check(args: argparse.Namespace) -> int:
@@ -697,7 +721,8 @@ def _verdict_check(args: argparse.Namespace) -> int:
     result.problems += verdict.cross_check(
         result, mapping, issue=args.issue,
         evidence_sha=recorded.sha if recorded is not None else None,
-        checkpoint_branch=found[1].branch if found is not None else None, branch_head=head)
+        checkpoint_branch=found[1].branch if found is not None else None, branch_head=head,
+        test_pending=recorded is not None and "test" in recorded.pending)
     _print_safe(verdict.render(result, mapping))
     return 0 if result.ok else 1
 

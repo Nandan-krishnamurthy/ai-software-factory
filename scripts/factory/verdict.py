@@ -28,6 +28,11 @@ for the branch head on ``origin``. Then:
 * a ``not-verifiable`` may not hide a mapped test that failed;
 * an AC with no test in the diff must be ``not-verifiable`` with ``manual steps: …``.
 
+When ``commands.test`` is **pending** (introduced by the branch, so the factory has not run
+it; T6.5), there is no recorded result to hold a ``pass`` against. A ``pass`` then needs a
+test named after the AC in the diff, and the PR says the results are the verifier's
+alone until S12 runs the commands after the merge.
+
 Parsing is pure and never raises on input text; problems are returned as strings.
 """
 
@@ -161,13 +166,14 @@ def checkpoint_note(gh: Gh, repo: str, number: int, body: str | None = None) -> 
 
 def cross_check(verdict: Verdict, acmap: AcMap | None, *, issue: int,
                 evidence_sha: str | None, checkpoint_branch: str | None,
-                branch_head: str | None) -> list[str]:
+                branch_head: str | None, test_pending: bool = False) -> list[str]:
     """Why the verdict cannot stand against the AC-to-test map of the recorded run; empty
     if it agrees. Every problem makes the verdict INVALID.
 
     ``acmap`` and ``evidence_sha`` come from the checkpoint (``None``: none stored),
     ``checkpoint_branch`` from its marker, and ``branch_head`` is the head of the map's
-    branch on ``origin`` (``None``: not there)."""
+    branch on ``origin`` (``None``: not there). ``test_pending``: the evidence records
+    ``commands.test`` as pending, so no test has a recorded result."""
     if acmap is None:
         return ["no AC-to-test map is stored in the checkpoint; the verdict cannot be "
                 "checked against the recorded tests: run `verify run`, then `verify map`"]
@@ -200,7 +206,11 @@ def cross_check(verdict: Verdict, acmap: AcMap | None, *, issue: int,
         m = acmap.status(a.number)
         if m is None:
             continue
-        if a.verdict == "pass" and m.status != "passed":
+        if a.verdict == "pass" and test_pending:
+            if not m.tests:
+                problems.append(f"AC{a.number}: the verifier says pass, but no test is named "
+                                f"`#{issue} AC{a.number}` in the branch diff")
+        elif a.verdict == "pass" and m.status != "passed":
             problems.append(f"AC{a.number}: the verifier says pass, but {_why(m, issue)}")
         elif not m.tests and a.verdict != "not-verifiable":
             problems.append(f"AC{a.number}: no test is named `#{issue} AC{a.number}` in the "

@@ -71,6 +71,8 @@ This starts **one** story: picks the next unblocked issue, creates its branch, i
 
 While a story PR is at Gate B, `/factory-status` also shows the latest evidence the factory recorded for it (each quality command's result, and whether it is for the PR's head) and the AC verifier's verdict.
 
+Every result in a story PR comes from the factory's own run of the quality commands (`verify run`), never from text the model wrote. The factory runs only the commands on the default branch, which only your merges change. A new project's first story (the walking skeleton) sets those commands up, so its PR shows them as **Not run**: your merge approves them, and close-out runs them on the default branch before the story is marked done.
+
 After you merge the last story of an increment, the close-out summary says the increment is complete and to run `/factory-start` with new requirements. After any other story it says to continue.
 
 ### Tracing a line back to its requirement

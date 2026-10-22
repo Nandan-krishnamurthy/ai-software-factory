@@ -27,7 +27,7 @@ import unittest
 from dataclasses import dataclass
 from pathlib import Path
 
-from factory import cli, guard, state
+from factory import cli, evidence, guard, prbody, state
 from tests import REPO_ROOT
 
 STATIONS_DIR = REPO_ROOT / "stations"
@@ -75,6 +75,19 @@ PLACEHOLDERS = {"<T>": "/work/target", "<R>": "owner/app", "<D>": "main",
                 "<I>": "12", "<B>": "story/12-add-task", "<P>": "21"}
 # The story loop built by T3.3, S06 (pick) to S11 (PR), ending at Gate B.
 STORY_STATIONS = ("S06", "S07", "S08", "S09", "S10", "S11")
+# T6.5: S09-S11 run the verification engine; the model writes no gate result, test result
+# or PR body fact itself (rule H1). Each pattern is a way a station could ask it to.
+VERIFICATION_STATIONS = ("S09", "S10", "S11")
+HAND_WRITTEN = [
+    (r"\{\{", "fills a template placeholder by hand"),
+    (r"templates/pr\.md", "fills the PR template by hand instead of `pr render`"),
+    (r"(?i)\bresult lines?\b", "keeps a command's result line by hand"),
+    (r"(?i)every gate shows", "writes gate results by hand"),
+    (r"Skipped: commands\.", "writes a gate's wording by hand"),
+    (r"(?i)\b(?:run|re-run)\b[^\n]*?`commands\.(?:build|lint|typecheck|test)`",
+     "runs a configured command by hand instead of `verify run`"),
+    (r"(?i)\bthe full commands\b", "runs the quality commands by hand"),
+]
 _SPAN = re.compile(r"`([^`\n]+)`")
 
 
@@ -608,33 +621,52 @@ class StoryStationsTest(unittest.TestCase):
         self.assertIn("--station S12 --next GATE_C --branch <B> --sha <merge_sha>",
                       self.section("S12", "Checkpoint"))
 
-    def test_s11_brings_the_branch_up_to_date_and_re_tests_before_the_pr(self):
+    def test_s11_brings_the_branch_up_to_date_and_sends_it_back_to_s09(self):
+        # T6.5 (B-06): new <D> commits change the code, so S09 and S10 run again, rather
+        # than S11 re-running the commands by hand.
         steps = self.section("S11", "Steps")
         self.assertIn("git -C <T> rev-list --count <B>..origin/<D>", steps)
         self.assertIn("git -C <T> pull --no-rebase --no-edit origin <D>", steps)
-        self.assertIn("run the full commands again", steps)
-        self.assertLess(steps.index("pull --no-rebase"),
-                        steps.index("python scripts/factory.py pr --head <B>"))
+        back = steps.index("--station S11 --next S09 --branch <B>")
+        self.assertLess(steps.index("pull --no-rebase"), back)
+        self.assertLess(back, steps.index("python scripts/factory.py pr --head <B>"))
 
-    def test_s11_pr_follows_the_template_and_copies_the_verdict_unchanged(self):
+    def test_s11_publishes_the_render_and_copies_the_verdict_unchanged(self):
+        # T6.5: the body is `pr render`'s (the verdict lines copied unchanged by the code),
+        # published as written and confirmed by `pr check`.
         steps = self.section("S11", "Steps")
-        self.assertIn("templates/pr.md", steps)
-        self.assertIn("**copied unchanged** (rule H5)", steps)
-        self.assertIn("`<!-- factory:pr story=<STORY-###> -->`", steps)
-        self.assertIn('python scripts/factory.py pr --head <B> --title "[#<I>] <story title>"',
-                      steps)
-        self.assertIn('--title "[#<I>] <story title>"', steps)
-        self.assertIn("every heading of `templates/pr.md` in order, no `{{`",
+        order = ["python scripts/factory.py pr render --issue <I> --notes "
+                 "<SCRATCH>/notes-<I>.md --out <SCRATCH>/pr-<I>.md",
+                 'python scripts/factory.py pr --head <B> --title "[#<I>] <story title>" '
+                 "--body-file <SCRATCH>/pr-<I>.md --json",
+                 "docs/factory/traceability.md",
+                 "python scripts/factory.py verify run --issue <I>",
+                 "python scripts/factory.py verify map --issue <I>",
+                 "python scripts/factory.py pr check <P>"]
+        positions = [steps.index(text) for text in order]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn("exactly as written", steps)
+        self.assertIn("`python scripts/factory.py pr check <P>` exits 0",
                       self.section("S11", "Done check"))
-        # The verdict S10 stored is what S11 copies: it is on GitHub, not in the session.
+        self.assertIn("copied unchanged (rule H5)", self.section("S11", "Purpose"))
+        # The verdict S10 stored is what the render copies: it is on GitHub, not in the session.
         self.assertIn("--body-file <SCRATCH>/verdict-<I>.md", self.section("S10", "Checkpoint"))
 
-    def test_skipped_gate_wording_matches_the_template_contract(self):
+    def test_skipped_gate_wording_is_the_engines(self):
+        # T6.5: the stations no longer write gate results, so the template contract's
+        # wording for a null command is what `pr render` produces.
         readme = (REPO_ROOT / "templates" / "README.md").read_text(encoding="utf-8")
         self.assertIn("`Skipped: commands.<name> is null`", readme)
+        recorded = evidence.Evidence(
+            issue=1, repo="o/r", branch="story/1-x", sha="1" * 40, started_at="",
+            finished_at="", sha_after="1" * 40, commands=[
+                evidence.CommandEvidence(name, None, "skipped")
+                for name in evidence.VERIFY_COMMANDS])
+        gate = prbody._command_gate("gate_build", "Q1 Build", recorded, "build")
+        self.assertEqual(gate.value, "Skipped: commands.build is null")
         for sid in ("S09", "S11"):
             with self.subTest(station=sid):
-                self.assertIn("`Skipped: commands.<name> is null`", self.by_id[sid].text)
+                self.assertNotIn("Skipped: commands.", self.by_id[sid].text)
 
     def test_s11_updates_traceability_and_moves_the_label(self):
         self.assertIn("docs/factory/traceability.md", self.section("S11", "Outputs"))
@@ -646,6 +678,78 @@ class StoryStationsTest(unittest.TestCase):
         self.assertIn("`ac-verifier` subagent", s10)
         self.assertIn(".claude/agents/ac-verifier.md", s10)
         self.assertIn("never verify your own work", self.section("S10", "Preconditions"))
+
+
+def hand_written_results(text: str) -> list[str]:
+    """Why a station's text asks the model to run the quality commands or write gate
+    results itself (rule H1, T6.5); empty if it leaves both to the engine."""
+    return [f"{why}: {m[0]!r}" for pattern, why in HAND_WRITTEN
+            for m in [re.search(pattern, text)] if m]
+
+
+class VerificationEngineTest(unittest.TestCase):
+    """T6.5: S09-S11 use the verification engine, and contain no hand-written gate results."""
+
+    def setUp(self):
+        self.by_id = {s.id: s for s in load_stations()}
+
+    def steps(self, sid):
+        return self.by_id[sid].sections["Steps"]
+
+    def test_no_station_has_the_model_write_results(self):
+        for sid in VERIFICATION_STATIONS:
+            with self.subTest(station=sid):
+                self.assertEqual(hand_written_results(self.by_id[sid].text), [])
+
+    def test_the_lint_catches_the_hand_written_forms(self):
+        # Lines from S09 and S11 as they were before T6.5.
+        for text in ("Fill [`templates/pr.md`](../templates/pr.md) into `<SCRATCH>/pr-<I>.md` "
+                     "**honestly**: every gate shows its real result",
+                     "Run, from inside `<T>`, each non-`null` command from "
+                     "`.factory/config.json`: `commands.build`, then `commands.test`",
+                     "Keep the exact result line of each",
+                     "A `null` command is **skipped**: write `Skipped: commands.<name> is null`",
+                     "Then run the full commands again (build, lint, typecheck)",
+                     "`{{test_command}}` and `{{test_result}}`: the real full-suite command"):
+            with self.subTest(text=text[:40]):
+                self.assertTrue(hand_written_results(text))
+
+    def test_s09_commits_then_runs_the_commands_through_the_factory(self):
+        steps = self.steps("S09")
+        run = steps.index("python scripts/factory.py verify run --issue <I>")
+        self.assertLess(steps.index("Commit and push the tests"), run)
+        self.assertIn("nothing is committed after them", steps)
+        self.assertIn("python scripts/factory.py verify check --issue <I>` exits 0",
+                      self.by_id["S09"].sections["Done check"])
+
+    def test_the_stuck_draft_pr_is_rendered(self):
+        stuck = self.by_id["S09"].sections["Stop conditions"]
+        order = ["python scripts/factory.py verify map --issue <I>",
+                 "python scripts/factory.py pr render --issue <I> --notes "
+                 "<SCRATCH>/notes-<I>.md --stuck --out <SCRATCH>/pr-<I>.md",
+                 'python scripts/factory.py pr --head <B> --title "[#<I>] <story title>" '
+                 "--body-file <SCRATCH>/pr-<I>.md --draft"]
+        positions = [stuck.index(text) for text in order]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn("Stuck", self.steps("S10"))
+
+    def test_s10_maps_the_run_before_the_verifier(self):
+        steps = self.steps("S10")
+        self.assertLess(steps.index("python scripts/factory.py verify map --issue <I>"),
+                        steps.index("Start the `ac-verifier` subagent"))
+        self.assertLess(steps.index("Start the `ac-verifier` subagent"),
+                        steps.index("python scripts/factory.py verdict check --issue <I>"))
+        self.assertIn("python scripts/factory.py verify check --issue <I>` exits 0",
+                      self.by_id["S10"].sections["Preconditions"])
+
+    def test_s12_runs_the_commands_a_story_introduced_before_it_is_done(self):
+        # B-01: the walking skeleton's commands are approved by the merge and run then.
+        steps = self.by_id["S12"].sections["Steps"]
+        run = steps.index("python scripts/factory.py verify run --issue <I>")
+        self.assertLess(steps.index("git -C <T> switch <D>"), run)
+        self.assertLess(run, steps.index("python scripts/factory.py closeout --issue <I> "
+                                         "--finish"))
+        self.assertIn("verify_after_merge", steps)
 
 
 class LintCatchesProblemsTest(unittest.TestCase):

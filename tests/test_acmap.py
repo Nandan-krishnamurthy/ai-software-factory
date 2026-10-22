@@ -292,6 +292,33 @@ class RequiredMapTest(unittest.TestCase):
                       "stop", s10)
 
 
+class PendingTestCommandTest(unittest.TestCase):
+    """T6.5 (B-01): ``commands.test`` introduced by the branch, so no run was recorded."""
+
+    def test_without_a_recorded_run_a_pass_needs_its_named_test(self):
+        result = build(27, output="")
+        self.assertEqual(set(statuses(result).values()), {"missing"})
+        text = fixture("27.verdict.md")
+        self.assertTrue(check(text, result).problems)  # an approved command must have run
+        self.assertEqual(check(text, result, test_pending=True).problems, [])
+
+    def test_a_pass_without_a_test_named_after_its_ac_is_still_refused(self):
+        result = build(27, diff=without(27, 3, fixture("27.diff")), output="")
+        self.assertEqual(check(fixture("27.verdict.md"), result, test_pending=True).problems,
+                         ["AC3: the verifier says pass, but no test is named `#27 AC3` in "
+                          "the branch diff"])
+
+    def test_the_other_rules_still_hold(self):
+        result = build(27, diff=without(27, 3, fixture("27.diff")), output="")
+        text = fixture("27.verdict.md").replace(
+            next(line for line in fixture("27.verdict.md").splitlines()
+                 if line.startswith("- [x] AC3")),
+            "- [ ] AC3 — not-verifiable — reason: hard to automate")
+        self.assertIn("AC3: it has no test, so not-verifiable needs written `manual steps: "
+                      "…`, not only a reason",
+                      check(text, result, test_pending=True).problems)
+
+
 # ----------------------------------------------------------------------------- parts
 
 
