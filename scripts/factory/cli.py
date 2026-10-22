@@ -743,7 +743,7 @@ def _verify_run(args: argparse.Namespace) -> int:
     comments.set_checkpoint_evidence(gh, repo, args.issue, evidence.to_block(result))
     _print_safe(json.dumps(result.to_dict(), indent=2) if args.json
                 else evidence.render(result, out))
-    return 1 if result.failures() or result.unapproved else 0
+    return 1 if result.failures() or result.unapproved or result.report_problems() else 0
 
 
 def _recorded_evidence(gh: Gh, repo: str, issue: int, file: str | None
@@ -780,7 +780,9 @@ def _verify_map(args: argparse.Namespace) -> int:
     # Only the checkpoint's evidence, which only `verify run` writes, is trusted; the local
     # files beside the default evidence path are used only if their hashes match it.
     recorded, expected_branch = _recorded_evidence(gh, repo, args.issue, None)
-    failures = set(recorded.failures())
+    # A failed command or a missing configured report still maps: without results, a test
+    # can only be missing, never passed.
+    failures = set(recorded.failures()) | set(recorded.report_problems())
     unusable = [p for p in evidence.check(recorded, issue=args.issue,
                                           branch_head=evidence.remote_head(git, recorded.branch),
                                           expected_branch=expected_branch)

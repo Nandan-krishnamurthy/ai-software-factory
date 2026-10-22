@@ -30,7 +30,7 @@ Write the tests for the story's acceptance criteria, commit them, and have the f
    - `OK`: every command passed. Go to step 6.
    - `OK, PENDING APPROVAL`: every approved command passed, and this story introduces commands of its own (the walking skeleton sets the project's commands, see [S08](S08-implement.md)). They are not run until the human merges the PR; close-out (S12) runs them then. Go to step 6.
    - `FAILING`: go to step 5.
-   - `NOT ACCEPTED`: this branch changes or removes an approved command. Approved commands change only through a merged PR: stop and ask (rule H6).
+   - `NOT ACCEPTED`: this branch changes or removes an approved command, or the tests passed without writing a fresh, readable report that the approved config's `test_reports` lists. Approved commands and reports change only through a merged PR: stop and ask (rule H6).
    - An `error:` (for example a command the guard refuses): report it exactly and stop.
 5. **If a command failed:**
    - Let `k` be the checkpoint's `fix_attempts` plus 1.

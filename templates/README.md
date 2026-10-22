@@ -32,6 +32,8 @@ The **marker** lines (`<!-- factory:… -->`, architecture §5.5) must be kept e
 
 All `commands` start as `null`. S01 fills in the ones it finds; the factory never guesses a command (rule H4). A command left `null` means that quality gate is skipped, and the PR says so.
 
+The template has no `test_reports`. It is optional (architecture §5.3, B-26): a reviewed change to the target adds it when the test command writes a structured report, which `verify map` needs when the runner's terminal output does not name the tests that passed.
+
 ### `story.md`
 The issue **title** is `{{story_id}}: <story title>`.
 

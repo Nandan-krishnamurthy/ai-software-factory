@@ -151,6 +151,49 @@ class ValidConfigTest(unittest.TestCase):
                 parse_config(data)
 
 
+class TestReportsConfigTest(unittest.TestCase):
+    """B-26: ``test_reports``, the structured reports `verify run` captures."""
+
+    def test_optional_and_kept_in_order(self):
+        self.assertEqual(parse_config(MINIMAL).test_reports, ())
+        self.assertEqual(parse_config({**MINIMAL, "test_reports": None}).test_reports, ())
+        reports = ["test-results/unit.json", "reports/e2e.junit.xml"]
+        self.assertEqual(parse_config({**MINIMAL, "test_reports": reports}).test_reports,
+                         tuple(reports))
+
+    def test_unsafe_or_malformed_paths_are_rejected(self):
+        cases = {
+            "an absolute path": ("/tmp/unit.json", "must be relative to the target"),
+            "a Windows drive": ("C:/reports/unit.json", "must be relative to the target"),
+            "a backslash": ("test-results\\unit.json", "must use forward slashes"),
+            "a parent segment": ("../unit.json", "'..' segments"),
+            "a parent inside": ("reports/../../unit.json", "'..' segments"),
+            "a dot segment": ("./unit.json", "'..' segments"),
+            "a doubled slash": ("reports//unit.json", "'..' segments"),
+            "a trailing slash": ("reports/", "'..' segments"),
+            "a NUL": ("unit\x00.json", "':' or control characters"),
+            "a newline": ("unit\n.json", "':' or control characters"),
+            "an NTFS stream": ("unit.json:stream", "':' or control characters"),
+            "inside .git": (".git/unit.json", "must not be inside .git"),
+            "inside .GIT, any case": ("sub/.GIT/x.json", "must not be inside .git"),
+            "empty": ("", "non-empty path"),
+            "surrounding spaces": (" unit.json", "non-empty path"),
+            "not a string": (5, "non-empty path"),
+        }
+        for name, (report, expected) in cases.items():
+            with self.subTest(name), self.assertRaises(ConfigError) as ctx:
+                parse_config({**MINIMAL, "test_reports": [report]})
+            self.assertIn(expected, "\n".join(ctx.exception.problems))
+
+    def test_the_list_itself_is_checked(self):
+        for value, expected in (("unit.json", "must be a list"),
+                                (["a.json", "a.json"], "listed twice"),
+                                ([f"r{n}.json" for n in range(11)], "at most 10")):
+            with self.subTest(value=value), self.assertRaises(ConfigError) as ctx:
+                parse_config({**MINIMAL, "test_reports": value})
+            self.assertIn(expected, "\n".join(ctx.exception.problems))
+
+
 class InvalidConfigTest(unittest.TestCase):
     def test_invalid_configs_are_rejected_with_reason(self):
         for name, data, expected in INVALID:

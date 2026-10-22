@@ -51,10 +51,24 @@ so ``verify map`` can find every test's result and prove the file is the one tha
 ``--report PATH`` names a JUnit or JSON report the target's test command already writes:
 it is copied beside the evidence (``evidence-<N>.report<k>.<ext>``) with its SHA-256, but
 only if the run created or changed it, so a file written beforehand never counts.
+
+**Configured reports (B-26).** Some runners print no passing test by name (Vitest's
+default and ``minimal`` reporters), so ``verify map`` needs their structured report. The
+reports listed in ``test_reports`` of the **approved** config are captured on every run
+without ``--report``; a ``test_reports`` entry that only the story branch adds is never
+read, the same trust boundary as the commands. A captured report must also parse as a
+report ``verify map`` reads; otherwise it is ``unreadable`` and is not used. When
+``commands.test`` passed but a configured report was not captured (missing, unchanged,
+unreadable, too large, or redirected outside its checked path by a link the run made),
+the evidence is not accepted: ``verify check`` rejects it and
+``verify run`` exits 1, so a missing report can never leave its tests looking unrun
+while the story goes on. When the test command failed, or is pending, nothing more is
+reported.
 """
 
 import hashlib
 import json
+import os
 import re
 import tempfile
 import time
@@ -120,7 +134,9 @@ class Evidence:
     # Not run; approved by the merge (T6.5).
     pending: dict[str, str] = field(default_factory=dict)
     tails_omitted: bool = False
-    # Test reports the run wrote (``--report``): {"path", "status", "sha256", "bytes"}.
+    # Test reports the run wrote: {"path", "status", "sha256", "bytes", "configured"}, plus
+    # "detail" for an unreadable one. "configured": listed in the approved test_reports
+    # (B-26), rather than named by --report.
     reports: list[dict] = field(default_factory=list)
     schema: int = SCHEMA
     # Local only, never in the JSON or the note: the full outputs by command name, and the
@@ -132,6 +148,19 @@ class Evidence:
         """One line per command that did not pass (a skipped command is not a failure)."""
         return [f"commands.{c.name} {_describe(c)}" for c in self.commands
                 if c.status not in ("pass", "skipped")]
+
+    def report_problems(self) -> list[str]:
+        """One line per configured test report that a passing test command did not leave
+        behind as a fresh, readable report (B-26). Empty when the test command did not pass:
+        its failure, or its pending state, is the problem then."""
+        test = self.command("test")
+        if test is None or test.status != "pass":
+            return []
+        return [f"the configured test report {r.get('path')} was not captured: "
+                f"{r.get('status')}" + (f" ({r['detail']})" if r.get("detail") else "")
+                + "; check the test command's reporter configuration"
+                for r in self.reports
+                if r.get("configured") and r.get("status") != "captured"]
 
     def command(self, name: str) -> CommandEvidence | None:
         return next((c for c in self.commands if c.name == name), None)
@@ -160,9 +189,9 @@ def run_verification(
 ) -> Evidence:
     """Run the approved quality commands on the target's current commit and record the
     results. Nothing runs if any check before the run fails. ``reports``: paths, relative
-    to the target, of test reports the commands write; each is captured only if the run
-    created or changed it."""
-    report_paths = [_report_path(target_path, r) for r in reports]
+    to the target, of test reports the commands write, besides the approved config's
+    ``test_reports``; each is captured only if the run created or changed it."""
+    extra_paths = [_report_path(target_path, r) for r in reports]
     dirty = _status_lines(git)
     if dirty:
         raise EvidenceError("the target has uncommitted changes, so the evidence could not "
@@ -175,7 +204,12 @@ def run_verification(
         sha = git.rev_parse("HEAD")
     except GitError:
         raise EvidenceError("the target has no commits") from None
-    commands, source = approved_commands(git)
+    config, source = approved_config(git)
+    commands = {name: config.commands.get(name) for name in COMMAND_NAMES}
+    # Only the approved config names the reports to trust (B-26); the branch's are not read.
+    configured = [_report_path(target_path, r, "test_reports entry")
+                  for r in config.test_reports]
+    report_paths = list({rel: (rel, full) for rel, full in configured + extra_paths}.values())
     unapproved = unapproved_changes(target_path, commands)
     pending = introduced_commands(target_path, commands)
     checked = [(name, commands.get(name), "") for name in VERIFY_COMMANDS]
@@ -198,7 +232,8 @@ def run_verification(
     outputs: dict[str, str] = {}
     results = [_run_one(name, commands.get(name), target_path, runner, timeout, clock,
                         outputs) for name in VERIFY_COMMANDS]
-    captured, report_data = _capture_reports(report_paths, before)
+    captured, report_data = _capture_reports(report_paths, before,
+                                             {rel for rel, _ in configured})
     return Evidence(
         issue=issue, repo=repo, branch=branch, sha=sha,
         started_at=started.isoformat(timespec="seconds"),
@@ -209,15 +244,17 @@ def run_verification(
     )
 
 
-def _report_path(target_path: Path, rel: str) -> tuple[str, Path]:
-    """A ``--report`` path: relative, inside the target, and not ``.git``."""
+def _report_path(target_path: Path, rel: str, what: str = "--report") -> tuple[str, Path]:
+    """A report path: relative, inside the target (symlinks resolved), and not ``.git``."""
     path = Path(rel)
     if not rel.strip() or path.is_absolute() or path.drive:
-        raise EvidenceError(f"--report {rel!r} must be a path relative to the target")
+        raise EvidenceError(f"{what} {rel!r} must be a path relative to the target; "
+                            "nothing was run")
     root = target_path.resolve()
     full = (root / path).resolve()
     if full == root or root not in full.parents or ".git" in full.relative_to(root).parts:
-        raise EvidenceError(f"--report {rel!r} is not a file inside the target")
+        raise EvidenceError(f"{what} {rel!r} is not a file inside the target; nothing was "
+                            "run")
     return full.relative_to(root).as_posix(), full
 
 
@@ -228,14 +265,27 @@ def _digest_file(path: Path) -> str | None:
         return None
 
 
-def _capture_reports(paths: list[tuple[str, Path]], before: dict[str, str | None]
+def _capture_reports(paths: list[tuple[str, Path]], before: dict[str, str | None],
+                     configured: frozenset[str] | set[str] = frozenset()
                      ) -> tuple[list[dict], dict[str, bytes]]:
     """Each report as the run left it. Only a file the run created or changed is
     ``captured``; one it left as it was is ``unchanged``, so a report written before the
-    run (by anyone) is never taken for the run's."""
+    run (by anyone) is never taken for the run's. A changed file that is no report
+    ``verify map`` reads is ``unreadable``, and one whose path the run redirected through
+    a link is ``redirected``; neither is read into the evidence."""
+    from factory.acmap import AcMapError, report_cases  # lazily: acmap imports this module
+
     captured, data = [], {}
     for rel, path in paths:
-        entry: dict = {"path": rel, "status": "missing", "sha256": None, "bytes": None}
+        entry: dict = {"path": rel, "status": "missing", "sha256": None, "bytes": None,
+                       "configured": rel in configured}
+        # ``path`` was resolved inside the target before the run. The commands may have
+        # put a link in its way since (a folder replaced by a symlink or junction): read
+        # nothing that no longer resolves to the same place.
+        if os.path.normcase(path.resolve()) != os.path.normcase(path):
+            entry["status"] = "redirected"
+            captured.append(entry)
+            continue
         try:
             content = path.read_bytes() if path.is_file() else None
         except OSError:
@@ -248,8 +298,13 @@ def _capture_reports(paths: list[tuple[str, Path]], before: dict[str, str | None
             if digest == before.get(rel):
                 entry["status"] = "unchanged"
             else:
-                entry["status"] = "captured"
-                data[rel] = content
+                try:
+                    report_cases(content)
+                except AcMapError as err:
+                    entry.update(status="unreadable", detail=str(err)[:200])
+                else:
+                    entry["status"] = "captured"
+                    data[rel] = content
         captured.append(entry)
     return captured, data
 
@@ -614,7 +669,8 @@ def from_dict(data: Any) -> Evidence:
     except (KeyError, TypeError) as err:
         raise EvidenceError(f"malformed evidence: {err}") from None
     if not isinstance(evidence.reports, list) or not all(
-            isinstance(r, dict) and isinstance(r.get("path"), str) for r in evidence.reports):
+            isinstance(r, dict) and isinstance(r.get("path"), str)
+            and isinstance(r.get("configured", False), bool) for r in evidence.reports):
         raise EvidenceError("malformed evidence: reports must be a list of {path, …}")
     if not isinstance(evidence.pending, dict) or not all(
             name in COMMAND_NAMES and isinstance(text, str) and text
@@ -712,6 +768,7 @@ def check(evidence: Evidence, *, issue: int, branch_head: str | None,
                  f"({evidence.config_source}); the approved command ran, so the branch's "
                  "change is not verified" for name in evidence.unapproved]
     problems += evidence.failures()
+    problems += evidence.report_problems()
     return problems
 
 
@@ -756,6 +813,9 @@ def render(evidence: Evidence, path: Path | None = None) -> str:
         lines.append("  NOT run, changed on this branch: " + ", ".join(evidence.unapproved))
     lines += [f"  pending    introduced by this branch, not run until the merge: "
               f"commands.{name} `{text}`" for name, text in evidence.pending.items()]
+    lines += [f"  report     {r.get('path')} {r.get('status')}"
+              + (" (from test_reports)" if r.get("configured") else " (from --report)")
+              + (f": {r['detail']}" if r.get("detail") else "") for r in evidence.reports]
     if path is not None:
         lines.append(f"Written to {path} and to the checkpoint note.")
     failures = evidence.failures()
@@ -764,6 +824,9 @@ def render(evidence: Evidence, path: Path | None = None) -> str:
     elif evidence.unapproved:
         lines.append("NOT ACCEPTED: the approved commands passed, but this branch changes "
                      + ", ".join(evidence.unapproved) + "; that change was not verified.")
+    elif problems := evidence.report_problems():
+        lines.append("NOT ACCEPTED: the approved commands passed, but " + "; ".join(problems)
+                     + ".")
     elif evidence.pending:
         verb = "is" if len(evidence.pending) == 1 else "are"
         lines.append(f"OK, PENDING APPROVAL: every approved command passed; "
