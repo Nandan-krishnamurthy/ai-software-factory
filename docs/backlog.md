@@ -75,9 +75,9 @@ This is the backlog that [03-factory-plan.md](03-factory-plan.md) §5 refers to 
   - **Verified, 2026-10-22** (Vitest 5.0.2 as installed in Task Tracker, from its source; no tests were run): with no reporter configured, Vitest uses `minimal` when `std-env` detects an AI agent (for example `CLAUDECODE` or `AI_AGENT`, which `verify run` passes on to the commands) and `default` otherwise. Neither prints a passing test by name. Its `json` reporter writes the jest-style report that `verify map` already reads.
   - **Analysis, 2026-10-22:** none of the 62 tagged ACs in Task Tracker's history is unit-only, so this has not stopped a story there yet.
 - **Source:** [PR #37](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/37), "Limitations" 1 and 2 (T6.2); the T6.5 station text
-- **Fix (factory side):** an optional `test_reports` list in `.factory/config.json`, read only from the approved config. `verify run` captures those reports with no station naming them, accepts only fresh, readable ones, and does not accept the evidence when the tests passed without them (architecture §5.3, §4.4). [PR #45](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/45) (branch `task/B-26-test-reports`).
+- **Fix (factory side):** an optional `test_reports` list in `.factory/config.json`, read only from the approved config. `verify run` captures those reports with no station naming them, accepts only fresh, readable ones, and does not accept the evidence when the tests passed without them (architecture §5.3, §4.4). Merged in [PR #45](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/45) on 2026-10-22.
 - **Still needed (target side):** each target that needs it must write such a report and list it in its approved config. For Task Tracker: a reviewed PR that sets Vitest's reporters to `default` plus `json` (`outputFile` under the gitignored `test-results/`) and adds that path to `test_reports`. Its real Vitest output has not been run and inspected yet.
-- **Status:** verified (the limitation and the Vitest behaviour); analysis (its effect on the M6 demo) · **Owner:** unassigned (before or during the M6 demo) · **State:** open: the factory side is in review; no target is configured yet
+- **Status:** verified (the limitation and the Vitest behaviour); analysis (its effect on the M6 demo) · **Owner:** unassigned (before or during the M6 demo) · **State:** open: the factory side is merged (PR #45); no target is configured yet
 
 ### <a id="b-27"></a>B-27 A stuck rework leaves a ready PR ready
 - **What:** `factory.py pr --draft` makes a PR a draft only when it creates it; an existing PR keeps its state. When a story gets stuck during rework, its PR is already ready for review, so the stuck path updates its body (which states the failures) but does not make it a draft, as rule H2 asks.
@@ -147,7 +147,7 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
   5. The remote cannot be reached, or its answer cannot be parsed: fail closed, with the reason, and nothing runs.
   6. Optional defence in depth: the guard blocks rewriting `refs/remotes/origin/*` and `remote set-head` in the target.
   7. Unit tests use fakes, with no network; Windows Git Bash and PowerShell, like the rest of the engine.
-- **Source:** the B-26 review, 2026-10-22 (session `c161a4ca`): the code paths above and a `guard.decide` check of the three commands
+- **Source:** found during the review of B-26 ([PR #45](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/45)), 2026-10-22: the code paths above and a `guard.decide` check of the three commands
 - **Status:** verified (the commands are allowed, and the code reads local refs); analysis (the acceptance criteria) · **Owner:** unassigned: T9.5 (guard hardening) or a standalone hardening task sequenced by the human · **State:** open. ADR-0004 is unchanged; making its "default branch on `origin`" authoritative may call for an amendment or a new ADR.
 
 ## Verification not yet done
