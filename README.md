@@ -4,7 +4,7 @@ A reusable, human-gated workflow that uses Claude Code to take a **separate targ
 
 The factory works on any GitHub repository. Everything project-specific lives in the target repo: its `.factory/config.json` and its `docs/factory/` folder. The factory's own code, stations, templates and commands contain nothing about any one project (checked by `tests/test_reusability.py`).
 
-> **Status:** M0–M4 are complete and demonstrated. M5 (existing projects and hardening) is being built: see [docs/progress.md](docs/progress.md) and the runbook [docs/04-task-tracker-test-plan.md](docs/04-task-tracker-test-plan.md).
+> **Status:** M0–M5 are complete and demonstrated ([docs/progress.md](docs/progress.md)). M6–M9 are being built in order ([docs/05-roadmap-m6-m9.md](docs/05-roadmap-m6-m9.md)); [docs/task-log.md](docs/task-log.md) records each task as it lands.
 
 ## Requirements
 
@@ -114,7 +114,7 @@ It never merges a PR, never pushes to the default branch, never starts a story w
 While a target is active, the factory never modifies its own repo (rule S3). To change the factory:
 
 1. **Deactivate the target:** delete the two gitignored files `.factory-local/target.json` and `.claude/settings.local.json`. `python scripts/factory.py target show` should then say there is no active target.
-2. Follow [CLAUDE.md](CLAUDE.md): one task from the plan per branch `task/<id>-<slug>`, a PR titled `[<id>] …`, and you merge it.
+2. Follow [CLAUDE.md](CLAUDE.md): one task from the plan or roadmap per branch `task/<id>-<slug>`, a PR titled `[<id>] …`, and you merge it.
 3. Run the checks:
    ```
    python -m unittest
@@ -125,10 +125,14 @@ While a target is active, the factory never modifies its own repo (rule S3). To 
 
 ## Documents
 
+The full index, and which document is the source of truth for what, is in [docs/README.md](docs/README.md).
+
 - [01 — Requirements](docs/01-factory-requirements.md): what the factory must do
 - [02 — Architecture](docs/02-factory-architecture.md): how it is built
 - [03 — Implementation plan](docs/03-factory-plan.md): tasks T0.1–T5.4
 - [04 — Task Tracker test plan](docs/04-task-tracker-test-plan.md): the runbook that proves success criteria 1–8
+- [05 — Roadmap M6–M9](docs/05-roadmap-m6-m9.md): tasks T6.1–T9.9
 - [Progress and milestone demos](docs/progress.md)
+- [Task log](docs/task-log.md), [backlog](docs/backlog.md) and [architecture decision records](docs/adr/)
 - [Stations](stations/) and their rules ([_rules.md](stations/_rules.md))
 - [Templates](templates/README.md): what the factory writes into a target repo
