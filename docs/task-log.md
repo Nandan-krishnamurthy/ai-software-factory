@@ -191,7 +191,7 @@ The final review (`c878c238#1216`, 2026-10-21T12:15:58Z) found no blocking issue
 | | |
 |---|---|
 | **Specification** | [05-roadmap-m6-m9.md](05-roadmap-m6-m9.md), "T6.5 Stations S09–S11 use the verification engine" |
-| **PR** | opened from branch `task/T6.5-stations-use-engine`; not merged |
+| **PR** | [#44](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/44), not merged |
 | **Status** | In review |
 
 **Approved decisions** (`c161a4ca#426`, 2026-10-22T07:52:22Z; each was the recommended option of a question listing the alternatives):
