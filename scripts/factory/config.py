@@ -23,8 +23,10 @@ IDENTITY_MODES_PLANNED = ("bot",)
 
 _TOP_LEVEL = {
     "schema", "project", "repo", "default_branch", "reviewers",
-    "commands", "limits", "ci", "identity",
+    "commands", "test_reports", "limits", "ci", "identity",
 }
+MAX_TEST_REPORTS = 10
+_DRIVE = re.compile(r"^[A-Za-z]:")
 _REQUIRED = ("schema", "project", "repo", "default_branch", "reviewers")
 _REPO = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/[A-Za-z0-9._-]{1,100}$")
 _LOGIN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$")
@@ -81,6 +83,9 @@ class Config:
     limits: Limits
     ci_required: bool
     identity: Identity
+    # Structured test reports the test command writes (JUnit XML or a JSON report that
+    # `verify map` reads), relative to the target; `verify run` captures them (B-26).
+    test_reports: tuple[str, ...] = ()
 
 
 def config_path(target: str | Path) -> Path:
@@ -148,6 +153,20 @@ def parse_config(data: Any, path: str | Path = CONFIG_RELPATH) -> Config:
         if value is not None and not _nonempty_str(value):
             problems.append(f"commands.{name} must be a non-empty string or null")
 
+    test_reports = data.get("test_reports", [])
+    if test_reports is None:
+        test_reports = []
+    if not isinstance(test_reports, list):
+        problems.append("test_reports must be a list of report paths")
+        test_reports = []
+    elif len(test_reports) > MAX_TEST_REPORTS:
+        problems.append(f"test_reports: at most {MAX_TEST_REPORTS} reports")
+    for report in test_reports:
+        if why := report_path_problem(report):
+            problems.append(f"test_reports: {report!r} {why}")
+    if len(set(map(str, test_reports))) != len(test_reports):
+        problems.append("test_reports: a report is listed twice")
+
     limits_in = _section(data, "limits", problems)
     for key in sorted(set(limits_in) - set(DEFAULT_LIMITS)):
         problems.append(f"limits: unknown key {key!r}")
@@ -203,7 +222,29 @@ def parse_config(data: Any, path: str | Path = CONFIG_RELPATH) -> Config:
         limits=Limits(**limits),
         ci_required=ci_required,
         identity=Identity(mode=mode, bot_login=bot_login, bot_token_env=bot_token_env),
+        test_reports=tuple(test_reports),
     )
+
+
+def report_path_problem(report: Any) -> str | None:
+    """Why ``report`` is not a valid ``test_reports`` entry, or ``None``: it must be a
+    relative POSIX path to a file inside the target, outside ``.git``. Checked without the
+    filesystem; ``verify run`` checks again where the path resolves to (symlinks)."""
+    if not _nonempty_str(report) or report != report.strip():
+        return "must be a non-empty path without surrounding spaces"
+    if "\\" in report:
+        return "must use forward slashes"
+    if report.startswith("/") or _DRIVE.match(report):
+        return "must be relative to the target"
+    # A NUL fails only when the path is opened; a ':' names an NTFS stream on Windows.
+    if ":" in report or any(ord(char) < 32 or ord(char) == 127 for char in report):
+        return "must not contain ':' or control characters"
+    parts = report.split("/")
+    if any(part in ("", ".", "..") for part in parts):
+        return "must not contain empty, '.' or '..' segments"
+    if any(part.lower() == ".git" for part in parts):
+        return "must not be inside .git"
+    return None
 
 
 def _nonempty_str(value: Any) -> bool:

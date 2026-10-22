@@ -72,8 +72,12 @@ This is the backlog that [03-factory-plan.md](03-factory-plan.md) §5 refers to 
 
 ### <a id="b-26"></a>B-26 The stations capture no test report, so a unit-only AC may not map
 - **What:** S09 runs `verify run` without `--report`, because nothing records which report file a target's test command writes. With a runner whose default output lists no passing test by name (Vitest's default reporter), a test that passed has no result in the map. An AC covered only by such tests is `missing`, and the verifier's `pass` for it is `INVALID`, which stops S10 for the human. An AC that also has an end-to-end test listed by name is not affected.
+  - **Verified, 2026-10-22** (Vitest 5.0.2 as installed in Task Tracker, from its source; no tests were run): with no reporter configured, Vitest uses `minimal` when `std-env` detects an AI agent (for example `CLAUDECODE` or `AI_AGENT`, which `verify run` passes on to the commands) and `default` otherwise. Neither prints a passing test by name. Its `json` reporter writes the jest-style report that `verify map` already reads.
+  - **Analysis, 2026-10-22:** none of the 62 tagged ACs in Task Tracker's history is unit-only, so this has not stopped a story there yet.
 - **Source:** [PR #37](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/37), "Limitations" 1 and 2 (T6.2); the T6.5 station text
-- **Status:** verified (the limitation); analysis (its effect on the M6 demo) · **Owner:** unassigned (likely before or during the M6 demo) · **State:** open
+- **Fix (factory side):** an optional `test_reports` list in `.factory/config.json`, read only from the approved config. `verify run` captures those reports with no station naming them, accepts only fresh, readable ones, and does not accept the evidence when the tests passed without them (architecture §5.3, §4.4). [PR #45](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/45) (branch `task/B-26-test-reports`).
+- **Still needed (target side):** each target that needs it must write such a report and list it in its approved config. For Task Tracker: a reviewed PR that sets Vitest's reporters to `default` plus `json` (`outputFile` under the gitignored `test-results/`) and adds that path to `test_reports`. Its real Vitest output has not been run and inspected yet.
+- **Status:** verified (the limitation and the Vitest behaviour); analysis (its effect on the M6 demo) · **Owner:** unassigned (before or during the M6 demo) · **State:** open: the factory side is in review; no target is configured yet
 
 ### <a id="b-27"></a>B-27 A stuck rework leaves a ready PR ready
 - **What:** `factory.py pr --draft` makes a PR a draft only when it creates it; an existing PR keeps its state. When a story gets stuck during rework, its PR is already ready for review, so the stuck path updates its body (which states the failures) but does not make it a draft, as rule H2 asks.
@@ -89,7 +93,7 @@ This is the backlog that [03-factory-plan.md](03-factory-plan.md) §5 refers to 
 
 ## Guard gaps
 
-The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` outside the target, the `/tmp` mapping and computed verbs. B-10, B-11, B-14 and B-15 are not named in T9.5's Build, so whether they belong to T9.5 is a scope decision for that task.
+The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` outside the target, the `/tmp` mapping and computed verbs. B-10, B-11, B-14, B-15 and B-28 are not named in T9.5's Build, so whether they belong to T9.5 is a scope decision for that task.
 
 ### <a id="b-09"></a>B-09 Computed arguments are not analysed
 - **What:** for example `gh pr $(echo merge) 5`.
@@ -127,6 +131,24 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
 - **What:** the commands `verify run` executes inherit the environment, including any credentials in it.
 - **Source:** [PR #36](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/36), "Known gaps left for T9.5" ("out of scope for this PR")
 - **Status:** verified · **Owner:** unassigned · **State:** open
+
+### <a id="b-28"></a>B-28 The approved config's trust root is a local ref that can be repointed
+- **What:** "approved" means `.factory/config.json` on the default branch on `origin` (ADR-0004). `verify run` finds that commit through the clone's **local** refs: `evidence.default_ref` reads the symbolic ref `origin/HEAD`, and `evidence.approved_config` reads the config at the local remote-tracking ref it names (`origin/main`). Both are plain local refs. The guard allows the commands that repoint them (checked with `guard.decide` on 2026-10-22):
+  - `git -C <T> remote set-head origin story/27-x`
+  - `git -C <T> update-ref refs/remotes/origin/main HEAD`
+  - `git -C <T> symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/story/27-x`
+- **Risk:** after any of these, the story branch's own config is treated as approved. Its `commands.*` would run and pass `verify check` as approved, and its `test_reports` would be read as trusted, bypassing ADR-0004's rule that only commands a human merged may run. The same refs also decide `config_source`, `unapproved`, `pending`, the base of `verify map`'s diff, and `pr render`'s diff base and its `limits.max_diff_lines` and `ci_required`. The guard still vets every command, so this does not by itself open a merge path. In contrast, the story branch's head is already taken from the remote (`git ls-remote`, `evidence.remote_head`).
+- **Expected behaviour:** the approved config comes from an authoritative default-branch head: the default branch and its commit as GitHub reports them, never from what local refs say. Local ref changes cannot change what is approved, and anything that cannot be confirmed fails closed.
+- **Proposed acceptance criteria** (for the owning task to confirm; not decided):
+  1. The default branch's name and head commit come from the remote (`git ls-remote --symref origin HEAD` or `refs/heads/<D>`, or the GitHub API), not from `refs/remotes/origin/*`. The name must match `default_branch` in that config, or nothing runs.
+  2. The approved config is read from that exact commit. If the commit is not in the clone, it is fetched; if it still cannot be read, nothing runs.
+  3. Repointing `origin/HEAD` (`remote set-head`, `symbolic-ref`) or the remote-tracking default branch (`update-ref`) changes neither the commands that run nor the reports that are read. One regression test for each of the three commands above, plus one for a forged `refs/remotes/origin/main` that points at a commit that is not on the remote.
+  4. `config_source` records the authoritative commit, and `verify check`, `verify map`, `verdict check` and `pr render` reject evidence whose `config_source` is not a commit of the remote default branch.
+  5. The remote cannot be reached, or its answer cannot be parsed: fail closed, with the reason, and nothing runs.
+  6. Optional defence in depth: the guard blocks rewriting `refs/remotes/origin/*` and `remote set-head` in the target.
+  7. Unit tests use fakes, with no network; Windows Git Bash and PowerShell, like the rest of the engine.
+- **Source:** the B-26 review, 2026-10-22 (session `c161a4ca`): the code paths above and a `guard.decide` check of the three commands
+- **Status:** verified (the commands are allowed, and the code reads local refs); analysis (the acceptance criteria) · **Owner:** unassigned: T9.5 (guard hardening) or a standalone hardening task sequenced by the human · **State:** open. ADR-0004 is unchanged; making its "default branch on `origin`" authoritative may call for an amendment or a new ADR.
 
 ## Verification not yet done
 

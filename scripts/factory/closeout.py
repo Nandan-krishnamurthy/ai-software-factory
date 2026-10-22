@@ -136,7 +136,7 @@ def after_merge(recorded: evidence_mod.Evidence | None, story_branch: str) -> st
         return (f"{evidence_mod.pending_text(recorded)} {'was' if one else 'were'} "
                 "introduced by the story's PR and approved by the merge, and "
                 f"{'has' if one else 'have'} not run yet")
-    if failures := recorded.failures():
+    if failures := recorded.failures() + recorded.report_problems():
         return f"the last run on {recorded.branch} failed: " + "; ".join(failures)
     return None
 
