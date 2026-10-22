@@ -30,6 +30,7 @@ Each entry is taken from its PR description and from the session in which the hu
 | `1bcf8818` | `1bcf8818-42c6-44aa-82e5-e187c8b50c7e` | Roadmap (2026-10-08), sequencing decision, T6.1 |
 | `12c41339` | `12c41339-9a82-42b9-8504-24909a76cbea` | T6.2, T6.3 |
 | `c878c238` | `c878c238-890e-4dd2-a905-6956ecf1b25d` | T6.4, T6.5 preparation, documentation migration |
+| `c161a4ca` | `c161a4ca-39de-4e3c-bad1-4ee8caeeadcb` | Documentation migration PRs C and D, T6.5 |
 
 ---
 
@@ -190,12 +191,27 @@ The final review (`c878c238#1216`, 2026-10-21T12:15:58Z) found no blocking issue
 | | |
 |---|---|
 | **Specification** | [05-roadmap-m6-m9.md](05-roadmap-m6-m9.md), "T6.5 Stations S09–S11 use the verification engine" |
-| **PR** | none yet |
-| **Status** | **Not started.** No decisions have been made. |
+| **PR** | [#44](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/44), not merged |
+| **Status** | In review |
 
-**Inputs already recorded** (to settle before or during T6.5; none are decided):
-- [B-01](backlog.md#b-01) the walking-skeleton story's unapproved commands (PR #36);
-- [B-02](backlog.md#b-02) the interim S10/S11 fail-closed stop, which ends with T6.5 (PR #37);
-- [B-03](backlog.md#b-03) bookkeeping commits that move the branch head past the evidence (PR #38);
-- [B-04](backlog.md#b-04) the rendered-body attribution/footer conflict (PR #38), **unresolved**;
-- [B-05](backlog.md#b-05), [B-06](backlog.md#b-06) and [B-07](backlog.md#b-07): analysis from 2026-10-21 of the current station text. Not decisions.
+**Approved decisions** (`c161a4ca#426`, 2026-10-22T07:52:22Z; each was the recommended option of a question listing the alternatives):
+1. **B-03, B-06: re-verify in S11.** Merging new default-branch commits sends the story back to S09, since the code changed: the commands run again and the AC verifier runs again. For the traceability commit, which needs the PR number, S11 opens the PR from a first render, commits the rows, runs `verify run` and `verify map` again, re-checks the verdict, renders again, edits the PR and runs `pr check`. No engine guard ties the verdict to the documentation-only commit (the option that added one was not chosen). The matrix format is unchanged.
+2. **B-04: the attribution line is in `templates/pr.md`.** It is factory-owned and rendered, so `pr check` still compares the whole body, and nothing is appended after rendering. The #29/#30 snapshots change by that line.
+3. **B-05: `pr render --stuck`.** A stuck story's draft PR is rendered from the evidence and the map; with no verdict, the AC section says the verifier did not run and Q5 fails. The model writes only Summary, Risks and Follow-ups. Rule H2 (a draft PR) is kept.
+4. **B-01: verify after the merge.** A command that is `null` in the approved config and set by the story branch is **pending**: vetted like the others but not run. The PR shows its gate as `Not run`, and S12 runs `verify run` on the default branch after the merge approves it, stopping with `factory:needs-human` if it fails. ADR-0004 is unchanged: no command runs before a human approved it. A command the branch changes or removes is still rejected.
+
+**Proposed in the PR, for the human's review** (not asked before implementation; B-07 asks where "rule H1 is enforced by code wherever it can be"):
+- the station lint the roadmap names: S09–S11 may not ask the model to run a configured command, keep a result line, fill a template placeholder or write a gate result (`tests/test_stations.py`, `HAND_WRITTEN`);
+- `factory.py pr` refuses a story PR body (`factory:pr`) that is not a fresh `pr render` of the recorded facts, apart from Summary, Risks and Follow-ups.
+
+**Deviation from the specification:** none from the roadmap's Build. Decision 4 also applies to any command a story introduces, not only the walking skeleton's, because the engine cannot tell the two apart.
+
+**Changed existing tests** (each pinned the behaviour these decisions replace):
+- `tests/test_evidence.py` `test_a_command_added_on_the_branch_is_not_run`: an added command is now pending, not unapproved (decision 4).
+- `tests/test_closeout.py` `test_inspect_reports_and_changes_nothing`: the report gains `verify_after_merge` (decision 4).
+- `tests/test_stations.py`: `test_s11_brings_the_branch_up_to_date_and_re_tests_before_the_pr`, `test_s11_pr_follows_the_template_and_copies_the_verdict_unchanged` and `test_skipped_gate_wording_matches_the_template_contract` asserted the hand-written steps this task removes (decisions 1 and 3, and the roadmap's lint).
+- `tests/fixtures/prbody/29.md` and `30.md`: the footer line (decision 2).
+
+**Handed on:**
+- The stations pass no `--report` to `verify run`. With Vitest's default reporter, an AC covered only by unit tests has no passing mapped test, so its `pass` is `INVALID` ([B-26](backlog.md#b-26)). This is likely to matter in the M6 demo on Task Tracker.
+- The stuck path on a PR that is already ready for review (a rework that gets stuck) leaves it ready, because `--draft` applies only when a PR is created ([B-27](backlog.md#b-27)). This was already so before T6.5.

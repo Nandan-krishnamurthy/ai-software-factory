@@ -20,11 +20,19 @@ step is ``/factory-start`` (M5 follow-up 2); otherwise it is ``continue``. A sto
 without ``status:done`` (closed by hand, with no merged PR) keeps the increment open: the
 state engine reports NEEDS_HUMAN for it, where ``/factory-start`` is not allowed.
 
-``plan()``, ``newly_unblocked()`` and ``remaining_in_increment()`` are pure.
+``verify_after_merge`` (T6.5) says whether S12 must first run ``verify run`` on the
+default branch: the story's PR introduced commands (the walking skeleton), which the
+merge approved but nothing has run yet, or that run failed. It is read from the evidence
+in the story's checkpoint, so a failed run is asked for again until one passes.
+
+``plan()``, ``newly_unblocked()``, ``remaining_in_increment()`` and ``after_merge()`` are
+pure.
 """
 
 from dataclasses import dataclass
 
+from factory import comments as comments_mod
+from factory import evidence as evidence_mod
 from factory import pick as pick_mod
 from factory.errors import FactoryError
 from factory.gh import Gh
@@ -57,6 +65,8 @@ class Closeout:
     increment: str = ""
     # The increment's other story issues that are not both closed and status:done.
     remaining: tuple[int, ...] = ()
+    # Why `verify run` must run on the default branch before close-out, or None (T6.5).
+    verify_after_merge: str | None = None
 
     @property
     def increment_complete(self) -> bool:
@@ -80,7 +90,8 @@ class Closeout:
                 "unblocked": [{"number": s.number, "story": s.story_id, "title": s.title}
                               for s in self.unblocked],
                 "increment": self.increment, "increment_complete": self.increment_complete,
-                "remaining": list(self.remaining), "next_step": self.next_step}
+                "remaining": list(self.remaining), "next_step": self.next_step,
+                "verify_after_merge": self.verify_after_merge}
 
 
 # ----------------------------------------------------------------------------- pure
@@ -113,8 +124,27 @@ def remaining_in_increment(number: int, increment: str,
                         and (s.open or DONE not in s.labels)))
 
 
-def plan(number: int, issue: dict, prs: list[dict], all_issues: list[dict]) -> Closeout:
-    """What close-out of story issue ``number`` involves. Refuses without a merged PR."""
+def after_merge(recorded: evidence_mod.Evidence | None, story_branch: str) -> str | None:
+    """Why the commands must run on the default branch before the story is done, from the
+    latest evidence in its checkpoint, or ``None``."""
+    if recorded is None:
+        return None
+    if recorded.branch == story_branch:
+        if not recorded.pending:
+            return None
+        one = len(recorded.pending) == 1
+        return (f"{evidence_mod.pending_text(recorded)} {'was' if one else 'were'} "
+                "introduced by the story's PR and approved by the merge, and "
+                f"{'has' if one else 'have'} not run yet")
+    if failures := recorded.failures():
+        return f"the last run on {recorded.branch} failed: " + "; ".join(failures)
+    return None
+
+
+def plan(number: int, issue: dict, prs: list[dict], all_issues: list[dict],
+         recorded: evidence_mod.Evidence | None = None) -> Closeout:
+    """What close-out of story issue ``number`` involves. Refuses without a merged PR.
+    ``recorded``: the evidence in the story's checkpoint, if any."""
     if "pull_request" in issue:
         raise CloseoutError(f"#{number} is a pull request; close-out works on the story issue")
     marker = find(issue.get("body"), StoryMarker)
@@ -134,7 +164,8 @@ def plan(number: int, issue: dict, prs: list[dict], all_issues: list[dict]) -> C
         head_sha=pr.get("headRefOid", ""),
         merge_sha=(pr.get("mergeCommit") or {}).get("oid", ""), merged_at=pr["mergedAt"],
         unblocked=newly_unblocked(number, stories, is_open), increment=marker.increment,
-        remaining=remaining_in_increment(number, marker.increment, stories))
+        remaining=remaining_in_increment(number, marker.increment, stories),
+        verify_after_merge=after_merge(recorded, pr.get("headRefName", "")))
 
 
 # ----------------------------------------------------------------------------- GitHub
@@ -145,7 +176,10 @@ def inspect(gh: Gh, repo: str, number: int) -> Closeout:
     issue = gh.api(f"repos/{repo}/issues/{number}")
     prs = gh.json(["pr", "list", "--repo", repo, "--state", "merged", "--limit", "200"],
                   fields=_PR_FIELDS)
-    return plan(number, issue, prs, fetch_all_issues(gh, repo))
+    found = comments_mod.find_checkpoint(comments_mod.list_comments(gh, repo, number))
+    recorded = (evidence_mod.from_body(found[0].get("body") or "") if found is not None
+                else None)
+    return plan(number, issue, prs, fetch_all_issues(gh, repo), recorded)
 
 
 def finish(gh: Gh, repo: str, number: int) -> tuple[Closeout, list[str]]:
@@ -177,5 +211,7 @@ def render(closeout: Closeout) -> str:
     else:
         lines.append(f"  increment {c.increment} has stories not done: "
                      + ", ".join(f"#{n}" for n in c.remaining))
+    if c.verify_after_merge:
+        lines.append(f"  run `verify run` on the default branch first: {c.verify_after_merge}")
     lines.append(f"Next step: {c.next_step}")
     return "\n".join(lines)

@@ -50,7 +50,8 @@ def text(path: Path) -> str:
 class Story:
     """One real story, with every fact `pr render` reads, and knobs to doctor them."""
 
-    def __init__(self, issue: int, test_output: str | None = None, test_exit: int = 0):
+    def __init__(self, issue: int, test_output: str | None = None, test_exit: int = 0,
+                 pending_test: bool = False):
         self.issue = issue
         self.base, self.head, self.branch, self.pr = STORIES[issue]
         self.git_answers = json.loads(text(FIXTURES / f"{issue}.git.json"))
@@ -60,21 +61,25 @@ class Story:
         self.verdict = text(ACMAP / f"{issue}.verdict.md")
         self.ci_runs: list[dict] = []
         output = test_output if test_output is not None else text(ACMAP / f"{issue}.output.txt")
-        self.evidence = self._evidence(output, test_exit)
+        # pending_test: commands.test is null on main and set by the branch (T6.5), so the
+        # factory ran no tests: no output to map.
+        self.evidence = self._evidence(output, test_exit, pending_test)
         self.acmap = acmap.build(
             issue=issue, acs=verdict.issue_acs(self.issue_json["body"]),
             evidence=self.evidence, base=f"origin/main@{self.base}",
-            diff=text(ACMAP / f"{issue}.diff"), output=output,
-            output_note=f"the test command's full output ({len(output.splitlines())} lines)",
+            diff=text(ACMAP / f"{issue}.diff"), output=None if pending_test else output,
+            output_note=("the test command was skipped" if pending_test else
+                         f"the test command's full output ({len(output.splitlines())} lines)"),
             reports=[])
-        self.pr_state, self.pr_head = "open", self.head
+        self.pr_state, self.pr_head, self.pr_draft = "open", self.head, False
         self.pr_body: str | None = None
 
-    def _evidence(self, output: str, test_exit: int) -> evidence.Evidence:
+    def _evidence(self, output: str, test_exit: int, pending_test: bool) -> evidence.Evidence:
         outputs = {"npm run build": (0, text(FIXTURES / f"{self.issue}.build.txt")),
                    "npm run typecheck": (0, text(FIXTURES / f"{self.issue}.typecheck.txt")),
                    "npm test": (test_exit, output)}
-        repo = FakeGitRepo(branch=self.branch, heads=(self.head,))
+        repo = FakeGitRepo(branch=self.branch, heads=(self.head,),
+                           approved={**COMMANDS, "test": None} if pending_test else COMMANDS)
         path = working_tree(COMMANDS)
         return evidence.run_verification(
             path, issue=self.issue, repo=REPO, git=Git(path, transport=repo),
@@ -126,7 +131,7 @@ class Story:
         if endpoint == f"repos/{REPO}/issues/{self.issue}/comments":
             return self._ok([[{"id": 1, "body": self.checkpoint_body()}]])
         if endpoint == f"repos/{REPO}/pulls/{self.pr}":
-            return self._ok({"number": self.pr, "state": self.pr_state,
+            return self._ok({"number": self.pr, "state": self.pr_state, "draft": self.pr_draft,
                              "head": {"ref": self.branch, "sha": self.pr_head},
                              "body": self.pr_body})
         if endpoint == f"repos/{REPO}/commits/{self.head}/check-runs?per_page=100":
@@ -138,15 +143,19 @@ class Story:
         return ProcessResult([], 0, json.dumps(data), "")
 
     # -- the engine --------------------------------------------------------------------
-    def facts(self) -> prbody.Facts:
+    def facts(self, stuck: bool = False) -> prbody.Facts:
         return prbody.collect(Gh(transport=self.github), Git("/t", transport=self.git),
-                              REPO, self.issue)
+                              REPO, self.issue, stuck=stuck)
 
     def notes(self) -> dict[str, str]:
         return prbody.parse_notes(text(FIXTURES / f"{self.pr}.notes.md"))
 
-    def render(self, sections=None) -> prbody.Rendered:
-        return prbody.render(self.facts(), sections or self.notes())
+    def render(self, sections=None, stuck: bool = False) -> prbody.Rendered:
+        return prbody.render(self.facts(stuck), sections or self.notes())
+
+    def unrendered(self, body: str, stuck: bool = False) -> list[str]:
+        return prbody.unrendered(Gh(transport=self.github), Git("/t", transport=self.git),
+                                 REPO, self.branch, body, stuck=stuck)
 
     def check(self, body: str) -> prbody.CheckResult:
         self.pr_body = body
@@ -693,6 +702,118 @@ class InputTest(unittest.TestCase):
                                  prbody.FileStat("new/x.ts", "old/x.ts", 2, 2)])
 
 
+# ----------------------------------------------------------------------------- T6.5
+
+
+class FooterTest(unittest.TestCase):
+    """B-04: the attribution line is the template's, so nothing is appended after render."""
+
+    FOOTER = "🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+
+    def test_the_render_ends_with_the_footer(self):
+        self.assertTrue(Story(28).render().body.rstrip("\n").endswith("\n\n" + self.FOOTER))
+
+    def test_an_appended_line_still_fails_pr_check(self):
+        result = Story(28).check(snapshot(30) + "\n" + self.FOOTER + "\n")
+        self.assertFalse(result.ok)
+        self.assertEqual(result.differences, ["+", "+" + self.FOOTER])
+
+
+class PendingTestCommandTest(unittest.TestCase):
+    """B-01: commands.test introduced by the branch (the walking skeleton)."""
+
+    def setUp(self):
+        self.story = Story(28, pending_test=True)
+        self.rendered = self.story.render()
+        self.gates = {g.label: g for g in self.rendered.gates}
+
+    def test_the_gates_say_not_run_and_nothing_is_a_problem(self):
+        self.assertEqual(self.gates["Q4 Full suite"].value,
+                         "Not run: `npm test` is introduced by this PR, so the factory has not "
+                         "run it: your merge approves it, and close-out (S12) runs it on "
+                         "`main`")
+        self.assertEqual(self.gates["Q5 AC evidence"].status, "Not run")
+        self.assertIn("these are the AC verifier's own results, each pass with a test named "
+                      "after its AC", self.gates["Q5 AC evidence"].text)
+        self.assertEqual(self.gates["Q1 Build"].status, "Pass")  # the approved build ran
+        self.assertEqual((self.rendered.problems, self.rendered.warnings), ([], []))
+        self.assertIn("- Full suite: `npm test` → not run: introduced by this PR; close-out "
+                      "(S12) runs it on `main` after your merge", self.rendered.body)
+
+    def test_pr_check_accepts_its_render(self):
+        result = self.story.check(self.rendered.body)
+        self.assertTrue(result.ok, prbody.report_check(result))
+
+    def test_a_pending_lint_makes_q2_not_run_but_a_failure_still_wins(self):
+        ev = self.story.evidence
+        ev.pending = {**ev.pending, "lint": "npm run lint"}
+        self.assertEqual(prbody._lint_gate(ev).status, "Not run")
+        typecheck = ev.command("typecheck")
+        typecheck.status, typecheck.exit_code = "fail", 2
+        self.assertEqual(prbody._lint_gate(ev).status, "Fail")
+
+
+class StuckTest(unittest.TestCase):
+    """B-05: a stuck story's draft PR is rendered too, never filled by hand."""
+
+    def setUp(self):
+        self.story = Story(27, test_output=text(ACMAP / "27-e2e-failed.output.txt"),
+                           test_exit=1)
+        self.story.verdict = "**Factory checkpoint note:** S09 stuck"  # S10 never ran
+
+    def test_without_stuck_the_missing_verdict_is_refused(self):
+        with self.assertRaisesRegex(prbody.PrBodyError, "only a stuck story's draft PR"):
+            self.story.facts()
+
+    def test_the_stuck_body_states_the_failures(self):
+        rendered = self.story.render(stuck=True)
+        gates = {g.label: g for g in rendered.gates}
+        self.assertEqual(gates["Q4 Full suite"].status, "Fail")
+        self.assertEqual(gates["Q5 AC evidence"].value, "Fail: not verified: the factory is "
+                         "stuck, and stopped before the AC verifier (S10) ran")
+        self.assertIn("## Acceptance criteria verification\nNot verified: the factory is "
+                      "stuck, and stopped before the AC verifier (S10) ran. The AC-to-test "
+                      "map of the recorded run @ `8b095c2`: AC1 passed, AC2 failed, AC3 "
+                      "passed, AC4 passed, AC5 passed.", rendered.body)
+        self.assertTrue(rendered.problems)
+
+    def test_pr_check_of_a_draft_renders_it_as_stuck(self):
+        body = self.story.render(stuck=True).body
+        self.story.pr_draft = True
+        result = self.story.check(body)
+        self.assertEqual(result.differences, [])
+        self.assertTrue(result.problems)  # a stuck PR is never ready for review
+
+    def test_a_failing_verdict_renders_its_lines_as_usual(self):
+        story = Story(27, test_output=text(ACMAP / "27-e2e-failed.output.txt"), test_exit=1)
+        body = story.render(stuck=True).body
+        self.assertIn(next(line for line in story.verdict.splitlines()
+                           if line.startswith("- [x] AC2")), body)
+
+
+class UnrenderedTest(unittest.TestCase):
+    """B-07: `pr` publishes a story PR body only if it is the factory's render."""
+
+    def test_the_render_is_accepted_with_any_model_sections(self):
+        story = Story(28)
+        self.assertEqual(story.unrendered(snapshot(30)), [])
+        body = snapshot(30).replace("## Summary\n", "## Summary\n- Reworded.\n")
+        self.assertEqual(story.unrendered(body), [])
+
+    def test_any_hand_written_fact_is_refused(self):
+        body = snapshot(30).replace("| Q4 Full suite | Pass:",
+                                    "| Q4 Full suite | Pass (all green):")
+        differences = Story(28).unrendered(body)
+        self.assertEqual(len(differences), 2)
+        self.assertTrue(differences[1].startswith("+| Q4 Full suite | Pass (all green):"))
+
+    def test_a_body_for_a_branch_that_is_not_a_story_branch_is_refused(self):
+        story = Story(28)
+        with self.assertRaisesRegex(prbody.PrBodyError, "needs a story branch"):
+            prbody.unrendered(Gh(transport=story.github), Git("/t", transport=story.git),
+                              REPO, "feature/x", snapshot(30), stuck=False)
+
+
 # ----------------------------------------------------------------------------- the CLI
 
 
@@ -746,6 +867,50 @@ class CliTest(unittest.TestCase):
         code, out, _ = self.cli("pr", "render", "--issue", "28", "--notes", str(self.notes))
         self.assertEqual(code, 1)
         self.assertIn("Summary: a closing keyword would close an issue on merge", out)
+
+    def test_render_stuck_writes_the_draft_body_and_exits_0(self):
+        story = self.story = Story(27, test_output=text(ACMAP / "27-e2e-failed.output.txt"),
+                                   test_exit=1)
+        story.verdict = "S09 stuck"
+        code, out, _ = self.cli("pr", "render", "--issue", "27", "--notes", str(self.notes))
+        self.assertEqual(code, 1)
+        self.assertIn("only a stuck story's draft PR", out + _)
+        code, out, _ = self.cli("pr", "render", "--issue", "27", "--notes", str(self.notes),
+                                "--stuck")
+        self.assertEqual(code, 0, out)
+        self.assertIn("problem: Q4 Full suite: Fail", out)
+        self.assertIn("Not verified: the factory is stuck",
+                      (self.dir / "pr-27.md").read_text(encoding="utf-8"))
+
+    def publish(self, body: str, *extra: str):
+        body_file = self.dir / "body.md"
+        body_file.write_bytes(body.encode("utf-8"))
+        published = mock.Mock(return_value=mock.Mock(number=30, url="u", action="updated",
+                                                     is_draft=False))
+        with mock.patch.object(cli.ensure, "ensure_pr", published):
+            code, out, err = self.cli("pr", "--head", self.story.branch, "--title", "t",
+                                      "--body-file", str(body_file), "--base", "main", *extra)
+        return code, out + err, published
+
+    def test_pr_publishes_the_render(self):
+        code, out, published = self.publish(snapshot(30))
+        self.assertEqual(code, 0, out)
+        self.assertEqual(published.call_args.kwargs["body"], snapshot(30))
+
+    def test_pr_refuses_a_story_body_that_is_not_the_render(self):
+        for name, body in (("an appended line", snapshot(30) + "\nAll green!\n"),
+                           ("a hand-written gate", snapshot(30).replace(
+                               "| Q8 CI | Not configured", "| Q8 CI | Pass"))):
+            with self.subTest(name):
+                code, out, published = self.publish(body)
+                self.assertEqual(code, 1)
+                self.assertIn("the story PR body is not the factory's render", out)
+                published.assert_not_called()
+
+    def test_pr_does_not_render_a_planning_pr(self):
+        code, out, published = self.publish("<!-- factory:planning increment=001-x -->\nbody\n")
+        self.assertEqual(code, 0, out)
+        published.assert_called_once()
 
     def test_pr_without_an_action_still_needs_head_title_and_body(self):
         code, _, err = self.cli("pr", "--head", "story/28-x")

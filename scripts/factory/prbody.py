@@ -120,9 +120,11 @@ class Facts:
     git: GitFacts
 
 
-def collect(gh: Gh, git: Git, repo: str, issue: int) -> Facts:
+def collect(gh: Gh, git: Git, repo: str, issue: int, *, stuck: bool = False) -> Facts:
     """Every fact the body is built from. Raises ``PrBodyError`` when the facts cannot be
-    trusted: no story marker, no or stale evidence, no map for that evidence, no verdict."""
+    trusted: no story marker, no or stale evidence, no map for that evidence, no verdict.
+    ``stuck``: the body of a stuck story's draft PR (rule H2), which may have no verdict
+    because the factory stopped before the AC verifier ran (S09)."""
     item = gh.api(f"repos/{repo}/issues/{issue}")
     if "pull_request" in item:
         raise PrBodyError(f"#{issue} is a pull request, not a story issue")
@@ -150,11 +152,15 @@ def collect(gh: Gh, git: Git, repo: str, issue: int) -> Facts:
                           f"{recorded.sha[:7]}; run `verify map`")
     note = verdict.checkpoint_note(gh, repo, issue, note_body)
     parsed = verdict.parse(note, verdict.issue_acs(body))
-    if not parsed.acs:
-        raise PrBodyError(f"issue #{issue}'s checkpoint note has no AC verifier lines (S10)")
-    parsed.problems += verdict.cross_check(
-        parsed, mapped, issue=issue, evidence_sha=recorded.sha,
-        checkpoint_branch=found[1].branch, branch_head=head)
+    if not parsed.acs and not stuck:
+        raise PrBodyError(f"issue #{issue}'s checkpoint note has no AC verifier lines (S10); "
+                          "only a stuck story's draft PR (`--stuck`) may be rendered without "
+                          "them")
+    if parsed.acs:
+        parsed.problems += verdict.cross_check(
+            parsed, mapped, issue=issue, evidence_sha=recorded.sha,
+            checkpoint_branch=found[1].branch, branch_head=head,
+            test_pending="test" in recorded.pending)
     config, _ = evidence.approved_config(git)
     facts = git_facts(git, evidence.default_ref(git), recorded.sha)
     return Facts(
@@ -501,11 +507,13 @@ def render(facts: Facts, sections: dict[str, str]) -> Rendered:
         "summary": sections.get("summary", "").strip() or "None",
         "requirements": ", ".join(dict.fromkeys(facts.requirements)) or "None",
         "traceability_rows": _traceability(facts.git),
-        "ac_verification": "\n".join(a.line for a in facts.verdict.acs),
+        "ac_verification": _ac_verification(facts),
         "tests_added": _tests_added(facts),
         "tests_changed": _tests_changed(changed, unmatched),
-        "test_command": _command(facts.evidence, "test") or "commands.test is null",
-        "test_result": _result(facts.evidence.command("test")),
+        "test_command": (facts.evidence.pending.get("test") or _command(facts.evidence, "test")
+                         or "commands.test is null"),
+        "test_result": (_pending_result(facts.evidence) if "test" in facts.evidence.pending
+                        else _result(facts.evidence.command("test"))),
         "new_dependencies": _dependencies(deps),
         "doc_changes": _doc_changes(facts.git),
         "risks": sections.get("risks", "").strip() or "None",
@@ -563,22 +571,45 @@ def _result(c: evidence.CommandEvidence | None) -> str:
     return f"{text}; {c.detail}" if c.detail and c.status in ("pass", "fail") else text
 
 
-def _status(c: evidence.CommandEvidence | None) -> str:
+def _status(c: evidence.CommandEvidence | None, pending: bool = False) -> str:
+    if pending:
+        return "Not run"
     if c is None or c.status == "skipped":
         return "Skipped"
     return "Pass" if c.status == "pass" else "Fail"
 
 
+def _default_branch(ev: evidence.Evidence) -> str:
+    """The default branch the approved config came from (``origin/main@abc`` -> ``main``)."""
+    return ev.config_source.split("@", 1)[0].removeprefix("origin/") or "the default branch"
+
+
+def _pending_outcome(ev: evidence.Evidence, name: str) -> str:
+    return (f"`{ev.pending[name]}` is introduced by this PR, so the factory has not run it: "
+            f"your merge approves it, and close-out (S12) runs it on `{_default_branch(ev)}`")
+
+
+def _pending_result(ev: evidence.Evidence) -> str:
+    return (f"not run: introduced by this PR; close-out (S12) runs it on "
+            f"`{_default_branch(ev)}` after your merge")
+
+
 def _command_gate(key: str, label: str, ev: evidence.Evidence, name: str) -> Gate:
     c = ev.command(name)
+    if name in ev.pending:
+        return Gate(key, label, _status(c, pending=True), _pending_outcome(ev, name))
     return Gate(key, label, _status(c), _outcome(c, name))
 
 
 def _lint_gate(ev: evidence.Evidence) -> Gate:
-    parts = [(name, ev.command(name)) for name in ("lint", "typecheck")]
-    statuses = {_status(c) for _, c in parts}
-    status = "Fail" if "Fail" in statuses else "Skipped" if statuses == {"Skipped"} else "Pass"
-    text = "; ".join(f"{name}: {_status(c).lower()}, {_outcome(c, name)}" for name, c in parts)
+    parts = [(name, ev.command(name), name in ev.pending) for name in ("lint", "typecheck")]
+    statuses = {_status(c, pending) for _, c, pending in parts}
+    status = ("Fail" if "Fail" in statuses else "Skipped" if statuses == {"Skipped"}
+              else "Not run" if "Not run" in statuses else "Pass")
+    text = "; ".join(
+        f"{name}: {_status(c, pending).lower()}, "
+        + (_pending_outcome(ev, name) if pending else _outcome(c, name))
+        for name, c, pending in parts)
     return Gate("gate_lint", "Q2 Lint & types", status, text)
 
 
@@ -602,6 +633,10 @@ def _tests_gate(facts: Facts) -> Gate:
 
 def _evidence_gate(facts: Facts) -> Gate:
     v = facts.verdict
+    if not v.acs:
+        return Gate("gate_ac_evidence", "Q5 AC evidence", "Fail",
+                    "not verified: the factory is stuck, and stopped before the AC verifier "
+                    "(S10) ran")
     counts = {k: sum(a.verdict == k for a in v.acs) for k in verdict.VERDICTS}
     text = (f"{counts['pass']} pass, {counts['fail']} fail, {counts['not-verifiable']} "
             f"not-verifiable, held against the AC-to-test map @ `{facts.acmap.sha[:7]}`")
@@ -610,8 +645,24 @@ def _evidence_gate(facts: Facts) -> Gate:
                     f"{text}; the verdict is invalid: " + "; ".join(v.problems))
     if v.failing:
         return Gate("gate_ac_evidence", "Q5 AC evidence", "Fail", f"{text}; an AC failed")
+    if "test" in facts.evidence.pending:
+        return Gate("gate_ac_evidence", "Q5 AC evidence", "Not run",
+                    f"{text}; commands.test is introduced by this PR, so these are the AC "
+                    "verifier's own results, each pass with a test named after its AC; "
+                    f"close-out (S12) runs the tests on `{_default_branch(facts.evidence)}` "
+                    "after your merge")
     return Gate("gate_ac_evidence", "Q5 AC evidence", "Pass",
                 f"{text}; every pass has a passing mapped test")
+
+
+def _ac_verification(facts: Facts) -> str:
+    """The verifier's lines, unchanged (rule H5), or, for a stuck story stopped before S10,
+    what the recorded run shows instead."""
+    if facts.verdict.acs:
+        return "\n".join(a.line for a in facts.verdict.acs)
+    return ("Not verified: the factory is stuck, and stopped before the AC verifier (S10) "
+            f"ran. The AC-to-test map of the recorded run @ `{facts.acmap.sha[:7]}`: "
+            + ", ".join(f"AC{m.ac} {m.status}" for m in facts.acmap.acs) + ".")
 
 
 def _size_gate(facts: Facts) -> Gate:
@@ -813,12 +864,11 @@ def check(gh: Gh, git: Git, repo: str, number: int) -> CheckResult:
     """Hold open PR ``number`` against a fresh render from the facts as they are now."""
     pr = gh.api(f"repos/{repo}/pulls/{number}")
     branch = (pr.get("head") or {}).get("ref") or ""
-    m = _STORY_BRANCH.match(branch)
-    if m is None:
+    issue = story_issue(branch)
+    if issue is None:
         raise PrBodyError(f"PR #{number}'s branch {branch!r} is not a story branch "
                           "(story/<issue>-<slug>)")
-    issue = int(m[1])
-    facts = collect(gh, git, repo, issue)
+    facts = collect(gh, git, repo, issue, stuck=bool(pr.get("draft")))
     problems = []
     if pr.get("state") != "open":
         problems.append(f"PR #{number} is {pr.get('state')}, not open")
@@ -837,6 +887,28 @@ def check(gh: Gh, git: Git, repo: str, number: int) -> CheckResult:
                                      "fresh render", f"PR #{number}", lineterm="", n=0))
     differences = [line for line in diff[2:] if not line.startswith("@@")]
     return CheckResult(number, issue, differences, problems, rendered)
+
+
+def story_issue(branch: str) -> int | None:
+    """The story issue of a story branch (``story/<issue>-<slug>``), or ``None``."""
+    m = _STORY_BRANCH.match(branch)
+    return int(m[1]) if m else None
+
+
+def unrendered(gh: Gh, git: Git, repo: str, branch: str, body: str, *,
+               stuck: bool) -> list[str]:
+    """How a story PR body that is about to be published differs from a fresh render of
+    the facts, taking its Summary, Risks and Follow-ups as they are; empty if it is the
+    factory's render (rule H1, T6.5). ``factory.py pr`` refuses any difference, so no gate
+    result, test result or verdict line in a story PR is ever written by hand."""
+    issue = story_issue(branch)
+    if issue is None:
+        raise PrBodyError(f"a body with a factory:pr marker needs a story branch "
+                          f"(story/<issue>-<slug>), not {branch!r}")
+    rendered = render(collect(gh, git, repo, issue, stuck=stuck), template_sections(body))
+    diff = list(difflib.unified_diff(normalize(rendered.body), normalize(body),
+                                     "fresh render", "body", lineterm="", n=0))
+    return [line for line in diff[2:] if not line.startswith("@@")]
 
 
 # ----------------------------------------------------------------------------- output

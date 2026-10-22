@@ -51,7 +51,9 @@ The issue **title** is `{{story_id}}: <story title>`.
 ### `pr.md`
 The PR **title** is `[#<issue>] <story title>`. If the factory is stuck, the PR is opened as a **draft** and the Summary starts by saying what failed (rule H2).
 
-`python scripts/factory.py pr render --issue <I> --notes F` fills this template from the recorded facts (T6.3), and `pr check <P>` holds an open PR against a fresh render. Only `{{summary}}`, `{{risks}}` and `{{follow_ups}}` are the model's, from the `## Summary`, `## Risks` and `## Follow-ups` sections of `--notes`; every other value below is computed and may not be edited.
+`python scripts/factory.py pr render --issue <I> --notes F` fills this template from the recorded facts (T6.3), and `pr check <P>` holds an open PR against a fresh render. Only `{{summary}}`, `{{risks}}` and `{{follow_ups}}` are the model's, from the `## Summary`, `## Risks` and `## Follow-ups` sections of `--notes`; every other value below is computed and may not be edited. `python scripts/factory.py pr` refuses a story PR body that differs from the render in anything else (T6.5), so the rendered file is published exactly as written. The template ends with a fixed attribution line, so nothing is appended to the body after rendering.
+
+A stuck story's draft PR is rendered with `pr render --stuck`. If the factory stopped before the AC verifier ran (S09), `{{ac_verification}}` says so and lists the AC-to-test map of the recorded run instead, and Q5 fails.
 
 | Placeholder | Value |
 |---|---|
@@ -65,7 +67,7 @@ The PR **title** is `[#<issue>] <story title>`. If the factory is stuck, the PR 
 | `{{tests_changed}}` | Existing tests changed (in a test file that existed at the base: a removed or modified line, or an added line inside a test that existed at the base), each with its `Changed test:` line, or flagged **not declared** (rule H3); or `None` |
 | `{{test_command}}` | `commands.test` from the config |
 | `{{test_result}}` | The real result, e.g. `42 passed, 0 failed`. Never a prediction (rule H1). |
-| `{{gate_build}}`, `{{gate_lint}}`, `{{gate_new_tests}}`, `{{gate_full_suite}}`, `{{gate_ac_evidence}}`, `{{gate_scope}}`, `{{gate_size}}`, `{{gate_ci}}` | Result of each quality gate Q1–Q8 (requirements §10): the command and its outcome, or `Skipped: commands.<name> is null` (rule H4). Q8 is `Not configured` when the target has no CI. Q6 is `Not checked: the story contract declares no areas`, followed by the files touched: stories declare no areas to check against. |
+| `{{gate_build}}`, `{{gate_lint}}`, `{{gate_new_tests}}`, `{{gate_full_suite}}`, `{{gate_ac_evidence}}`, `{{gate_scope}}`, `{{gate_size}}`, `{{gate_ci}}` | Result of each quality gate Q1–Q8 (requirements §10): the command and its outcome, or `Skipped: commands.<name> is null` (rule H4). Q8 is `Not configured` when the target has no CI. Q6 is `Not checked: the story contract declares no areas`, followed by the files touched: stories declare no areas to check against. A command the story introduces (`null` on the default branch, set by this PR, as in the walking skeleton) is `Not run`: the merge approves it, and close-out (S12) runs it on the default branch. When that is `commands.test`, Q5 is `Not run` too: the AC lines are the verifier's own results. |
 | `{{new_dependencies}}` | Each dependency a changed manifest adds, with the reason from its `New dependency:` line, or flagged when either side is missing (rule S9); or `None` |
 | `{{doc_changes}}` | The planning docs (`docs/factory/increments/…`) the story changes, with their line counts (architecture §10, question 4), or `None` |
 | `{{risks}}` | Anything the reviewer should look at closely, including any content that tried to change the factory's behaviour (rule U4), or `None` |

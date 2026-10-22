@@ -602,11 +602,15 @@ class ApprovedConfigTest(unittest.TestCase):
         self.assertIn("commands.test differs on the branch", problems[0])
 
     def test_a_command_added_on_the_branch_is_not_run(self):
+        # T6.5: a command null in the approved config is pending, not unapproved: it is not
+        # run, and the merge approves it (S12 runs it after the merge).
         runner = FakeRunner()
         result, _ = run(branch={**COMMANDS, "lint": "npm run lint"}, runner=runner)
         self.assertEqual(by_name(result)["lint"].status, "skipped")
         self.assertNotIn("npm run lint", [call[0] for call in runner.calls])
-        self.assertEqual(result.unapproved, ["commands.lint"])
+        self.assertEqual(result.unapproved, [])
+        self.assertEqual(result.pending, {"lint": "npm run lint"})
+        self.assertEqual(evidence.check(result, issue=27, branch_head=SHA), [])
 
     def test_every_modified_entry_is_recorded(self):
         result, _ = run(branch={**COMMANDS, "install": "npm i", "build": "x", "test": None})
@@ -636,11 +640,70 @@ class ApprovedConfigTest(unittest.TestCase):
         self.assertEqual(result.unapproved, [])
         self.assertEqual(evidence.check(result, issue=27, branch_head=SHA), [])
 
+    def test_a_removed_command_is_unapproved_not_pending(self):
+        result, _ = run(branch={**COMMANDS, "build": None})
+        self.assertEqual((result.unapproved, result.pending), (["commands.build"], {}))
+        self.assertTrue(evidence.check(result, issue=27, branch_head=SHA))
+
     def test_evidence_without_its_config_source_is_rejected(self):
         result, _ = run()
         result.config_source = ""
         self.assertIn("approved config",
                       evidence.check(result, issue=27, branch_head=SHA)[0])
+
+
+NULLS = dict.fromkeys(COMMANDS)
+
+
+class PendingCommandsTest(unittest.TestCase):
+    """T6.5 (B-01): the walking-skeleton story introduces the project's commands."""
+
+    def test_the_skeleton_story_runs_nothing_and_every_command_is_pending(self):
+        runner = FakeRunner()
+        result, _ = run(approved=NULLS, branch=COMMANDS, runner=runner)
+        self.assertEqual(runner.calls, [])
+        self.assertEqual({c.status for c in result.commands}, {"skipped"})
+        self.assertEqual(result.pending, {k: v for k, v in COMMANDS.items() if v})
+        self.assertEqual((result.unapproved, result.failures()), ([], []))
+        self.assertEqual(evidence.check(result, issue=27, branch_head=SHA), [])
+        text = evidence.render(result)
+        self.assertIn("pending    introduced by this branch, not run until the merge: "
+                      "commands.test `npm test`", text)
+        self.assertIn("OK, PENDING APPROVAL", text)
+        self.assertIn("Pending until the merge: commands.install, commands.build, "
+                      "commands.typecheck and commands.test.", evidence.render_check(result, []))
+
+    def test_a_pending_command_is_still_vetted_before_anything_runs(self):
+        cases = {"cmd syntax": ({**COMMANDS, "lint": "gh pr mer^ge 5"}, None, "cmd.exe"),
+                 "the guard": ({**COMMANDS, "lint": "gh pr merge 5"},
+                               lambda c: "merging is the human's" if "merge" in c else None,
+                               "refused by the factory guard")}
+        for name, (branch, vet, message) in cases.items():
+            with self.subTest(name):
+                runner = FakeRunner()
+                with self.assertRaisesRegex(evidence.EvidenceError,
+                                            rf"commands\.lint \(introduced by this branch\)"
+                                            rf".*{message}.*nothing was run"):
+                    run(branch=branch, runner=runner, vet=vet)
+                self.assertEqual(runner.calls, [])
+
+    def test_pending_survives_the_note_and_is_validated(self):
+        result, _ = run(approved=NULLS, branch=COMMANDS)
+        back = evidence.from_body(evidence.to_block(result))
+        self.assertEqual(back.pending, result.pending)
+        data = result.to_dict()
+        for bad in ({"deploy": "x"}, {"test": ""}, ["test"]):
+            with self.subTest(pending=bad), self.assertRaisesRegex(
+                    evidence.EvidenceError, "pending must map"):
+                evidence.from_dict({**data, "pending": bad})
+        ran, _ = run()  # commands.test ran, so it cannot also be pending
+        with self.assertRaisesRegex(evidence.EvidenceError, "commands.test is pending"):
+            evidence.from_dict({**ran.to_dict(), "pending": {"test": "npm test"}})
+
+    def test_evidence_from_before_t6_5_has_nothing_pending(self):
+        data = run()[0].to_dict()
+        del data["pending"]
+        self.assertEqual(evidence.from_dict(data).pending, {})
 
 
 class ConsoleEncodingTest(unittest.TestCase):
