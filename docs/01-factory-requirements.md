@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Status** | Draft v3, with decisions D1–D5 applied |
+| **Status** | v3, with decisions D1–D5 applied. The MVP is implemented (M0–M5, see [progress.md](progress.md)). This document changes only when a requirement changes. |
 | **Date** | 2026-09-24 |
-| **Scope** | MVP of a reusable factory. Nothing is built yet. |
+| **Scope** | MVP of a reusable factory |
 | **First test project** | Task Tracker (used to test the factory; it is not part of the factory) |
 
 ---

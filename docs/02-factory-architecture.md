@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Status** | Proposed, for review before implementation |
+| **Status** | Describes the factory as built. Each task that changes the design updates it in the same PR ([03-factory-plan.md](03-factory-plan.md) §3, Definition of Done item 7). Planned changes are in [05-roadmap-m6-m9.md](05-roadmap-m6-m9.md); for example, §3's invocation model changes in M9 ([ADR-0003](adr/0003-plugin-packaging-in-t9.md)). |
 | **Date** | 2026-09-24 |
-| **Implements** | [01-factory-requirements.md](01-factory-requirements.md) (Draft v2, D1–D5) |
+| **Implements** | [01-factory-requirements.md](01-factory-requirements.md) (v3, D1–D5) |
 
 ---
 
