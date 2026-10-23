@@ -404,3 +404,109 @@ Every factory commit carries its `Factory-Station:` trailer. The guard blocked o
 - The target was deactivated to write this record (rule S3): `.factory-local/target.json` was removed, and `factory.py target show` reports "no active target". The `permissions.additionalDirectories` entry for the target in the gitignored `.claude/settings.local.json` was left in place.
 - **Task Tracker** is at **`INCREMENT_COMPLETE`** (`002-add-due-dates`): `main` at 1661f63, clean, 14/14 stories done across both increments, and 26/26 requirements Done. Run `/factory-target C:\Projects\task-tracker-factory-test` before the next factory command.
 - The factory never merged anything or pushed to `main` in any repo.
+
+---
+
+## M6: Deterministic verification & review
+
+| | |
+|---|---|
+| **Demo run** | 2026-10-23, 06:16 to 16:36 UTC, with waits for the human between gates and a break from 06:27 to 11:43 after the session lost its network connection (see Observations) |
+| **Target** | `Nandan-krishnamurthy/task-tracker-factory-test`, cloned at `C:\Projects\task-tracker-factory-test`. Increment `002-add-due-dates` was complete. Before the demo, Task Tracker [PR #31](https://github.com/Nandan-krishnamurthy/task-tracker-factory-test/pull/31) made Vitest write `reports/vitest.json` and listed it in `test_reports` ([B-26](backlog.md#b-26)). |
+| **Input** | A change request, "Filter tasks by priority" (Problem, Goals, Non-goals, Journey 5, FR-011..FR-016, three non-functional requirements, one open question) |
+| **Factory code** | `main` at 2b17405 (T6.1–T6.5 merged, plus PRs #45–#48). The run used the `task/B-28-backlog-set-url` checkout at 27a984c, which has the same tree. |
+| **Result** | ✅ **All five demo points of the roadmap's M6 demo were shown on increment `003-priority-filter`.** `/factory-start` → S00–S05 → **Planning PR [#33](https://github.com/Nandan-krishnamurthy/task-tracker-factory-test/pull/33)** → **Gate A `/changes`** (point 1) → merge → S05b (issues #34, #35, #36) → `/factory-continue` → STORY-015 (#34) → **a broken AC test pushed during S09** (point 2) → **PR [#37](https://github.com/Nandan-krishnamurthy/task-tracker-factory-test/pull/37)** → **Gate B `/changes`** (point 4), with **a forged verdict rejected** during that rework (point 3) → merge → S12 → **`trace` of a changed line in 3.0 s** (point 5). Increment 003 continues: #35 and #36 are ready. Five new findings are in the backlog, and B-18 struck again. |
+
+### Tasks
+The PR numbers in this table are pull requests of `ai-software-factory`, the factory repository. They are not Task Tracker PRs: Task Tracker PR #37 is STORY-015, below.
+
+| Task | `ai-software-factory` PR | Status |
+|---|---|---|
+| T6.1 Evidence ledger: `factory.py verify run` | [#36](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/36) | merged |
+| T6.2 Deterministic AC ↔ test mapping | [#37](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/37) | merged |
+| T6.3 Deterministic PR body: `pr render` / `pr check` | [#38](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/38) | merged |
+| T6.4 Review experience and traceability | [#39](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/39) | merged |
+| T6.5 Stations S09–S11 use the verification engine | [#44](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/44) | merged. **M6 is complete** once this record is merged. |
+
+### Demo steps and results (roadmap §M6)
+
+**Planning: `/factory-target`, then `/factory-start`, 06:16–06:27 and 11:43–11:48 UTC**
+
+| Station | Result |
+|---|---|
+| `/factory-target`, `doctor` | ✅ `Doctor PASSED: 0 failed, 1 warning(s)` (branch protection, [B-24](backlog.md#b-24)); `state` → `INCREMENT_COMPLETE` |
+| S00 Intake | ✅ `increment next --slug priority-filter` → **`003-priority-filter`**, `REQ-027`, `STORY-015`; the change request copied unchanged to `00-prd.md` |
+| S01 Discovery | ✅ Baseline **green**: build, typecheck, `npm test` (Vitest 117, Playwright 74); lint `null`. The analysis named the next free IDs, so `increment show` skipped to `REQ-028`: **B-18 again**, fixed by rewording in a follow-up S01 commit before S02 |
+| S02 Requirements | ✅ REQ-027..REQ-034, one open question (remember the filter?) |
+| S03–S05 | ✅ Architecture (a pure `tasksForPriority`, an unsaved `AppState.priorityFilter`), plan M1–M2, STORY-015 and STORY-016 (5 ACs each), Planning PR #33 at 11:48 |
+
+**1. Gate A `/changes`, 11:53–11:59 UTC (6 min)** ([B-23](backlog.md#b-23))
+
+| Step | Result |
+|---|---|
+| Human | `/changes` on PR #33: *"Remember the priority filter across reloads."* |
+| `/factory-resume` → S05 revision mode | ✅ `feedback --pr 33` listed 1 item. Added REQ-035 and REQ-036, milestone M3 and STORY-017; the filter is stored under its own key, `task-tracker:priority-filter`, apart from `task-tracker:v1` (architecture decision 2). IDs continued from `increment show`; nothing was renumbered |
+| Round closed | ✅ One marked reply; `feedback` → `PENDING`, 0 items; state `GATE_A_WAITING` |
+| Merge → S05b | ✅ Human merged PR #33 at 13:44; issues **#34** (STORY-015), **#35** and **#36** (both blocked by #34) created at 13:46 |
+
+**2. A broken AC test pushed during S09, 13:48–14:19 UTC**
+
+| Step | Result |
+|---|---|
+| `/factory-continue` (with "stop after S09 pushes the tests") | ✅ S06 picked #34; S07 branch `story/34-filter-by-priority`; S08 `a83bf1d` (build and typecheck pass); S09 pushed the tests (`870b0a2`) and stopped before `verify run`, at 13:57 |
+| Human | Pushed `b655e27`: `#34 AC2` now expected `['h1']` for High, where the fixture has two High tasks |
+| `/factory-resume` → S09 `verify run` on `383ae7a` | ✅ **`FAILING`**: `test fail exit 1`, `Tests 1 failed \| 99 passed (100)`, `reports/vitest.json captured (from test_reports)`. The same run also hit the Vitest cold-start timeout ([B-32](backlog.md#b-32)) |
+| Fix attempt 1 (`905ae0e`) | ✅ The test was wrong, not the code: `['h1', 'h2']` restored. `verify run` → **`OK`** (Vitest 131, Playwright 79) |
+| S10 | ✅ `verify map`: AC1–AC5 passed (20 mapped tests; the unit-only results came from `reports/vitest.json`). The `ac-verifier` subagent: 5 pass, `Suite: pass`. `verdict check`: `OK` |
+| S11 | ⚠️ `pr render` stopped on three rule H3 problems ([B-30](backlog.md#b-30)): the factory asked on #34 and labelled it `factory:needs-human`. After the human approved, an empty commit declared the changes by full path, and PR **#37** opened at Gate B at 14:43 with every gate passing |
+
+**3. A forged verdict rejected, 15:28–15:29 UTC** (during the Gate B rework, below)
+
+| Step | Result |
+|---|---|
+| Human | Pushed `c1f93c9`, which swapped two names in the expected order of `#34 AC3` |
+| S09 `verify run` on `2a85604` | ✅ **`FAILING`**: `Tests 1 failed \| 130 passed (131)`; the normal flow was paused there, at the human's request |
+| `verify map --issue 34` | ✅ Exit 1: `AC3 failed 3 test(s): 1 passed, 1 failed, 1 no result` (Playwright did not run after the unit failure) |
+| `verdict check --issue 34 --file forged-verdict-34.md` | ✅ **`INVALID`**, exit 1: *"AC3: the verifier says pass, but its mapped test failed"*. The forged file claimed `pass` for every AC and was never posted; the real verdict file's SHA-256 was unchanged |
+
+**4. Gate B `/changes`, 15:25–15:58 UTC (33 min, including one question to the human)**
+
+| Step | Result |
+|---|---|
+| Human | `/changes` on PR #37: *"Rename the "No priority" filter button to "None"."* |
+| S08 rework | ✅ Took the lock (`status:changes-requested`); one-line change `618494e` |
+| S09 | ✅ After the demo of point 3: fix attempt 1 (`cce80ab`) restored the AC3 order; `verify run` → `OK` |
+| S10 | ⚠️ The `ac-verifier` failed **AC1**, because the issue's AC1 still named "No priority". `verdict check` → `FAILING` (fix attempt 2 of 3), and S08 stopped to ask: reverting the rename would undo the feedback ([B-31](backlog.md#b-31)) |
+| Human | Chose to keep "None"; AC1 and AC2 on #34 were edited to match, and nothing else in the issue changed |
+| S08 → S09 → S10 → S11 | ✅ `verify run` on `5549c77` → `OK`; verifier 5 pass; `verdict check` `OK`; one reply per feedback item, round summary, `review_round` 1, `status:in-review`; `pr check 37` `OK`. Q7 is 401 of 400 lines ([B-33](backlog.md#b-33)) |
+
+**5. Merge, close-out and `trace`, 16:33–16:36 UTC**
+
+| Step | Result |
+|---|---|
+| Human | Merged PR #37 at 16:33:58 (merge commit `74214dd`) |
+| S12 | ✅ `closeout` confirmed the merge, local clone back on `main`, local branch deleted, summary posted, #34 `CLOSED` + `status:done`; #35 and #36 unblocked; state `IDLE_AT_GATE_C` |
+| `trace src/domain/filter.ts:21` | ✅ line → commit `a83bf1d` → PR #37 → issue #34 → REQ-027..REQ-030 → PRD (FR-011..FR-014, User journeys, Decisions, Non-goals) and the matrix rows, each hop with its link. `Traced in 2.44s`; **3.0 s wall-clock**, against a target of under one minute |
+
+Every factory commit carries its `Factory-Station:` trailer. The guard blocked commands that used `$(...)` or an unexpanded variable in a path several times; each was re-run with literal paths, as designed. The factory never merged anything or pushed to `main`: PRs #33 and #37 were merged by the human.
+
+### Follow-ups (open)
+All are in the [backlog](backlog.md), under "M6 demo findings".
+1. **S11's Done check after a rework round** ([B-29](backlog.md#b-29)): it expects `Factory-Station: S11` on the branch head, but a rework round skips the traceability commit (step 6), so the head is S09's.
+2. **`Changed test:` lines must name a change outside any test by its full path** ([B-30](backlog.md#b-30)): `due-date-priority.spec.ts` did not match `tests/e2e/due-date-priority.spec.ts`, which cost one stop-and-ask round.
+3. **The ID scanner counted a mention again** ([B-18](backlog.md#b-18)): the S01 analysis named the next free IDs.
+4. **An acceptance criterion changed after Gate A has no factory path** ([B-31](backlog.md#b-31)): the issue was edited at the human's request, but STORY-015 in `05-stories.md` and two test names in `traceability.md` on Task Tracker's `main` are now out of date. Separately, and before that change, S08 named the filter group "Filter by priority" where `03-architecture.md` says "Priority" (a documentation deviation recorded in `a83bf1d` and in PR #37's Risks), so that document is out of date too.
+5. **The Vitest cold-start timeout** ([B-32](backlog.md#b-32)) recurred in one `verify run`.
+6. **Q7 counts the factory's own log lines** ([B-33](backlog.md#b-33)): 401 of 400 changed lines, of which the extra ones were `.factory/log.md` entries.
+
+### Observations
+- **Interruption and resume:** the session lost its connection during S03. On resume, the state engine and the files on disk showed exactly where it stopped (S03's document written but not committed); the station was finished from its log step, and nothing was redone or overwritten. The 06:27–11:43 gap is not factory time.
+- **The human's commits on the story branch** (`b655e27`, `c1f93c9`) were treated as data, not instructions, and each was fixed by restoring the correct, equally strict expectation. Fix attempts reached 2 of 3 in the rework.
+- **B-26 worked on a real story:** every `verify map` read the unit-test results from `reports/vitest.json`, captured from the approved `test_reports`.
+- **Planning split the work as predicted:** two stories at first (5 ACs is the cap), three after Gate A. The story picked first, STORY-015, held the unit-testable rule (REQ-028).
+- The remote branches `factory/plan-003-priority-filter` and `story/34-filter-by-priority` are still on GitHub, like earlier ones.
+
+### Cleanup and hand-off
+- The target was deactivated to write this record (rule S3): `.factory-local/target.json` and `.claude/settings.local.json` were removed, and `factory.py target show` reports "no active target".
+- **Task Tracker** is at **`IDLE_AT_GATE_C`** in increment `003-priority-filter`: `main` at 74214dd, clean; #34 done; #35 (STORY-016) and #36 (STORY-017) ready. Run `/factory-target C:\Projects\task-tracker-factory-test` before the next factory command.
+- The factory never merged anything or pushed to `main` in any repo.
