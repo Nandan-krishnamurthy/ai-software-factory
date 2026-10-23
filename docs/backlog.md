@@ -163,7 +163,37 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
 ### <a id="b-17"></a>B-17 The timed traceability walk by a human (success criterion 6)
 - **What:** `trace` gives the chain in one command, but the walk by a human reviewer has not been timed.
 - **Source:** decision `c878c238#106` item 6 (see [task-log.md](task-log.md#t64-review-experience-and-traceability)); the roadmap's M6 demo item 5
-- **Status:** verified · **Owner:** M6 demo · **State:** open
+- **M6 demo, 2026-10-23:** `trace src/domain/filter.ts:21` followed the line to PR #37, issue #34, REQ-027..REQ-030 and the PRD in 2.44 s (3.0 s wall-clock), which meets the roadmap's M6 demo item 5. The assistant ran it; a walk by a human reviewer has still not been timed ([progress.md](progress.md#m6-deterministic-verification--review)).
+- **Status:** verified · **Owner:** unassigned (was the M6 demo) · **State:** open
+
+## M6 demo findings
+
+Found while running the M6 demo on Task Tracker, increment `003-priority-filter` ([progress.md](progress.md#m6-deterministic-verification--review)). The recurrence of [B-18](#b-18) is recorded on that item.
+
+### <a id="b-29"></a>B-29 S11's Done check cannot pass after a rework round
+- **What:** in rework mode, S11 step 6 (the traceability commit) is skipped because the rows already list `#<P>` from the first run, so S11 makes no commit and the story branch's head carries S09's (or S08's) trailer. S11's Done check still requires `git -C <T> log origin/<B> -1 --format=%B` to show `Factory-Station: S11`, which cannot hold. The state engine reports `GATE_B_WAITING_REVIEW` regardless, so nothing is blocked; only the checklist is wrong. The same skip leaves the rows' test names stale when a rework renames tests (REQ-027 and REQ-028 on Task Tracker).
+- **Source:** the M6 demo, point 4 (PR #37, rework round 1); [S11](../stations/S11-pr.md) step 6 and Done check
+- **Status:** verified · **Owner:** unassigned · **State:** open
+
+### <a id="b-30"></a>B-30 A `Changed test:` line must give a full path for a change outside any test
+- **What:** `prbody.changed_tests` matches a change outside any test (an import, a locator helper) by checking that the declared text contains the file's full path. `Changed test: due-date-priority.spec.ts …` did not match `tests/e2e/due-date-priority.spec.ts`, so `pr render` reported rule H3 problems, and also warned that the declared line named no change. [S09](../stations/S09-test.md) step 2 does not say that a full path is needed. Candidates: say so in S09, or also match by file name.
+- **Source:** the M6 demo, point 2: S11 stopped and asked on Task Tracker #34; the human approved an empty commit (`3f48c51`) with full-path lines; `scripts/factory/prbody.py` (`changed_tests`)
+- **Status:** verified · **Owner:** unassigned · **State:** open
+
+### <a id="b-31"></a>B-31 No factory path for changing an acceptance criterion after Gate A
+- **What:** a Gate B `/changes` renamed a label that AC1 and AC2 name. The AC verifier, which sees only the issue's criteria and the diff, correctly failed AC1, and S08 had to stop and ask, because the only "fix" would have undone the feedback. At the human's request, AC1 and AC2 were edited on the issue. STORY-015 in the approved `05-stories.md` on the target's `main` and two test names in `traceability.md` are now out of date, and no station records or reconciles such a change. Needs a decision: how a rework that changes an approved criterion updates the issue and the planning documents (for example a small planning PR, or S11 carrying the document changes).
+- **Source:** the M6 demo, point 4 (the question and the human's decision on Task Tracker #34; PR #37)
+- **Status:** verified · **Owner:** unassigned · **State:** open
+
+### <a id="b-32"></a>B-32 Vitest sometimes cannot start a worker on a cold start
+- **What:** on the Windows machine used, the first `npm test` after a pause sometimes fails before Playwright runs: Vitest reports `Failed to start forks worker for test files …/src/ui/render.test.ts` (`Timeout waiting for worker to respond`), that file does not run, and every test that ran passes. `verify run` then records `test fail`, which can spend a fix attempt. Every rerun has passed. It is environmental, on the target's side (Vitest's pool), but the factory cannot tell such a failure from a real one.
+- **Source:** the B-26 integration (Task Tracker PR #31, 2026-10-22); the M6 demo, point 2 (`verify run` on `383ae7a`)
+- **Status:** observed · **Owner:** unassigned · **State:** open
+
+### <a id="b-33"></a>B-33 Q7 Size counts the factory's own `.factory/log.md` lines
+- **What:** `pr render` counts every changed line toward Q7, including the `.factory/log.md` line that each station run appends. A rework round therefore adds lines that no reviewer needs to read: PR #37 went from 397 to 401 of 400 lines through log lines alone, and Q7 warned (a warning, not a stop; see Accepted limitations, T6.3). Candidate: leave `.factory/log.md` out of Q7, as generated files are.
+- **Source:** the M6 demo, point 4 (PR #37, `pr render`)
+- **Status:** verified · **Owner:** unassigned · **State:** open
 
 ## Earlier findings assigned by the roadmap
 
@@ -171,12 +201,12 @@ The roadmap's open-findings table ([05-roadmap-m6-m9.md](05-roadmap-m6-m9.md), "
 
 | ID | Finding | Owner | State |
 |---|---|---|---|
-| <a id="b-18"></a>B-18 | The ID scanner counts mentions in the docs (M2 Problem 4, M5 follow-up 1) | T7.1 | open. In M5 the docs were reworded so that they mention no unallocated ID ([progress.md](progress.md), M5 record). The assistant restated this as an interim practice (`1bcf8818#1057`): keep literal `REQ-`/`STORY-` numbers out of prose under the target's `docs/factory/`, and check `increment show` before S05. This is guidance, not a recorded human decision. |
+| <a id="b-18"></a>B-18 | The ID scanner counts mentions in the docs (M2 Problem 4, M5 follow-up 1) | T7.1 | open. In M5 the docs were reworded so that they mention no unallocated ID ([progress.md](progress.md), M5 record). The assistant restated this as an interim practice (`1bcf8818#1057`): keep literal `REQ-`/`STORY-` numbers out of prose under the target's `docs/factory/`, and check `increment show` before S05. This is guidance, not a recorded human decision. It struck again in the M6 demo (2026-10-23): the S01 analysis named the next free IDs, and `increment show` skipped to `REQ-028`; rewording the line in a follow-up S01 commit restored `REQ-027` ([progress.md](progress.md#m6-deterministic-verification--review)). |
 | <a id="b-19"></a>B-19 | Stale story markers without the label (M4 follow-up 1) | T7.1 | open |
 | <a id="b-20"></a>B-20 | A PRD in `docs/` triggers S01 (M2 Problem 2, M4 follow-up 2) | T7.2 | open |
 | <a id="b-21"></a>B-21 | A PDF PRD can't be "copied unchanged" (M2 Problem 3) | T7.2 | open |
 | <a id="b-22"></a>B-22 | S00 runs `doctor` before `labels ensure` (M2 Problem 1) | T7.2 | open |
-| <a id="b-23"></a>B-23 | The Gate A `/changes` revision round has never been demonstrated (M2, M4, M5) | M6 demo | open |
+| <a id="b-23"></a>B-23 | The Gate A `/changes` revision round has never been demonstrated (M2, M4, M5) | M6 demo | **resolved**: demonstrated in the M6 demo, point 1, on Task Tracker's Planning PR #33 ([progress.md](progress.md#m6-deterministic-verification--review)) |
 | <a id="b-24"></a>B-24 | `main` has no branch protection (M5 follow-up 3) | T9.6 (`doctor`) and the runbook | open |
 | <a id="b-25"></a>B-25 | Close-out wording on an increment's last story (M5 follow-up 2) | T6.4 | **resolved** by [PR #39](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/39) |
 | — | Timed traceability walk-through, success criterion 6 (M5) | T6.4 | `trace` delivered by PR #39; the timed human walk moved to the M6 demo: see [B-17](#b-17) |
