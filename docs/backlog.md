@@ -138,6 +138,8 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
   - `git -C <T> remote set-head origin story/27-x`
   - `git -C <T> update-ref refs/remotes/origin/main HEAD`
   - `git -C <T> symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/story/27-x`
+  - **Also allowed** (checked with `guard.decide` on 2026-10-23): `git -C <T> remote set-url origin <url>` and `git -C <T> config remote.origin.url <url>`. `origin` can then name another repository, so `git ls-remote origin` is not authoritative by itself; the GitHub API for the repository recorded with the target is.
+  - **Not only through the guard:** `verify run` runs the approved test command with bash, outside the guard, so the story branch's test code can also run these commands. A guard block (criterion 6 below) cannot be the main fix.
 - **Risk:** after any of these, the story branch's own config is treated as approved. Its `commands.*` would run and pass `verify check` as approved, and its `test_reports` would be read as trusted, bypassing ADR-0004's rule that only commands a human merged may run. The same refs also decide `config_source`, `unapproved`, `pending`, the base of `verify map`'s diff, and `pr render`'s diff base and its `limits.max_diff_lines` and `ci_required`. The guard still vets every command, so this does not by itself open a merge path. In contrast, the story branch's head is already taken from the remote (`git ls-remote`, `evidence.remote_head`).
 - **Expected behaviour:** the approved config comes from an authoritative default-branch head: the default branch and its commit as GitHub reports them, never from what local refs say. Local ref changes cannot change what is approved, and anything that cannot be confirmed fails closed.
 - **Proposed acceptance criteria** (for the owning task to confirm; not decided):
@@ -148,8 +150,8 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
   5. The remote cannot be reached, or its answer cannot be parsed: fail closed, with the reason, and nothing runs.
   6. Optional defence in depth: the guard blocks rewriting `refs/remotes/origin/*` and `remote set-head` in the target.
   7. Unit tests use fakes, with no network; Windows Git Bash and PowerShell, like the rest of the engine.
-- **Source:** found during the review of B-26 ([PR #45](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/45)), 2026-10-22: the code paths above and a `guard.decide` check of the three commands
-- **Status:** verified (the commands are allowed, and the code reads local refs); analysis (the acceptance criteria) · **Owner:** unassigned: T9.5 (guard hardening) or a standalone hardening task sequenced by the human · **State:** open. ADR-0004 is unchanged; making its "default branch on `origin`" authoritative may call for an amendment or a new ADR.
+- **Source:** found during the review of B-26 ([PR #45](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/45)), 2026-10-22: the code paths above and a `guard.decide` check of the three commands; the `remote set-url` check, 2026-10-23
+- **Status:** verified (the commands are allowed, and the code reads local refs); analysis (the acceptance criteria) · **Owner:** unassigned: T9.5 (guard hardening) or a standalone hardening task sequenced by the human; **due before T8.1** (the headless runner, which runs unattended between gates), the human's decision on 2026-10-23 · **State:** open. ADR-0004 is unchanged; making its "default branch on `origin`" authoritative may call for an amendment or a new ADR.
 
 ## Verification not yet done
 
