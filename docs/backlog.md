@@ -85,6 +85,13 @@ This is the backlog that [03-factory-plan.md](03-factory-plan.md) §5 refers to 
 - **Source:** `factory.py pr --help` ("an existing PR keeps its state"); the S09 stuck path, unchanged in this respect by T6.5
 - **Status:** analysis · **Owner:** unassigned · **State:** open
 
+## Handed on by T7.1
+
+### <a id="b-34"></a>B-34 An ID removed during a Gate A revision round can be reused
+- **What:** T7.1 reads a Planning PR's records at its final head commit only. Suppose a revision round allocates an ID (for example a new STORY) and a later round removes it before the PR is merged or closed. That ID is then in no record that is read, and can be handed out again. S05's revision rules forbid renumbering, and every earlier commit of the PR still holds the old record. Candidates: read every commit of a Planning PR, or treat a removed record as retired in `02-requirements.md` or `05-stories.md`.
+- **Source:** T7.1 design discussion (`34ce5c38#146`–`#165`); [task-log.md](task-log.md#t71-id-allocation-from-structured-sources-only), "Known limitation"
+- **Status:** analysis · **Owner:** unassigned · **State:** open
+
 ## Specification gaps
 
 ### <a id="b-08"></a>B-08 Q6 scope: the story contract declares no areas
@@ -166,6 +173,11 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
 - **M6 demo, 2026-10-23:** `trace src/domain/filter.ts:21` followed the line to PR #37, issue #34, REQ-027..REQ-030 and the PRD in 2.44 s (3.0 s wall-clock), which meets the roadmap's M6 demo item 5. The assistant ran it; a walk by a human reviewer has still not been timed ([progress.md](progress.md#m6-deterministic-verification--review)).
 - **Status:** verified · **Owner:** unassigned (was the M6 demo) · **State:** open
 
+### <a id="b-35"></a>B-35 Reading a closed Planning PR's records after its branch is deleted, against live GitHub
+- **What:** T7.1 reads each Planning PR's records at its head commit by SHA, so that an abandoned plan's IDs are never reused, even after its `factory/plan-<inc>` branch is deleted. GitHub keeps a closed PR's head commit (`refs/pull/<n>/head`), but this has been tested only with a fake GitHub. A live check needs GitHub writes on a throwaway repo: push a record file, open a PR with a planning marker, close it, delete the branch, and run `increment show`. Every Planning PR read live so far (Task Tracker #1, #26, #33) still has its branch.
+- **Source:** T7.1, Step 6 of the approved implementation prompt; declined for now by the human (`34ce5c38#481`, 2026-10-25T10:44:41Z). See [task-log.md](task-log.md#t71-id-allocation-from-structured-sources-only).
+- **Status:** analysis · **Owner:** unassigned (candidate: the M7 demo) · **State:** open
+
 ## M6 demo findings
 
 Found while running the M6 demo on Task Tracker, increment `003-priority-filter` ([progress.md](progress.md#m6-deterministic-verification--review)). The recurrence of [B-18](#b-18) is recorded on that item.
@@ -201,8 +213,8 @@ The roadmap's open-findings table ([05-roadmap-m6-m9.md](05-roadmap-m6-m9.md), "
 
 | ID | Finding | Owner | State |
 |---|---|---|---|
-| <a id="b-18"></a>B-18 | The ID scanner counts mentions in the docs (M2 Problem 4, M5 follow-up 1) | T7.1 | open. In M5 the docs were reworded so that they mention no unallocated ID ([progress.md](progress.md), M5 record). The assistant restated this as an interim practice (`1bcf8818#1057`): keep literal `REQ-`/`STORY-` numbers out of prose under the target's `docs/factory/`, and check `increment show` before S05. This is guidance, not a recorded human decision. It struck again in the M6 demo (2026-10-23): the S01 analysis named the next free IDs, and `increment show` skipped to `REQ-028`; rewording the line in a follow-up S01 commit restored `REQ-027` ([progress.md](progress.md#m6-deterministic-verification--review)). |
-| <a id="b-19"></a>B-19 | Stale story markers without the label (M4 follow-up 1) | T7.1 | open |
+| <a id="b-18"></a>B-18 | The ID scanner counts mentions in the docs (M2 Problem 4, M5 follow-up 1) | T7.1 | open. In M5 the docs were reworded so that they mention no unallocated ID ([progress.md](progress.md), M5 record). The assistant restated this as an interim practice (`1bcf8818#1057`): keep literal `REQ-`/`STORY-` numbers out of prose under the target's `docs/factory/`, and check `increment show` before S05. This is guidance, not a recorded human decision. It struck again in the M6 demo (2026-10-23): the S01 analysis named the next free IDs, and `increment show` skipped to `REQ-028`; rewording the line in a follow-up S01 commit restored `REQ-027` ([progress.md](progress.md#m6-deterministic-verification--review)). **Resolved** by the T7.1 PR (on merge): only `- **REQ-###**` bullets in `02-requirements.md`, `### STORY-###` headings in `05-stories.md` (in the working tree and at every Planning PR's head commit) and labelled story issues allocate IDs. A mention is only a warning ([task-log.md](task-log.md#t71-id-allocation-from-structured-sources-only)). |
+| <a id="b-19"></a>B-19 | Stale story markers without the label (M4 follow-up 1) | T7.1 | **resolved** by the T7.1 PR (on merge): a marker counts only on an issue with the `factory:story` label, for IDs and for the next increment number; an unlabelled one is a warning |
 | <a id="b-20"></a>B-20 | A PRD in `docs/` triggers S01 (M2 Problem 2, M4 follow-up 2) | T7.2 | open |
 | <a id="b-21"></a>B-21 | A PDF PRD can't be "copied unchanged" (M2 Problem 3) | T7.2 | open |
 | <a id="b-22"></a>B-22 | S00 runs `doctor` before `labels ensure` (M2 Problem 1) | T7.2 | open |

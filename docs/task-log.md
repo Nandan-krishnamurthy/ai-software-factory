@@ -31,6 +31,7 @@ Each entry is taken from its PR description and from the session in which the hu
 | `12c41339` | `12c41339-9a82-42b9-8504-24909a76cbea` | T6.2, T6.3 |
 | `c878c238` | `c878c238-890e-4dd2-a905-6956ecf1b25d` | T6.4, T6.5 preparation, documentation migration |
 | `c161a4ca` | `c161a4ca-39de-4e3c-bad1-4ee8caeeadcb` | Documentation migration PRs C and D, T6.5 |
+| `34ce5c38` | `34ce5c38-2316-4d05-b39a-d5a5cf9b33bc` | T7.1 |
 
 ---
 
@@ -215,3 +216,61 @@ The final review (`c878c238#1216`, 2026-10-21T12:15:58Z) found no blocking issue
 **Handed on:**
 - The stations pass no `--report` to `verify run`. With Vitest's default reporter, an AC covered only by unit tests has no passing mapped test, so its `pass` is `INVALID` ([B-26](backlog.md#b-26)). This is likely to matter in the M6 demo on Task Tracker.
 - The stuck path on a PR that is already ready for review (a rework that gets stuck) leaves it ready, because `--draft` applies only when a PR is created ([B-27](backlog.md#b-27)). This was already so before T6.5.
+
+---
+
+## T7.1 ID allocation from structured sources only
+
+| | |
+|---|---|
+| **Specification** | [05-roadmap-m6-m9.md](05-roadmap-m6-m9.md), "T7.1 ID allocation from structured sources only" |
+| **PR** | not yet opened |
+| **Status** | In review |
+
+**Approved decisions.** The questions were raised in `34ce5c38#146` (2026-10-25T07:47:22Z). Option C was approved in `34ce5c38#165` (2026-10-25T08:06:58Z), and implementation was approved in `34ce5c38#189` (2026-10-25T09:35:48Z), with the M5 test required to warn about both IDs.
+1. **D1, Option C: records at every Planning PR's head commit allocate IDs.**
+   - **What is read:** the PR's increment's `02-requirements.md` and `05-stories.md`, at its `headRefOid`, through the GitHub API by SHA (`repos/<repo>/commits/<sha>`, then `contents/<path>?ref=<sha>`). This applies to every PR with a planning marker, open, merged or closed, so an abandoned plan's IDs are never reused, even after its source branch is deleted.
+   - **What does not allocate:** a Planning PR body.
+   - **Fallback:** if a plan's records cannot be read, every ID in its body counts, with a warning naming the PR, the short SHA and the reason. The fallback applies when the head SHA is missing, when the commit request fails, when a file request fails with anything but a 404, when the response is not base64 file content, or when the content cannot be decoded. It can only count more IDs, never fewer.
+   - **Missing files:** a file missing (404) from a readable commit has no records and is not an error.
+   - **Rejected options:** Option A (abandoned plans' IDs may be reused) and Option B (count the stories table of closed Planning PR bodies) were both rejected.
+2. **D2: the record forms.**
+   - **REQs:** `^\s*-\s+\*\*REQ-###\*\*` in `<NNN-slug>/02-requirements.md`.
+   - **STORYs:** `^###\s+STORY-###` in `<NNN-slug>/05-stories.md`.
+   - **Where:** only in folders that are valid increment names.
+   - **What does not allocate:** `00-prd.md` (even with its own bold REQ bullets), the `01`, `03` and `04` documents, `traceability.md` and other folders.
+3. **D3: the label filter.**
+   - **What changes:** a story issue's marker counts only when the issue has the `factory:story` label (case-insensitive), as the state engine lists stories. This applies to ID allocation and to the next increment number.
+   - **What doesn't:** the refusal checks (`_blockers`, "stories without issues") are unchanged.
+4. **D4: warnings.**
+   - **Mentions:** every `REQ-`/`STORY-` match in any `*.md` under `docs/factory/`, in any Planning PR body, and in the marker of an issue without the label.
+   - **Warning lines:** each mentioned ID that is not allocated gives one warning, naming every source. These are sorted by ID, and the fallback warnings follow them.
+   - **Where they appear:** `warnings` is added to the JSON of `increment show` and `increment next`, and as `Warning:` lines in the text output. Exit codes are unchanged.
+5. **D5: no station changes.**
+
+**Interpretation, not a deviation:** the roadmap's "in increment docs" is read as the record files at any published planning commit, not only in the local working tree. The specification's sources are unchanged. Architecture §5.2 keeps "IDs are global and never reused"; its "Next IDs" and "Next increment" bullets were rewritten to match, and a bullet on warnings was added (Definition of Done item 7).
+
+**Deviation from the specification:** none.
+
+**Other decisions in the session:**
+- **The target was deactivated before starting.** Task Tracker was still the active target, so rule S3 applied. With approval (`34ce5c38#205`, 2026-10-25T09:44:39Z), `.factory-local/target.json` was removed, and the gitignored `.claude/settings.local.json` was left in place.
+- **The live sandbox check was declined.** It would have needed GitHub writes: close a Planning PR, delete its branch, then run `increment show` (`34ce5c38#481`, 2026-10-25T10:44:41Z). Reading after branch deletion is covered by a fake-GitHub unit test, and the live check is open as [B-35](backlog.md#b-35).
+
+**Verification:**
+- **Before and after, on the incidents** (the old code is `main` at `5c2e9a7`):
+  - AC1 (M5 note): before, `REQ-027 STORY-014`; after, `REQ-027 STORY-013`, with a warning for STORY-013.
+  - AC2 (M4 markers): before, `901-initial STORY-9251317`; after, `001-initial STORY-001`, with a warning for each issue.
+- **A read-only run against Task Tracker's GitHub** (no target activated, nothing written): the records of Planning PRs #1, #26 and #33 were read at `e2babf0`, `88900ec` and `36a17e4` (REQ-001..036, STORY-001..017). The result was `Next IDs: REQ-037, STORY-018`, with no warnings.
+
+**Changed existing tests** (each pinned the behaviour T7.1 replaces), all in `tests/test_increments.py`:
+- `test_reads_increments_ids_and_stories`: `REQ-013` in `traceability.md` and `REQ-500` in a non-increment folder are now mentions, not IDs.
+- `test_word_boundaries`: prose in `docs/factory/x.md` is now a mention.
+- `test_ids_from_issue_markers_and_planning_pr_bodies_count` became `test_ids_from_planning_records_and_labelled_issues_count`: a PR body no longer allocates, and the plan's records do.
+- `test_increment_seen_only_in_issue_markers_is_not_current`: the issue now carries the label. Without it the number is no longer kept (AC2, `M4RegressionTest`).
+- `CollectRemoteTest.test_reads_branches_planning_prs_and_story_issues` and the `CliTest` fixtures: Planning PRs have a head commit with record files, and story issues carry the label. `test_next_allowed_json` expects `"warnings": []`.
+
+**Known limitation:** only a Planning PR's final head is read. An ID that a Gate A revision round wrote and then removed before that head is not seen, so it can be handed out again ([B-34](backlog.md#b-34)). S05's revision rules already forbid renumbering.
+
+**Handed on:**
+- The B-18 interim practice (keep literal ID numbers out of prose under `docs/factory/`) was guidance only; no station states it, and D5 left the stations unchanged. It is no longer needed for correctness, since a mention now only warns. Whether S02 and S05 should report `increment show`'s warnings is left open.
+- The live check of reading a closed Planning PR after its branch is deleted ([B-35](backlog.md#b-35)).
