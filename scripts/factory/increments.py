@@ -10,14 +10,15 @@ one Planning PR, one set of stories, in ``docs/factory/increments/<NNN-slug>/``.
   seen only in story issue markers (e.g. issues created by hand or by a test), so an
   increment number is never reused, even one whose planning was abandoned.
 * **IDs are global and never reused.** The next ``REQ-###``/``STORY-###`` is one above
-  the highest *allocated* number (T7.1). Only structured records allocate:
-  ``- **REQ-###**`` bullets in an increment's ``02-requirements.md`` and ``### STORY-###``
-  headings in its ``05-stories.md``, both in the working tree and at the head commit of
-  every Planning PR (open, merged or closed, so an abandoned plan's IDs are never handed
-  out again), and story issues carrying both the ``factory:story`` label and the marker.
+  the highest *allocated* number (T7.1). Only the record files allocate: every ID named
+  in an increment's ``02-requirements.md`` or ``05-stories.md`` (its bullets and headings,
+  and also an ID a Gate A revision moved to ``## Out of scope``), both in the working tree
+  and at the head commit of every Planning PR (open, merged or closed, so an abandoned
+  plan's IDs are never handed out again), and story issues carrying both the
+  ``factory:story`` label and the marker.
   If a Planning PR's records cannot be read, every ID in its body counts instead, with a
   warning: the fallback may count more IDs, never fewer.
-* **Mentions are only warnings.** An ID written anywhere else (prose under
+* **Mentions are only warnings.** An ID written anywhere else (any other file under
   ``docs/factory/``, a Planning PR body, the marker of an issue without the label) does
   not use up a number. If it is not allocated, ``increment show`` warns about it.
 * **One increment at a time.** A new increment is refused while the current one is still
@@ -47,13 +48,13 @@ from factory.state import PLAN_BRANCH_PREFIX
 INCREMENTS_DIR = Path("docs") / "factory" / "increments"
 DOCS_DIR = Path("docs") / "factory"
 REQUIREMENTS_FILE = "02-requirements.md"
+RECORD_FILES = (REQUIREMENTS_FILE, issues_mod.STORIES_FILE)  # each ID they name is allocated
 STORY_LABEL = "factory:story"
 FIRST_SLUG = "initial"  # a new project's first increment is 001-initial (architecture §5.2)
 MAX_SLUG = 40
 _INCREMENT = re.compile(r"^(?P<number>\d{3})-(?P<slug>[a-z0-9]+(?:-[a-z0-9]+)*)$")
-_REQ = re.compile(r"\bREQ-(\d{3,})\b")  # a mention, anywhere
+_REQ = re.compile(r"\bREQ-(\d{3,})\b")
 _STORY = re.compile(r"\bSTORY-(\d{3,})\b")
-_REQ_BULLET = re.compile(r"^\s*-\s+\*\*REQ-(\d{3,})\*\*", re.MULTILINE)  # a record
 _STORY_HEADING = re.compile(r"^###\s+(STORY-\d{3,})\b", re.MULTILINE)
 _HTTP_STATUS = re.compile(r"HTTP \d{3}")
 _BLOCKING_LABELS = {"status:blocked", "factory:needs-human"}
@@ -77,8 +78,8 @@ class Layout:
     """What the target's working tree says (``scan_layout``)."""
 
     increments: frozenset[str] = frozenset()
-    req_numbers: frozenset[int] = frozenset()  # allocated: REQ bullets in 02-requirements.md
-    story_numbers: frozenset[int] = frozenset()  # allocated: STORY headings in 05-stories.md
+    req_numbers: frozenset[int] = frozenset()  # allocated: named in a record file
+    story_numbers: frozenset[int] = frozenset()
     stories: dict[str, frozenset[str]] = field(default_factory=dict)  # inc -> STORY ids
     mentions: dict[str, frozenset[str]] = field(default_factory=dict)  # ID -> relative paths
 
@@ -169,14 +170,12 @@ def format_id(prefix: str, number: int) -> str:
     return f"{prefix}-{number:03d}"
 
 
-def requirement_ids(text: str) -> frozenset[int]:
-    """The REQ numbers a ``02-requirements.md`` allocates: its ``- **REQ-###**`` bullets."""
-    return frozenset(int(n) for n in _REQ_BULLET.findall(text))
-
-
-def story_ids(text: str) -> frozenset[int]:
-    """The STORY numbers a ``05-stories.md`` allocates: its ``### STORY-###`` headings."""
-    return frozenset(int(s.split("-", 1)[1]) for s in _STORY_HEADING.findall(text))
+def record_ids(text: str) -> tuple[frozenset[int], frozenset[int]]:
+    """The REQ and STORY numbers a record file (``02-requirements.md``, ``05-stories.md``)
+    allocates: every ID it names, not only its bullets and headings, so an ID that a Gate A
+    revision moved to ``## Out of scope`` stays allocated (S05 revision mode)."""
+    return (frozenset(int(n) for n in _REQ.findall(text)),
+            frozenset(int(n) for n in _STORY.findall(text)))
 
 
 def mentioned_ids(text: str) -> set[str]:
@@ -341,14 +340,16 @@ def scan_layout(target: Path) -> Layout:
     story_numbers: set[int] = set()
     stories: dict[str, frozenset[str]] = {}
     for inc in increments:
-        path = inc_root / inc / REQUIREMENTS_FILE
-        if path.is_file():
-            reqs |= requirement_ids(_read(path))
-        path = inc_root / inc / issues_mod.STORIES_FILE
-        if path.is_file():
+        for name in RECORD_FILES:
+            path = inc_root / inc / name
+            if not path.is_file():
+                continue
             text = _read(path)
-            stories[inc] = frozenset(_STORY_HEADING.findall(text))
-            story_numbers |= story_ids(text)
+            found_reqs, found_stories = record_ids(text)
+            reqs |= found_reqs
+            story_numbers |= found_stories
+            if name == issues_mod.STORIES_FILE:
+                stories[inc] = frozenset(_STORY_HEADING.findall(text))
     mentions: dict[str, set[str]] = {}
     docs = root / DOCS_DIR
     for path in sorted(docs.rglob("*.md")) if docs.is_dir() else []:
@@ -378,11 +379,15 @@ def read_plan(gh: Gh, repo: str, number: int, increment: str, head: str | None,
         except CommandError as err:
             raise _Unreadable(f"commit {_failure(err)}") from None
         base = (INCREMENTS_DIR / increment).as_posix()
-        reqs = requirement_ids(_read_file(gh, repo, head, f"{base}/{REQUIREMENTS_FILE}"))
-        stories = story_ids(_read_file(gh, repo, head, f"{base}/{issues_mod.STORIES_FILE}"))
+        reqs: set[int] = set()
+        stories: set[int] = set()
+        for name in RECORD_FILES:
+            found_reqs, found_stories = record_ids(_read_file(gh, repo, head, f"{base}/{name}"))
+            reqs |= found_reqs
+            stories |= found_stories
     except _Unreadable as err:
         return PlanRecords(number, increment, head, body=body, error=str(err))
-    return PlanRecords(number, increment, head, reqs, stories, body)
+    return PlanRecords(number, increment, head, frozenset(reqs), frozenset(stories), body)
 
 
 def _read_file(gh: Gh, repo: str, head: str, path: str) -> str:

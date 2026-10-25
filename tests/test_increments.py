@@ -126,17 +126,19 @@ class ScanLayoutTest(unittest.TestCase):
         self.assertEqual(layout.req_numbers, set())
         self.assertEqual(layout.story_numbers, set())
 
-    def test_record_forms(self):
+    def test_every_id_named_in_a_record_file_is_allocated(self):
+        # Option 1 (pre-merge review): any form, either kind, in either record file.
         t = TargetDir(self)
         base = "docs/factory/increments/001-initial"
         t.write(f"{base}/02-requirements.md",
                 "- **REQ-001** (PRD §Goals): one\n  - **REQ-002**: nested\n"
-                "**REQ-003** not a bullet\n- REQ-004 not bold\n- see **REQ-005**\n")
+                "**REQ-003** not a bullet\n* REQ-004 another bullet\n- see STORY-009\n")
         t.write(f"{base}/05-stories.md",
-                "### STORY-001: one\n#### STORY-002: too deep\n## STORY-003: too shallow\n")
+                "### STORY-001: one\n#### STORY-002: too deep\n- Traces to: REQ-005\n")
         layout = scan_layout(t.root)
-        self.assertEqual(layout.req_numbers, {1, 2})
-        self.assertEqual(layout.story_numbers, {1})
+        self.assertEqual(layout.req_numbers, {1, 2, 3, 4, 5})
+        self.assertEqual(layout.story_numbers, {1, 2, 9})
+        self.assertEqual(layout.stories["001-initial"], {"STORY-001"})  # headings only
 
 
 class SlugTest(unittest.TestCase):
@@ -457,6 +459,62 @@ class ProseMentionRegressionTest(unittest.TestCase):
         self.assertEqual((result.next_req, result.next_story), ("REQ-002", "STORY-001"))
         self.assertEqual(result.warnings,
                          (f"STORY-001 is mentioned in {plan} but never allocated",))
+
+
+class GateADropRegressionTest(unittest.TestCase):
+    """Pre-merge review of PR #50: S05 revision mode moves a dropped requirement or story to
+    ``## Out of scope``, so it loses its bullet or heading. Its ID must stay allocated even
+    when it was the highest, or the next increment hands it out again."""
+
+    BASE = f"{INC}/001-initial"
+    REQS = "".join(f"- **REQ-{n:03d}** (PRD §x): r\n" for n in range(1, 5))
+    STORIES = "".join(story(n) for n in (1, 2))
+    DROPPED_REQ = "\n## Out of scope\n- REQ-005 Export to CSV (PRD §Goals): dropped at Gate A.\n"
+    DROPPED_STORY = "\n## Out of scope\n- STORY-003 Export to CSV: dropped at Gate A.\n"
+
+    def plan_001(self, requirements: str, stories: str) -> TargetDir:
+        t = TargetDir(self)
+        t.write(f"{self.BASE}/00-prd.md", "# PRD\n")
+        t.write(f"{self.BASE}/02-requirements.md", requirements)
+        t.write(f"{self.BASE}/05-stories.md", stories)
+        return t
+
+    def next_after_001(self, t: TargetDir, remote: Remote | None = None):
+        remote = remote or merged("001-initial", issues_=done_issues(range(1, 3)))
+        result = assess(scan_layout(t.root), remote, "next")
+        self.assertEqual((result.reasons, result.next_increment), ((), "002-next"))
+        return result
+
+    def test_requirement_dropped_at_the_highest_id_is_not_reused(self):
+        t = self.plan_001(self.REQS + self.DROPPED_REQ, self.STORIES)
+        result = self.next_after_001(t)
+        self.assertEqual((result.next_req, result.next_story), ("REQ-006", "STORY-003"))
+        self.assertEqual(result.warnings, ())
+
+    def test_story_dropped_at_the_highest_id_is_not_reused(self):
+        for where in ("05-stories.md", "02-requirements.md"):  # either Out of scope section
+            with self.subTest(where=where):
+                in_stories = where == "05-stories.md"
+                t = self.plan_001(self.REQS + ("" if in_stories else self.DROPPED_STORY),
+                                  self.STORIES + (self.DROPPED_STORY if in_stories else ""))
+                result = self.next_after_001(t)
+                self.assertEqual((result.next_req, result.next_story), ("REQ-005", "STORY-004"))
+                self.assertEqual(result.warnings, ())
+
+    def test_both_dropped_and_read_only_at_the_planning_pr_head(self):
+        # The local clone has no 001 docs; the merged Planning PR's head commit has them.
+        files = {f"{self.BASE}/02-requirements.md": file_response(self.REQS + self.DROPPED_REQ),
+                 f"{self.BASE}/05-stories.md": file_response(self.STORIES + self.DROPPED_STORY)}
+        fake = FakeGitHub(prs=[{"number": 1, "state": "MERGED", "headRefOid": "e5",
+                                "body": build(PlanningMarker(increment="001-initial"))}],
+                          issues_=[gh_issue(2, "STORY-001", "001-initial", "closed",
+                                            labels=[LABEL]),
+                                   gh_issue(3, "STORY-002", "001-initial", "closed",
+                                            labels=[LABEL])],
+                          commits={"e5": files})
+        result = increments.assess_target(Gh(transport=fake), TargetDir(self).root, REPO)
+        self.assertEqual((result.next_req, result.next_story), ("REQ-006", "STORY-004"))
+        self.assertEqual(result.warnings, ())
 
 
 class M4RegressionTest(unittest.TestCase):

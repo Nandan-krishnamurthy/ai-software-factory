@@ -234,10 +234,8 @@ The final review (`c878c238#1216`, 2026-10-21T12:15:58Z) found no blocking issue
    - **Fallback:** if a plan's records cannot be read, every ID in its body counts, with a warning naming the PR, the short SHA and the reason. The fallback applies when the head SHA is missing, when the commit request fails, when a file request fails with anything but a 404, when the response is not base64 file content, or when the content cannot be decoded. It can only count more IDs, never fewer.
    - **Missing files:** a file missing (404) from a readable commit has no records and is not an error.
    - **Rejected options:** Option A (abandoned plans' IDs may be reused) and Option B (count the stories table of closed Planning PR bodies) were both rejected.
-2. **D2: the record forms.**
-   - **REQs:** `^\s*-\s+\*\*REQ-###\*\*` in `<NNN-slug>/02-requirements.md`.
-   - **STORYs:** `^###\s+STORY-###` in `<NNN-slug>/05-stories.md`.
-   - **Where:** only in folders that are valid increment names.
+2. **D2: the record files.** As approved before implementation, D2 counted only the record forms: `^\s*-\s+\*\*REQ-###\*\*` in `<NNN-slug>/02-requirements.md`, and `^###\s+STORY-###` in `<NNN-slug>/05-stories.md`. **It was amended by the pre-merge review (below):** every `REQ-###` and `STORY-###` named anywhere in either record file is allocated.
+   - **Where:** only in folders that are valid increment names, in the working tree and at every Planning PR's head commit.
    - **What does not allocate:** `00-prd.md` (even with its own bold REQ bullets), the `01`, `03` and `04` documents, `traceability.md` and other folders.
 3. **D3: the label filter.**
    - **What changes:** a story issue's marker counts only when the issue has the `factory:story` label (case-insensitive), as the state engine lists stories. This applies to ID allocation and to the next increment number.
@@ -248,9 +246,15 @@ The final review (`c878c238#1216`, 2026-10-21T12:15:58Z) found no blocking issue
    - **Where they appear:** `warnings` is added to the JSON of `increment show` and `increment next`, and as `Warning:` lines in the text output. Exit codes are unchanged.
 5. **D5: no station changes.**
 
-**Interpretation, not a deviation:** the roadmap's "in increment docs" is read as the record files at any published planning commit, not only in the local working tree. The specification's sources are unchanged. Architecture §5.2 keeps "IDs are global and never reused"; its "Next IDs" and "Next increment" bullets were rewritten to match, and a bullet on warnings was added (Definition of Done item 7).
+**Interpretation:** the roadmap's "in increment docs" is read as the record files at any published planning commit, not only in the local working tree. Architecture §5.2 keeps "IDs are global and never reused"; its "Next IDs" and "Next increment" bullets were rewritten to match, and a bullet on warnings was added (Definition of Done item 7).
 
-**Deviation from the specification:** none.
+**Deviation from the specification:** one, from the pre-merge review. The roadmap lists "`**REQ-###**` requirement bullets and `### STORY-###` headings in increment docs". T7.1 allocates every ID named in the two record files, which includes those bullets and headings but goes beyond them. The roadmap text is unchanged.
+
+**Pre-merge review** (`34ce5c38#646`, 2026-10-25T11:05:49Z): with the record forms of D2, an ID dropped at Gate A could be handed out again.
+- **Why:** S05 revision mode moves a dropped requirement or story to `## Out of scope`, as a plain bullet. A dropped story must also lose its `### STORY-###` heading, or `issues sync` would create its issue. When the dropped ID was the highest, the next increment reused it, with only a warning. On `main` at `5c2e9a7` that prose mention had still counted, so this was a regression.
+- **Reproduced:** REQ-005 and STORY-003 were dropped at Gate A. `main` gave `REQ-006 STORY-004`, and the reviewed PR head `24e59be` gave `REQ-005 STORY-003`.
+- **Fixed:** Option 1 was chosen (`34ce5c38#739`, 2026-10-25T11:13:16Z) over changing S05's rule (which would break D5) and over reading every commit of a Planning PR. Every ID named in `02-requirements.md` or `05-stories.md` is allocated. A stray mention inside a record file now uses up an ID, which errs in the safe direction. A requirement bullet in any form (`*`, a numbered list) is also allocated.
+- **After the fix:** the same case gives `REQ-006 STORY-004`. AC1, AC2, the abandoned-plan behaviour and the fallback are unchanged. The read-only Task Tracker run still gives `REQ-037, STORY-018`, with no warnings.
 
 **Other decisions in the session:**
 - **The target was deactivated before starting.** Task Tracker was still the active target, so rule S3 applied. With approval (`34ce5c38#205`, 2026-10-25T09:44:39Z), `.factory-local/target.json` was removed, and the gitignored `.claude/settings.local.json` was left in place.
@@ -268,8 +272,16 @@ The final review (`c878c238#1216`, 2026-10-21T12:15:58Z) found no blocking issue
 - `test_ids_from_issue_markers_and_planning_pr_bodies_count` became `test_ids_from_planning_records_and_labelled_issues_count`: a PR body no longer allocates, and the plan's records do.
 - `test_increment_seen_only_in_issue_markers_is_not_current`: the issue now carries the label. Without it the number is no longer kept (AC2, `M4RegressionTest`).
 - `CollectRemoteTest.test_reads_branches_planning_prs_and_story_issues` and the `CliTest` fixtures: Planning PRs have a head commit with record files, and story issues carry the label. `test_next_allowed_json` expects `"warnings": []`.
+- `test_record_forms` (added by this PR, then changed by the pre-merge review) became `test_every_id_named_in_a_record_file_is_allocated`. It had pinned the bullet and heading forms that Option 1 replaces.
 
-**Known limitation:** only a Planning PR's final head is read. An ID that a Gate A revision round wrote and then removed before that head is not seen, so it can be handed out again ([B-34](backlog.md#b-34)). S05's revision rules already forbid renumbering.
+**Regression tests for the pre-merge finding** (`GateADropRegressionTest`):
+- a requirement dropped at the highest ID;
+- a story dropped at the highest ID, recorded in either Out of scope section;
+- both dropped, with the records read only at the merged Planning PR's head commit.
+
+In every case the next increment reuses neither ID, and there are no warnings.
+
+**Known limitation:** only a Planning PR's final head is read, and only the two record files allocate. An ID that is deleted from both record files altogether, instead of being moved to `## Out of scope` as S05 requires, can be handed out again. This is accepted ([B-34](backlog.md#b-34)).
 
 **Handed on:**
 - The B-18 interim practice (keep literal ID numbers out of prose under `docs/factory/`) was guidance only; no station states it, and D5 left the stations unchanged. It is no longer needed for correctness, since a mention now only warns. Whether S02 and S05 should report `increment show`'s warnings is left open.

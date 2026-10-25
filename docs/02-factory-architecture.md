@@ -274,12 +274,12 @@ An **increment** is one pass through planning: one PRD or change request → one
 `factory.py increment show|next` (`scripts/factory/increments.py`) implements these rules:
 - **Current increment:** the highest-numbered one with a local folder, a `factory/plan-<inc>` branch or a Planning PR.
 - **Next increment:** one above the highest increment number seen anywhere, including numbers seen only in abandoned plans or in the markers of story issues that carry the `factory:story` label. An increment number is therefore never reused. A marker on an issue without the label does not count (T7.1); it is only warned about.
-- **Next IDs:** one above the highest *allocated* `REQ-`/`STORY-` number (T7.1). Only structured records allocate an ID:
-  - a `- **REQ-###**` bullet in an increment's `02-requirements.md`, or a `### STORY-###` heading in its `05-stories.md`. These are read in the working tree and, through the GitHub API by commit SHA, at the head commit of every Planning PR, whether open, merged or closed. An abandoned plan's IDs are therefore never handed out again, even after its branch is deleted;
+- **Next IDs:** one above the highest *allocated* `REQ-`/`STORY-` number (T7.1). Only these allocate an ID:
+  - any `REQ-###` or `STORY-###` named in an increment's record files, `02-requirements.md` and `05-stories.md`. That covers the requirement bullets and story headings, and also an ID that a Gate A revision moved to `## Out of scope` (S05 revision mode), so a dropped ID is never handed out again. The record files are read in the working tree and, through the GitHub API by commit SHA, at the head commit of every Planning PR, whether open, merged or closed. An abandoned plan's IDs are therefore never handed out again, even after its branch is deleted;
   - a story issue carrying both the `factory:story` label and the story marker, open or closed.
 
   If a Planning PR's records cannot be read (an unknown or unreadable commit, or a file the API cannot return), every ID in that PR's body counts instead, and a warning says so. The fallback can count more IDs than needed, never fewer.
-- **Mentions are warnings, not allocations:** an ID written anywhere else does not use up a number. This covers prose in any file under `docs/factory/`, a Planning PR body, and the marker of an issue without the label. `increment show` and `increment next` warn about each mentioned ID that is not allocated, naming where it was seen. Warnings never change the exit code.
+- **Mentions are warnings, not allocations:** an ID written anywhere else does not use up a number. This covers any other file under `docs/factory/` (such as the codebase analysis, the plan or `traceability.md`), a Planning PR body, and the marker of an issue without the label. `increment show` and `increment next` warn about each mentioned ID that is not allocated, naming where it was seen. Warnings never change the exit code.
 - **Refusal:** `increment next` refuses (exit 1, with the reasons) while the current increment:
   - has not passed Gate A, unless its Planning PR was closed and its branch deleted (abandoned);
   - still has stories without issues;
