@@ -32,7 +32,7 @@ Then **open Claude Code in this folder**. The slash commands (`.claude/commands/
 /factory-target C:\path\to\target-repo
 ```
 
-This validates the path (a git repo with a GitHub `origin`, not the factory itself), records it in the gitignored `.factory-local/target.json`, gives Claude Code access to it, and runs `doctor`. Fix any `FAIL` before going on. Pointing the factory at another repo is just another `/factory-target`; no factory file changes.
+This validates the path (a git repo with a GitHub `origin`, not the factory itself), records it in the gitignored `.factory-local/target.json`, gives Claude Code access to it, and runs `doctor`. Fix any `FAIL` before going on, except missing labels on a new target: `/factory-start` creates them. Pointing the factory at another repo is just another `/factory-target`; no factory file changes.
 
 ### 2. Plan an increment (up to Gate A)
 
@@ -41,7 +41,8 @@ This validates the path (a git repo with a GitHub `origin`, not the factory itse
 ```
 
 The requirements file can be a full PRD (a new project) or a change request (an existing project). The factory:
-- copies it to `docs/factory/increments/<NNN-slug>/00-prd.md`;
+- creates its GitHub labels, then runs `doctor`;
+- stores it as `docs/factory/increments/<NNN-slug>/00-prd.md`: a Markdown file is copied unchanged, and a plain-text file or a PDF gets a source header (a PDF is transcribed as faithful Markdown). For any other format, or a PDF whose requirements cannot be reproduced as text, it stops and asks for Markdown;
 - for a project that already has code or earlier increments, runs **Codebase Discovery** (S01). It records the stack, conventions and commands, and runs the baseline tests. On a red baseline it stops and asks on an issue labelled `factory:needs-human`: fix the baseline, or reply `/accept-baseline` there;
 - writes the requirements, architecture, plan and stories. For an existing project these describe the change: what exists, what changes, and what must keep working;
 - opens a **Planning PR** and stops at **Gate A**.

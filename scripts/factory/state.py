@@ -617,10 +617,15 @@ def _parse_config_text(text: str | None) -> tuple[Config | None, str | None]:
         return None, "; ".join(problems) if problems else str(err)
 
 
-_BASE_FILES = {"readme.md", "readme", "license", "license.md", ".gitignore", ".gitattributes"}
 # Folders and file types that are never the project's code: a repo holding only these (for
-# example a README and the requirements as a PDF) is a new project (T5.2).
-_NON_CODE_DIRS = ("docs/", ".factory/", ".github/")
+# example a README and the requirements as a PDF) is a new project (T5.2, T7.2). Anything
+# else counts as code, so an unusual language still gets Codebase Discovery (T7.2 D-A).
+_NON_CODE_DIRS = ("docs/", ".factory/", ".github/", ".claude/", ".vscode/", ".idea/")
+_NON_CODE_NAMES = {"readme", "codeowners", ".editorconfig"}
+# Repository metadata at the root, with any suffix: LICENSE, LICENSE-MIT, COPYING.LESSER,
+# CHANGELOG.md, … Only at the root, so source such as src/notice_service.py still counts.
+_METADATA = re.compile(r"^(?:license|licence|copying|notice|changelog|authors)(?:[-_.].*)?$")
+# HTML is not here: a static site's index.html is the project's code.
 _DOCUMENT_SUFFIXES = {".md", ".markdown", ".rst", ".txt", ".adoc", ".pdf", ".doc", ".docx",
                       ".odt", ".rtf", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"}
 _INCREMENT_DOC = re.compile(r"^docs/factory/increments/(?P<inc>[^/]+)/")
@@ -629,10 +634,16 @@ _INCREMENT_DOC = re.compile(r"^docs/factory/increments/(?P<inc>[^/]+)/")
 def is_existing_project(paths: Iterable[str], increment: str | None = None) -> bool:
     """Pure: does the default branch hold an existing project (T5.2, architecture §5.2)?
 
-    Yes if it has code: a file outside ``docs/``, ``.factory/`` and ``.github/`` that is
-    not a README, licence or ``.git*`` file, and not a document or an image. Also yes if
-    it holds the planning documents of an **earlier** increment (one other than
-    ``increment``, the one being planned): its Planning PR was merged, so this is the
+    Yes if it has code: any file that is not one of these (T7.2):
+    - under ``docs/``, ``.factory/``, ``.github/``, ``.claude/``, ``.vscode/`` or ``.idea/``;
+    - a ``.git*`` file, a README, ``CODEOWNERS`` or ``.editorconfig``;
+    - repository metadata at the root, with any suffix (a licence, notice, changelog or
+      authors file);
+    - a document or an image (``.md``, ``.pdf``, ``.txt``, ``.png``, …). HTML counts as
+      code (a static site), except under ``docs/``.
+
+    Also yes if it holds the planning documents of an **earlier** increment (one other
+    than ``increment``, the one being planned): its Planning PR was merged, so this is the
     project's second or later increment.
     """
     for path in paths:
@@ -640,11 +651,13 @@ def is_existing_project(paths: Iterable[str], increment: str | None = None) -> b
         earlier = _INCREMENT_DOC.match(path)
         if earlier and earlier["inc"] != increment:
             return True
-        if path.lower().startswith(_NON_CODE_DIRS) or name in _BASE_FILES:
-            continue
         suffix = name[name.rfind("."):] if "." in name[1:] else ""
-        if suffix not in _DOCUMENT_SUFFIXES:
-            return True
+        if path.lower().startswith(_NON_CODE_DIRS) or name.startswith(".git") \
+                or name in _NON_CODE_NAMES or suffix in _DOCUMENT_SUFFIXES:
+            continue
+        if "/" not in path and _METADATA.match(name):
+            continue
+        return True
     return False
 
 

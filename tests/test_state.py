@@ -680,6 +680,40 @@ class CollectSnapshotTest(unittest.TestCase):
         self.assertFalse(snapshot.existing_project)
         self.assertEqual(derive_state(snapshot).next_station, "S02")
 
+    def test_readme_and_docs_prd_route_to_requirements(self):
+        """T7.2 AC1: a repo with only a README and docs/prd.md routes to S02 after S00."""
+        fake = FakeRepo()
+        fake.put("main", "README.md", "# app")
+        fake.put("main", "docs/prd.md", "# PRD")
+        fake.put(PLAN, ".factory/config.json", CONFIG)
+        fake.put(PLAN, f"{DOCS}/00-prd.md", "PRD")
+        snapshot = collect(fake)
+        self.assertFalse(snapshot.existing_project)
+        result = derive_state(snapshot)
+        self.assertEqual((result.state, result.next_station), (st.PLANNING, "S02"))
+
+    def test_repository_metadata_does_not_route_to_discovery(self):
+        """T7.2 D-B: a new repo created with a licence, editor settings and code owners."""
+        fake = FakeRepo()
+        for path in ("README.md", "LICENSE-MIT", "CODEOWNERS", ".gitkeep",
+                     ".vscode/settings.json", ".editorconfig"):
+            fake.put("main", path, "x")
+        fake.put(PLAN, ".factory/config.json", CONFIG)
+        fake.put(PLAN, f"{DOCS}/00-prd.md", "PRD")
+        self.assertEqual(derive_state(collect(fake)).next_station, "S02")
+
+    def test_static_html_site_needs_discovery(self):
+        """T7.2 review: a static site (HTML and images only) is an existing project, so S00
+        is followed by Codebase Discovery, as before T7.2."""
+        fake = FakeRepo()
+        for path in ("README.md", "index.html", "logo.png", "docs/prd.html"):
+            fake.put("main", path, "x")
+        fake.put(PLAN, ".factory/config.json", CONFIG)
+        fake.put(PLAN, f"{DOCS}/00-prd.md", "PRD")
+        snapshot = collect(fake)
+        self.assertTrue(snapshot.existing_project)
+        self.assertEqual(derive_state(snapshot).next_station, "S01")
+
     def test_second_increment_of_a_factory_built_project_needs_discovery(self):
         """T5.2: Task Tracker after increment 001: its code and the merged 001 documents
         are on main, and increment 002 is being planned."""
@@ -1142,6 +1176,50 @@ class ExistingProjectTest(unittest.TestCase):
         for why, paths in cases.items():
             with self.subTest(why=why):
                 self.assertTrue(st.is_existing_project(paths, "002-x"))
+
+    def test_t72_layouts_that_are_new_projects(self):
+        """T7.2 AC1 and decision D-B: requirements and repository metadata are not code."""
+        cases = {
+            "AC1: a README and docs/prd.md": ["README.md", "docs/prd.md"],
+            "a PDF PRD at the root": ["README.md", "PRD.pdf"],
+            "every .git* file": [".gitignore", ".gitkeep", "src/.gitkeep", ".gitmodules",
+                                 ".gitlab-ci.yml"],
+            "licence and notice files": ["LICENSE", "LICENSE-MIT", "Licence", "COPYING",
+                                         "NOTICE", "license.txt"],
+            "licence files with any suffix": ["README.md", "COPYING.LESSER", "LICENSE-2.0",
+                                              "LICENSE.BSD"],
+            "a root file named like metadata, whatever its suffix": ["README.md",
+                                                                     "changelog.py"],
+            "changelog, authors and code owners": ["CHANGELOG", "CHANGELOG.md", "AUTHORS",
+                                                   "CODEOWNERS"],
+            "editor and agent settings": [".claude/settings.json", ".vscode/settings.json",
+                                          ".idea/workspace.xml", ".editorconfig",
+                                          "src/.editorconfig"],
+            "HTML under docs/": ["README.md", "docs/prd.html", "docs/site/index.htm"],
+        }
+        for why, paths in cases.items():
+            with self.subTest(why=why):
+                self.assertFalse(st.is_existing_project(paths, "001-initial"))
+
+    def test_t72_code_still_counts(self):
+        """D-A: anything not known to be a document still makes an existing project, so an
+        unusual language never skips Codebase Discovery."""
+        cases = {
+            "a build file": ["README.md", "Makefile"],
+            "a dotfile configuration": ["README.md", ".eslintrc.json"],
+            "a dev container": ["README.md", ".devcontainer/devcontainer.json"],
+            "data files": ["README.md", "data.csv"],
+            "source named like metadata": ["README.md", "src/changelog_parser.py"],
+            "nested source named like metadata": ["README.md", "src/notice_service.py"],
+            "metadata outside the root": ["README.md", "vendor/lib/COPYING"],
+            "a static HTML site": ["README.md", "index.html", "logo.png"],
+            "an HTML page outside docs/": ["README.md", "site/about.htm"],
+            "an unusual language": ["README.md", "main.zig"],
+            "a settings folder that is not an editor's": ["README.md", ".config/app.toml"],
+        }
+        for why, paths in cases.items():
+            with self.subTest(why=why):
+                self.assertTrue(st.is_existing_project(paths, "001-initial"))
 
     def test_an_earlier_increment_is_any_other_than_the_one_being_planned(self):
         paths = ["docs/factory/increments/001-initial/00-prd.md"]

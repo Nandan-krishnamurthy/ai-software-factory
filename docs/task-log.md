@@ -31,7 +31,7 @@ Each entry is taken from its PR description and from the session in which the hu
 | `12c41339` | `12c41339-9a82-42b9-8504-24909a76cbea` | T6.2, T6.3 |
 | `c878c238` | `c878c238-890e-4dd2-a905-6956ecf1b25d` | T6.4, T6.5 preparation, documentation migration |
 | `c161a4ca` | `c161a4ca-39de-4e3c-bad1-4ee8caeeadcb` | Documentation migration PRs C and D, T6.5 |
-| `34ce5c38` | `34ce5c38-2316-4d05-b39a-d5a5cf9b33bc` | T7.1 |
+| `34ce5c38` | `34ce5c38-2316-4d05-b39a-d5a5cf9b33bc` | T7.1, T7.2 |
 
 ---
 
@@ -286,3 +286,75 @@ In every case the next increment reuses neither ID, and there are no warnings.
 **Handed on:**
 - The B-18 interim practice (keep literal ID numbers out of prose under `docs/factory/`) was guidance only; no station states it, and D5 left the stations unchanged. It is no longer needed for correctness, since a mention now only warns. Whether S02 and S05 should report `increment show`'s warnings is left open.
 - The live check of reading a closed Planning PR after its branch is deleted ([B-35](backlog.md#b-35)).
+
+---
+
+## T7.2 Intake and project detection
+
+| | |
+|---|---|
+| **Specification** | [05-roadmap-m6-m9.md](05-roadmap-m6-m9.md), "T7.2 Intake and project detection" |
+| **PR** | [#51](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/51), not merged |
+| **Status** | In review |
+
+**Approved decisions.** The scoping pass was `34ce5c38#971` (2026-10-25T11:41:41Z). Decisions D-A to D-F were confirmed, with the recommended options, in `34ce5c38#1092` (2026-10-25T11:57:18Z).
+1. **D-A: keep T5.2's detection approach and close its gaps.**
+   - **The rule:** `state.is_existing_project` still counts every file that is not known to be a document or repository metadata.
+   - **Why:** an unknown file therefore means "existing project". S01 then runs needlessly, which is the safe error. Treating an existing project as new would plan over its code.
+   - **Rejected:** a list of known source and build file types was not adopted.
+2. **D-B: the exclusion list.** None of these count as code:
+   - every `.git*` file;
+   - the `.claude/`, `.vscode/` and `.idea/` folders;
+   - `CODEOWNERS` and `.editorconfig`;
+   - repository metadata at the root, with any suffix (`LICENSE*`, `LICENCE*`, `COPYING*`, `NOTICE*`, `CHANGELOG*`, `AUTHORS*`).
+
+   **Narrowing:** the metadata names apply only to root-level files, so nested source such as `src/notice_service.py` or `src/changelog_parser.py` still counts as code. Everything that counted before still counts: `Makefile`, `.eslintrc.json`, `.devcontainer/**`, data files and HTML.
+
+   **Corrected by the review of PR #51** (`34ce5c38#1395`, 2026-10-25T12:29:07Z; approved in `34ce5c38#1412`, 2026-10-25T12:31:24Z):
+   - **The suffix restriction was removed.** The first implementation applied the metadata names only to suffix-less files. That kept `COPYING.LESSER`, `LICENSE-2.0` and `LICENSE.BSD` counting as code, which wrongly sends a new project to S01, the B-20 problem. A root file named like metadata is now excluded whatever its suffix. That includes a root `changelog.py`, which only matters if it is the repo's only code.
+   - **`.html` and `.htm` were removed from the document suffixes.** The first implementation excluded them, so a static site (`index.html` and images) was detected as a new project and Codebase Discovery was skipped. That was a regression from `main`, and against D-A. HTML now counts as code again, except under `docs/**`. S00's intake rule for an HTML requirements file (stop and ask) is unchanged.
+3. **D-C: S00 step 7 by format.**
+   - `.md`/`.markdown`: copied unchanged.
+   - `.txt`: copied unchanged below a source header.
+   - `.pdf`: transcribed as faithful Markdown below a source header. The wording is kept; headings, lists and tables are restored; nothing is added, reordered or summarised.
+   - **Stop and ask:** any other format, or a PDF whose requirement content cannot be reproduced as text.
+   - **Still applies:** rules U1 and S6.
+4. **D-D: the source header.** It is a `<!-- factory:prd-source` HTML comment documented in `templates/README.md` ("PRD source header"). It records:
+   - the source file name;
+   - its location (repo path and commit, or "outside the repository");
+   - its `git hash-object`;
+   - a provenance statement for the format (`.txt` copied unchanged, or `.pdf` transcribed);
+   - `Not reproduced:`.
+
+   No helper was added, and the source file is not committed.
+5. **D-E: `/factory-target` wording.** A `labels` FAIL that lists missing labels is created by `/factory-start` (S00), and every other FAIL must still be fixed first. The command stays read-only.
+6. **D-F: no live run.** AC2 and AC3 depend on how the model follows S00, and are proven by the M7 demo (see "Handed on").
+
+**The S00 order (AC3):** step 1 is now `labels ensure`, and step 2 is `doctor`, stopping on any FAIL. The rest of S00 is unchanged, and `doctor` still runs again at the end. Running `labels ensure` first writes only the factory's own labels. It runs on a target that `target set` has already validated (a git repo with a GitHub remote, not the factory itself). If it fails, S00 stops.
+
+**Interpretation, not a deviation:** the roadmap's "counts source and build files only, ignoring `*.md`, `*.pdf` and `docs/**`" is met by D-A. The documents and `docs/**` are ignored, and everything else is treated as possible source, which is the safe reading. M2 Problem 2 named both readings as fixes. **Deviation from the specification:** none.
+
+**What T5.2 had already done:** AC1's layout (a README and `docs/prd.md`) has routed to S02 since T5.2 ([PR #32](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/32)). T7.2 adds the fixtures for it and closes the D-B gaps.
+
+**Verification (unit level):**
+- **Detection fixtures for each layout:**
+  - `ExistingProjectTest.test_t72_layouts_that_are_new_projects`;
+  - `ExistingProjectTest.test_t72_code_still_counts`;
+  - `CollectSnapshotTest.test_readme_and_docs_prd_route_to_requirements` (AC1);
+  - `CollectSnapshotTest.test_repository_metadata_does_not_route_to_discovery`;
+  - `CollectSnapshotTest.test_static_html_site_needs_discovery` (review correction).
+- **Station lint of the S00 step order:** `IntakeStationTest.test_labels_are_ensured_before_the_first_doctor` (AC3).
+- **The intake rule and header:**
+  - `IntakeStationTest.test_requirements_are_taken_by_format` (AC2);
+  - `IntakeStationTest.test_the_source_header_format_is_documented` (AC2).
+- **The command wording:** `CommandFileLintTest.test_target_lets_factory_start_create_missing_labels`.
+
+Before the change, every new D-B case and lint failed, and the AC1 fixtures already passed (10 failures in 33 tests).
+
+**Changed existing tests:** none; T7.2 only adds tests.
+
+**Known limitation:** a root-level file named like repository metadata is excluded whatever its suffix (D-B, after the review correction), so a root `changelog.py` or `notice.ts` does not count as code. This only matters when such a file is the repo's only code. Nested files with these names still count. Accepted ([backlog](backlog.md), Accepted limitations). The HTML-only limitation of the first implementation was removed by the review correction above.
+
+**Handed on:**
+- **Live proof in the M7 demo (D-F).** The roadmap's M7 demo runs on a sandbox: a new project with its PRD in `docs/`, and a PDF variant. Both must route to S02, labels must be created by S00, and the PDF must give `00-prd.md` with a `<!-- factory:prd-source` header. T7.2's tests check the station text and the detection logic, not a model run.
+- **The header is model-written and checked at Gate A.** No code checks the header's facts (D-D: no helper).

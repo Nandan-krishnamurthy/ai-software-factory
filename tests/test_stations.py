@@ -455,6 +455,53 @@ class ExistingProjectPlanningTest(unittest.TestCase):
                 self.assertIn("**New project**: use these sections, in this order:", steps)
 
 
+class IntakeStationTest(unittest.TestCase):
+    """T7.2: S00 creates the labels before doctor, and takes non-Markdown requirements."""
+
+    LABELS = "python scripts/factory.py labels ensure"
+    DOCTOR = "python scripts/factory.py doctor"
+
+    def setUp(self):
+        self.s00 = {s.id: s for s in load_stations()}["S00"]
+        self.steps = self.s00.sections["Steps"]
+
+    def test_labels_are_ensured_before_the_first_doctor(self):
+        """AC3 (M2 Problem 1): on a brand-new repo, doctor's labels FAIL is what labels ensure
+        fixes, so labels ensure must run first, and doctor must still run before anything
+        else changes."""
+        self.assertIn(self.LABELS, self.steps)
+        first_doctor = self.steps.index(self.DOCTOR)
+        self.assertLess(self.steps.index(self.LABELS), first_doctor)
+        before = self.steps[:first_doctor]
+        for later in ("gh repo view", "increment next", "factory.py branch", "config.json",
+                      "00-prd.md"):
+            self.assertNotIn(later, before, f"{later!r} must come after the first doctor")
+        self.assertIn(self.DOCTOR, self.steps[first_doctor + len(self.DOCTOR):],
+                      "doctor must still run again at the end")
+        self.assertIn("If it reports any `FAIL`", self.steps[first_doctor:])
+
+    def test_requirements_are_taken_by_format(self):
+        """AC2 (M2 Problem 3) and decision D-C."""
+        for text in ("`.md` or `.markdown`", "copy it unchanged", "`.txt`", "`.pdf`",
+                     "faithful Markdown", "source header", "stop and ask"):
+            self.assertIn(text, self.steps)
+        stops = self.s00.sections["Stop conditions"]
+        self.assertIn("not Markdown, text or PDF", stops)
+        self.assertIn("cannot be reproduced", stops)
+        # The content stays data, and the secret check covers a transcription too.
+        self.assertIn("rule U1", self.steps)
+        self.assertIn("rule S6", self.steps)
+
+    def test_the_source_header_format_is_documented(self):
+        """Decision D-D: one fixed header, documented in templates/README.md."""
+        readme = (REPO_ROOT / "templates" / "README.md").read_text(encoding="utf-8")
+        self.assertIn("<!-- factory:prd-source", self.steps)
+        self.assertIn("templates/README.md", self.steps)
+        self.assertIn("<!-- factory:prd-source", readme)
+        for field in ("git hash-object", "outside the repository", "Not reproduced:"):
+            self.assertIn(field, readme)
+
+
 class DiscoveryStationTest(unittest.TestCase):
     """T5.1: S01 never guesses a command, and stops on a red baseline."""
 
