@@ -183,7 +183,7 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
 
 ### <a id="b-36"></a>B-36 Target knowledge base: S01's creation/update and S12's note, not yet run on a real target
 - **What:** T7.3's `knowledge check` is proven at the unit level only, against real throwaway git repositories, not fake ones. What has not been run live is the **model-authored** half: S01 actually creating or updating `docs/factory/knowledge.md` by hand from `knowledge check`'s result (including reusing an earlier increment's `01-codebase-analysis.md` on first creation, K-D), and S12 actually posting the Knowledge base paragraph on an increment's last story (K-A).
-- **Source:** T7.3, decision K-G; [task-log.md](task-log.md#t73-target-knowledge-base)
+- **Source:** [PR #52](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/52) (T7.3), decision K-G; [task-log.md](task-log.md#t73-target-knowledge-base)
 - **Status:** analysis · **Owner:** unassigned (candidate: the M7 demo, Task Tracker increment 004) · **State:** open
 
 ## M6 demo findings

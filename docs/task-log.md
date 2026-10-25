@@ -366,7 +366,7 @@ Before the change, every new D-B case and lint failed, and the AC1 fixtures alre
 | | |
 |---|---|
 | **Specification** | [05-roadmap-m6-m9.md](05-roadmap-m6-m9.md), "T7.3 Target knowledge base" |
-| **PR** | not yet opened |
+| **PR** | [#52](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/52), not merged |
 | **Status** | In review |
 
 **Approved decisions.** The scoping pass was `34ce5c38#1722` (2026-10-25T13:11:46Z). Decisions K-A to K-G were confirmed, with the recommended options, in `34ce5c38#1801` (2026-10-25T14:08:57Z).
