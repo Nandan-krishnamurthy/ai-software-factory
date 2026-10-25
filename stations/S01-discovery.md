@@ -21,6 +21,8 @@ For a project that already has code, record what planning must know about it, an
 - `python scripts/factory.py discover --json`: the stack, and for each command name either the command the repository **declares** (a `package.json` script, a Makefile target, a configured Python tool, `go.mod` or `Cargo.toml`) with its `evidence`, or `null`. Also `hints` (CI `run:` lines), `docs` to read and `notes`. Read-only.
 - `.factory/config.json`: its `commands`. A non-`null` value there was recorded by an earlier increment after it ran successfully (S08, walking skeleton) or by an earlier S01.
 - `python scripts/factory.py question answer --key baseline-<INC> --keyword accept-baseline --json`: whether a reviewer accepted a red baseline on the question issue of an earlier run of this station.
+- `python scripts/factory.py knowledge check --json`: which sections of `docs/factory/knowledge.md`, if it exists, are stale (T7.3). Read-only.
+- On this target's first ever S01 run only (`docs/factory/knowledge.md` is `missing`): the latest earlier increment's `01-codebase-analysis.md`, if one exists, so nothing already known is rediscovered.
 
 ## Steps
 1. **Analyse the latest `<D>`.** Run `git -C <T> fetch origin`, then `git -C <T> rev-list --count factory/plan-<INC>..origin/<D>`. If it prints more than `0` (for example the human fixed the baseline after an earlier stop), fold `<D>` in with `git -C <T> pull --no-rebase --no-edit origin <D>` and push the branch. Never force-push. Note `git -C <T> rev-parse origin/<D>` as the commit analysed.
@@ -46,19 +48,27 @@ For a project that already has code, record what planning must know about it, an
    - **Green:** go on to step 7.
    - **Red:** run `python scripts/factory.py question answer --key baseline-<INC> --keyword accept-baseline --json`. If `accepted` is true **and** the failures now are the ones that issue reports, record the acceptance in `## Baseline` and go on to step 7. Otherwise, stop and ask: write the failing commands, their result lines and the commands table to `<SCRATCH>/baseline-<INC>.md`, ending with: *fix the baseline on `<D>`, or reply `/accept-baseline` on this issue to plan on top of the listed failures; then remove the `factory:needs-human` label and run `/factory-resume`*. Then run `python scripts/factory.py question ask --key baseline-<INC> --title "Baseline is red for increment <INC>" --body-file <SCRATCH>/baseline-<INC>.md`, report the issue to the human, and stop **without** writing anything into `<T>` (see Stop conditions).
 7. Copy the analysis to `<T>/docs/factory/increments/<INC>/01-codebase-analysis.md`.
-8. In `<T>/.factory/config.json`, set each of the five `commands` to the value chosen in step 3, and change nothing else. Run `python scripts/factory.py doctor`: the `config` check must be `OK`.
-9. Append one line to `<T>/.factory/log.md`: `<UTC time> S01 <INC> discovery baseline <green|red-accepted> null:<names or none>`.
-10. Commit and push. See Checkpoint.
+8. **Update the knowledge base** (T7.3). Take the `python scripts/factory.py knowledge check --json` result from Inputs:
+   - **`missing` or `invalid`:** write every section from this analysis. If this is the target's first ever S01 run (nothing was `missing` because of a stale commit, but because the file never existed), reuse the latest earlier increment's `01-codebase-analysis.md` too, so nothing already known is rediscovered.
+   - **`stale` names one or more sections:** rewrite only those sections from this analysis; keep the rest exactly as they are.
+   - **Neither** (the file is already fresh): leave all eight sections as they are.
+   - Either way, append one new entry under `## Changes` (the date, `<INC>`, and a short line on what changed since the commit last checked), keeping every earlier entry.
+   - Write `<!-- factory:knowledge checked=<sha> -->` as the file's first line, with `<sha>` the commit of `<D>` analysed in step 1 (full 40-character hex), then `# Target knowledge base`, then exactly these eight sections, in this order: `## Stack`, `## Layout`, `## Conventions`, `## Commands`, `## Hotspots`, `## Architecture decisions`, `## Known risks`, `## Changes`. `## Architecture decisions` must name every merged increment that has a `03-architecture.md` (by its folder name, e.g. `001-initial`), or the next `knowledge check` reports it stale again.
+   - Save it to `<T>/docs/factory/knowledge.md`.
+9. In `<T>/.factory/config.json`, set each of the five `commands` to the value chosen in step 3, and change nothing else. Run `python scripts/factory.py doctor`: the `config` check must be `OK`.
+10. Append one line to `<T>/.factory/log.md`: `<UTC time> S01 <INC> discovery baseline <green|red-accepted> null:<names or none>`.
+11. Commit and push. See Checkpoint.
 
 ## Outputs
 - `docs/factory/increments/<INC>/01-codebase-analysis.md`
+- `docs/factory/knowledge.md` (created or updated; T7.3)
 - `.factory/config.json` (its `commands` only)
 - `.factory/log.md`
 - On a red baseline that is not accepted: an issue on `<R>` labelled `factory:needs-human` (marker `factory:question key=baseline-<INC>`), and nothing written into `<T>`.
 
 ## Checkpoint
 Planning progress is recorded by pushed commits on `factory/plan-<INC>`. The state engine sees `01-codebase-analysis.md` there and names S02.
-- `git -C <T> add docs/factory/increments/<INC>/01-codebase-analysis.md .factory/config.json .factory/log.md`
+- `git -C <T> add docs/factory/increments/<INC>/01-codebase-analysis.md docs/factory/knowledge.md .factory/config.json .factory/log.md`
 - `git -C <T> commit -m "S01: codebase discovery for <INC>" -m "Factory-Station: S01"`
 - `git -C <T> push origin factory/plan-<INC>`
 
@@ -73,6 +83,7 @@ On the red path nothing is committed: the open `factory:needs-human` issue holds
 
 ## Done check
 - [ ] `docs/factory/increments/<INC>/01-codebase-analysis.md` on `factory/plan-<INC>` has every section of step 5, a `## Commands` row for each of the five commands with its evidence or `null`, and a `## Baseline` that says `Green` or `Red, accepted by …`.
+- [ ] `python scripts/factory.py knowledge check --json` reports `"ok": true` for `docs/factory/knowledge.md`.
 - [ ] `.factory/config.json` has exactly the commands of that table, and `python scripts/factory.py doctor` reports `config` as `OK`.
 - [ ] `git -C <T> status --porcelain` prints nothing, and `git -C <T> log origin/factory/plan-<INC> -1 --format=%B` shows `Factory-Station: S01`.
 - [ ] `python scripts/factory.py state --json` reports `PLANNING` with `next_station` `S02`, or `NEEDS_HUMAN` naming the baseline issue on the red path (which must be reported to the human).

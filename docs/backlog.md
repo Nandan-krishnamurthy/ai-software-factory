@@ -181,6 +181,11 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
 - **Source:** T7.1, Step 6 of the approved implementation prompt; declined for now by the human (`34ce5c38#481`, 2026-10-25T10:44:41Z). See [task-log.md](task-log.md#t71-id-allocation-from-structured-sources-only).
 - **Status:** analysis · **Owner:** unassigned (candidate: the M7 demo) · **State:** open
 
+### <a id="b-36"></a>B-36 Target knowledge base: S01's creation/update and S12's note, not yet run on a real target
+- **What:** T7.3's `knowledge check` is proven at the unit level only, against real throwaway git repositories, not fake ones. What has not been run live is the **model-authored** half: S01 actually creating or updating `docs/factory/knowledge.md` by hand from `knowledge check`'s result (including reusing an earlier increment's `01-codebase-analysis.md` on first creation, K-D), and S12 actually posting the Knowledge base paragraph on an increment's last story (K-A).
+- **Source:** T7.3, decision K-G; [task-log.md](task-log.md#t73-target-knowledge-base)
+- **Status:** analysis · **Owner:** unassigned (candidate: the M7 demo, Task Tracker increment 004) · **State:** open
+
 ## M6 demo findings
 
 Found while running the M6 demo on Task Tracker, increment `003-priority-filter` ([progress.md](progress.md#m6-deterministic-verification--review)). The recurrence of [B-18](#b-18) is recorded on that item.

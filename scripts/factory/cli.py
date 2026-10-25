@@ -17,6 +17,7 @@ from factory import (
     evidence,
     increments,
     issues,
+    knowledge,
     labels,
     pick,
     prbody,
@@ -100,6 +101,25 @@ def build_parser() -> argparse.ArgumentParser:
                                          f"(default {increments.FIRST_SLUG!r})")
     inc_next.add_argument("--json", action="store_true", help="machine-readable output")
     inc_next.set_defaults(handler=_increment, needs_target=True, allocate=True)
+
+    knowledge_parser = subparsers.add_parser(
+        "knowledge", help="the target's knowledge base, docs/factory/knowledge.md (T7.3)")
+    knowledge_sub = knowledge_parser.add_subparsers(dest="knowledge_command", metavar="<action>")
+    knowledge_sub.required = True
+    kcheck = knowledge_sub.add_parser(
+        "check", help="report which sections of knowledge.md are missing or stale",
+        description="Reads docs/factory/knowledge.md at --ref (default HEAD) in the active "
+                    "target. Exit 0 only if it exists, carries a well-formed "
+                    "factory:knowledge header naming a commit this repo can read, its "
+                    "eight sections are present once each in the fixed order, and none is "
+                    "stale against what changed since that commit. A missing file, a "
+                    "malformed or unreadable header, or sections that are missing, "
+                    "duplicated or out of order make every section stale (fail-safe). "
+                    "Read-only, local git only: it never calls GitHub and never writes.")
+    kcheck.add_argument("--ref", default="HEAD", metavar="R",
+                        help="the commit to check against (default: HEAD)")
+    kcheck.add_argument("--json", action="store_true", help="machine-readable output")
+    kcheck.set_defaults(handler=_knowledge_check, needs_target=True)
 
     issues_parser = subparsers.add_parser("issues", help="manage the story issues")
     issues_sub = issues_parser.add_subparsers(dest="issues_command", metavar="<action>")
@@ -679,6 +699,12 @@ def _trace(args: argparse.Namespace) -> int:
     else:
         _print_safe(trace.render(result))
     return 0 if result.complete else 1
+
+
+def _knowledge_check(args: argparse.Namespace) -> int:
+    result = knowledge.check(Git(args.target.path), args.ref)
+    print(json.dumps(result.to_dict(), indent=2) if args.json else knowledge.render(result))
+    return 0 if result.ok else 1
 
 
 def _closeout(args: argparse.Namespace) -> int:

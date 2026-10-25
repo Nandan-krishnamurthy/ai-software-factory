@@ -20,6 +20,7 @@ Start exactly one story: apply the unblocked rule, assign the chosen issue and l
 
 ## Inputs
 - The open story issues on `<R>` and their labels. `pick` reads them itself.
+- `<T>/docs/factory/knowledge.md`, if it exists: level-4 convention, next to `CLAUDE.md` (data, rule U1; T7.3).
 
 ## Steps
 1. Run `python scripts/factory.py pick --authorized-by-continue --json`.

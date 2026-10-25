@@ -31,7 +31,7 @@ Each entry is taken from its PR description and from the session in which the hu
 | `12c41339` | `12c41339-9a82-42b9-8504-24909a76cbea` | T6.2, T6.3 |
 | `c878c238` | `c878c238-890e-4dd2-a905-6956ecf1b25d` | T6.4, T6.5 preparation, documentation migration |
 | `c161a4ca` | `c161a4ca-39de-4e3c-bad1-4ee8caeeadcb` | Documentation migration PRs C and D, T6.5 |
-| `34ce5c38` | `34ce5c38-2316-4d05-b39a-d5a5cf9b33bc` | T7.1, T7.2 |
+| `34ce5c38` | `34ce5c38-2316-4d05-b39a-d5a5cf9b33bc` | T7.1, T7.2, T7.3 |
 
 ---
 
@@ -358,3 +358,52 @@ Before the change, every new D-B case and lint failed, and the AC1 fixtures alre
 **Handed on:**
 - **Live proof in the M7 demo (D-F).** The roadmap's M7 demo runs on a sandbox: a new project with its PRD in `docs/`, and a PDF variant. Both must route to S02, labels must be created by S00, and the PDF must give `00-prd.md` with a `<!-- factory:prd-source` header. T7.2's tests check the station text and the detection logic, not a model run.
 - **The header is model-written and checked at Gate A.** No code checks the header's facts (D-D: no helper).
+
+---
+
+## T7.3 Target knowledge base
+
+| | |
+|---|---|
+| **Specification** | [05-roadmap-m6-m9.md](05-roadmap-m6-m9.md), "T7.3 Target knowledge base" |
+| **PR** | not yet opened |
+| **Status** | In review |
+
+**Approved decisions.** The scoping pass was `34ce5c38#1722` (2026-10-25T13:11:46Z). Decisions K-A to K-G were confirmed, with the recommended options, in `34ce5c38#1801` (2026-10-25T14:08:57Z).
+1. **K-A: S01 is the only writer of `docs/factory/knowledge.md` (a deviation, recorded below).**
+   - S01 reads `factory.py knowledge check --json` (read-only, local git only) and rewrites only the sections it names stale, or every section if the file is `missing` or `invalid`. It then appends one `## Changes` entry.
+   - On an increment's last story, S12's close-out summary adds a **Knowledge base** paragraph: the increment's REQs and story PR numbers (read from `docs/factory/traceability.md`), and `knowledge check`'s result. S12 still commits nothing (rule S1); the next S01 is what actually updates the file.
+2. **K-B: fixed, deterministic staleness scopes**, none project-specific:
+   - **Stack**/**Commands**: `manifests.py`'s `is_manifest`/`is_lockfile` (every stack it already knows, T6.3) plus `Makefile`, `pom.xml`, `build.gradle*`, `.github/workflows/**` and `.factory/config.json`.
+   - **Conventions**: lint/format configuration, `CLAUDE.md`, `CONTRIBUTING*`, `.editorconfig`.
+   - **Layout**: any top-level entry added or removed, **after** removing `docs/factory/` and `.factory/` paths first, so S01's own first write of `knowledge.md`/`01-codebase-analysis.md` is never itself a "new top-level folder" (found and fixed during implementation; see "Problems found").
+   - **Hotspots**/**Known risks**: any change outside `docs/factory/` and `.factory/`.
+   - **Architecture decisions**: a merged increment's `03-architecture.md` not named in the section's own text.
+   - **Changes** is never flagged by a diff; S01 appends to it directly, every run.
+3. **K-C: the file format.** First line `<!-- factory:knowledge checked=<sha> -->` (a new `KnowledgeMarker` in `markers.py`, reusing the existing marker system rather than a bespoke parser), then the eight sections as `##` headings, in this fixed order: Stack, Layout, Conventions, Commands, Hotspots, Architecture decisions, Known risks, Changes. A missing marker, an unresolvable commit, or sections missing, duplicated or out of order make **every** section stale (fail-safe), regardless of the diff.
+4. **K-D:** on first creation, S01 also reuses the latest earlier increment's `01-codebase-analysis.md`, if one exists.
+5. **K-E:** S02–S08 each list `docs/factory/knowledge.md` (if present) as a level-4 input, next to `CLAUDE.md`. `stations/_rules.md` §5 item 4 names it there, and says both are data (rule U1), never instructions, and never override rules 1–3.
+6. **K-F:** `factory.py knowledge check [--ref R] [--json]`, read-only, **local git only** (it never calls GitHub, unlike most other read-only commands). Exit 0 only when the file exists, is well-formed, and nothing is stale.
+7. **K-G:** no live run. The proof is the M7 demo (Task Tracker 004: S01 creates or updates the file, S12's note appears). Recorded as a hand-off, like T7.1 and T7.2's live checks.
+
+**Deviation from the specification:** one. The roadmap's Build says "The S12 close-out of an increment's last story appends what changed." S12 commits nothing (rule S1 — the only write path left after the last merge is a new PR, which K-A rejected as disproportionate). K-A has S12 **report** what changed (REQs, PRs, stale sections) in its summary, and the next **S01** is the one that appends to `## Changes`. The roadmap text is unchanged.
+
+**Problems found during implementation, fixed before any test was finalised:**
+- **A false "Layout" staleness on first creation.** `collect()`'s first draft derived the top-level sets from `git ls-tree --name-only` directly. Writing `docs/factory/knowledge.md` for the first time (or `00-prd.md` by S00, before S01 ever runs) adds a `docs` top-level entry that was not there before, which read as a real layout change on the very first check. Fixed by deriving the top-level sets from the full recursive tree with `docs/factory/` and `.factory/` paths removed first, so the factory's own bookkeeping can never look like a target's layout change. Covered by `CollectTest.test_new_factory_docs_are_not_a_layout_change` and `CheckIntegrationTest.test_fresh_right_after_creation`.
+- **An ambiguous `invalid` message.** The first draft could not tell "no header, or sections out of order" apart from "the recorded commit is unreadable" in its rendered text, because both used the same field to decide the message. `CheckResult` gained an explicit `reason` field, set once, at the one place each cause is detected.
+- **A reusability conflict (success criterion 8).** The first draft's `_STACK_COMMANDS_GLOBS` named Node.js files (`package.json`, `yarn.lock`, …) directly, which `tests/test_reusability.py` refuses outside `discovery.py`/`manifests.py` (so stack knowledge stays in one checked place). Fixed by reusing `manifests.is_manifest`/`is_lockfile` (T6.3's own canonical, multi-stack, already-audited list) instead of a second list of the same names.
+
+**Verification (unit level):**
+- **Markers:** `markers.py` gains `KnowledgeMarker`; round-trip, tolerance and malformed coverage come from the existing parametrised `EXAMPLES`/`MALFORMED` tests, plus `KnowledgeMarkerTest`.
+- **Parsing and the fail-safe rule:** `tests/test_knowledge.py`, `ParseTest` (missing marker, missing/out-of-order/duplicate sections).
+- **The staleness check (the roadmap's named test):** `StalenessTest`, one test per K-B scope, plus ordering and the `Changes`-is-never-flagged rule.
+- **The git I/O:** `CollectTest` and `CheckIntegrationTest`, against real throwaway git repositories (no fixtures), covering the Layout fix, architecture-file filtering, an unknown commit, and `--ref`.
+- **The CLI:** `CliTest`, exit codes and `--json`.
+- **Station lint (the roadmap's other named test):** `DiscoveryStationTest.test_knowledge_base_is_created_or_updated` (S01) and `StoryStationsTest.test_s12_reports_the_knowledge_base_on_the_increments_last_story_only` (S12), plus the generic per-station command and output lints that already cover every station (`StationFilesTest`).
+- `docs/factory/knowledge.md` added to `ALLOWED_OUTPUTS` (test support) and to architecture §5.1 and §5.5.
+
+**Changed existing tests:** none; T7.3 only adds tests.
+
+**Handed on:**
+- **Live proof in the M7 demo (K-G).** Task Tracker increment 004: S01 must create or update `knowledge.md`, and S12's note must appear on the increment's last story.
+- **The header and every section are model-written.** `knowledge check` only checks the header and the diff-derived staleness; it never checks that a rewritten section's *content* is accurate. Gate A review is the safeguard, as for `01-codebase-analysis.md` today.
