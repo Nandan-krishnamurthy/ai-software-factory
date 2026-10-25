@@ -294,7 +294,7 @@ In every case the next increment reuses neither ID, and there are no warnings.
 | | |
 |---|---|
 | **Specification** | [05-roadmap-m6-m9.md](05-roadmap-m6-m9.md), "T7.2 Intake and project detection" |
-| **PR** | not yet opened |
+| **PR** | [#51](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/51), not merged |
 | **Status** | In review |
 
 **Approved decisions.** The scoping pass was `34ce5c38#971` (2026-10-25T11:41:41Z). Decisions D-A to D-F were confirmed, with the recommended options, in `34ce5c38#1092` (2026-10-25T11:57:18Z).
