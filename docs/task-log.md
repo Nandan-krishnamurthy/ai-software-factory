@@ -224,7 +224,7 @@ The final review (`c878c238#1216`, 2026-10-21T12:15:58Z) found no blocking issue
 | | |
 |---|---|
 | **Specification** | [05-roadmap-m6-m9.md](05-roadmap-m6-m9.md), "T7.1 ID allocation from structured sources only" |
-| **PR** | not yet opened |
+| **PR** | [#50](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/50), not merged |
 | **Status** | In review |
 
 **Approved decisions.** The questions were raised in `34ce5c38#146` (2026-10-25T07:47:22Z). Option C was approved in `34ce5c38#165` (2026-10-25T08:06:58Z), and implementation was approved in `34ce5c38#189` (2026-10-25T09:35:48Z), with the M5 test required to warn about both IDs.
