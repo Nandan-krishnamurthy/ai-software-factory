@@ -85,16 +85,17 @@ class StalenessTest(unittest.TestCase):
 
     def test_stack_and_commands_stale_together_on_a_manifest(self):
         for path in ("package.json", "sub/package.json", "pyproject.toml", "Cargo.lock",
-                     ".github/workflows/ci.yml", ".factory/config.json", "Makefile"):
+                     ".github/workflows/ci.yml", "Makefile"):
             with self.subTest(path=path):
                 result = self.stale(changed=frozenset({path}))
                 self.assertIn("Stack", result)
                 self.assertIn("Commands", result)
 
-    def test_config_under_factory_dot_does_not_also_flag_risk_sections(self):
-        # .factory/ is the factory's own bookkeeping, not the target's risk surface.
-        self.assertEqual(self.stale(changed=frozenset({".factory/config.json"})),
-                         ("Stack", "Commands"))
+    def test_the_factorys_own_config_makes_nothing_stale(self):
+        # S00 and S01 write .factory/config.json themselves on the plan branch (review of
+        # PR #52): it is the factory's bookkeeping, so no section goes stale because of it.
+        self.assertEqual(self.stale(changed=frozenset({".factory/config.json",
+                                                       ".factory/log.md"})), ())
 
     def test_conventions_stale_on_lint_or_claude_md(self):
         for path in ("CLAUDE.md", "CONTRIBUTING.md", ".editorconfig", "a/.eslintrc.json"):
@@ -256,6 +257,49 @@ class CheckIntegrationTest(unittest.TestCase):
         self.assertTrue(knowledge.check(repo.git, created).ok)  # fresh right after creation
         self.assertFalse(knowledge.check(repo.git, stale_at).ok)  # stale once HEAD moved on
         self.assertEqual(knowledge.check(repo.git), knowledge.check(repo.git, "HEAD"))
+
+
+class ReviewRegressionTest(unittest.TestCase):
+    """The two blockers found in the review of PR #52, against real git repositories."""
+
+    def test_s01_done_check_can_pass_on_the_plan_branch(self):
+        """An existing project's first increment: S00 creates .factory/config.json on the
+        plan branch, S01 sets its commands and writes knowledge.md with the commit of <D>
+        it analysed. The factory's own writes must not make the fresh file stale."""
+        repo = GitRepo(self)
+        repo.commit("src/app.py", "print(1)")
+        analysed = repo.commit("requirements.txt", "flask\n")  # origin/<D>, step 1
+        repo.git.run(["switch", "-q", "-c", "factory/plan-001-initial"])
+        repo.commit(".factory/config.json", "{}")  # S00
+        repo.commit("docs/factory/increments/001-initial/00-prd.md", "# PRD")  # S00
+        repo.commit("docs/factory/increments/001-initial/01-codebase-analysis.md", "x")
+        repo.commit(".factory/config.json", '{"commands": {"test": "pytest"}}')  # S01 step 9
+        repo.commit(".factory/log.md", "S01 001-initial discovery")
+        repo.commit("docs/factory/knowledge.md", text(analysed))  # S01 step 8
+        result = knowledge.check(repo.git)
+        self.assertTrue(result.ok, result.to_dict())
+
+        # Fail-safe kept: a real change on the plan branch still makes sections stale.
+        repo.commit("requirements.txt", "flask\nrequests\n")
+        result = knowledge.check(repo.git)
+        self.assertIn("Stack", result.stale)
+        self.assertIn("Commands", result.stale)
+
+    def test_a_renamed_manifest_is_stale_whatever_the_rename_config(self):
+        """`git mv requirements.txt deps.txt`: with rename detection, `git diff --name-only`
+        lists only deps.txt, which is not a manifest. --no-renames lists both paths."""
+        for renames in ("true", "false"):
+            with self.subTest(diff_renames=renames):
+                repo = GitRepo(self)
+                repo.git.run(["config", "diff.renames", renames])
+                repo.commit("src/app.py", "print(1)")
+                checked = repo.commit("requirements.txt", "flask\nrequests\n" * 20)
+                repo.commit("docs/factory/knowledge.md", text(checked))
+                repo.git.run(["mv", "requirements.txt", "deps.txt"])
+                repo.git.run([*IDENTITY, "commit", "-q", "-m", "rename"])
+                result = knowledge.check(repo.git)
+                self.assertIn("Stack", result.stale)
+                self.assertIn("Commands", result.stale)
 
 
 class RenderTest(unittest.TestCase):

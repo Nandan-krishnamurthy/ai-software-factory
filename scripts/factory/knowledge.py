@@ -20,8 +20,9 @@ Its eight sections, as ``##`` headings, in this fixed order::
 A section is **stale** when something in its fixed scope changed since the recorded
 commit (``staleness()``, pure):
 
-* **Stack** and **Commands**: manifests, lockfiles, ``Makefile``, CI workflow files, the
-  approved ``.factory/config.json``.
+* **Stack** and **Commands**: manifests, lockfiles, ``Makefile``, CI workflow files. Not
+  ``.factory/config.json``: S00 and S01 write it themselves on the plan branch, so it would
+  make every freshly written file stale at once (S01's Done check could never pass).
 * **Conventions**: lint/format configuration, ``CLAUDE.md``, ``CONTRIBUTING*``,
   ``.editorconfig``.
 * **Layout**: any top-level file or folder added or removed.
@@ -61,8 +62,8 @@ _INCREMENT_NAME = re.compile(r"\b(\d{3}-[a-z0-9]+(?:-[a-z0-9]+)*)\b")
 
 # Beyond the dependency manifests and lockfiles manifests.py already knows across every
 # stack (reused below, never duplicated here: T5.4 success criterion 8 keeps ecosystem
-# names out of every file but discovery.py and manifests.py), a build file, CI workflow
-# or the approved config also changes what Stack or Commands records.
+# names out of every file but discovery.py and manifests.py), a build file or CI workflow
+# also changes what Stack or Commands records.
 _STACK_COMMANDS_EXTRA = ("Makefile", "pom.xml", "build.gradle*")
 _CONVENTIONS_GLOBS = (
     "CLAUDE.md", "CONTRIBUTING*", ".editorconfig", ".eslintrc*", ".prettierrc*",
@@ -174,7 +175,7 @@ def staleness(sections: dict[str, str], diff: Diff) -> tuple[str, ...]:
 def _is_stack_or_commands(path: str) -> bool:
     if manifests.is_manifest(path) or manifests.is_lockfile(path):
         return True
-    if path == ".factory/config.json" or path.startswith(".github/workflows/"):
+    if path.startswith(".github/workflows/"):
         return True
     return _matches_name(path, _STACK_COMMANDS_EXTRA)
 
@@ -199,7 +200,10 @@ def collect(git: Git, checked: str, ref: str) -> Diff:
     paths removed first (``_under_factory_docs``): S01 committing ``docs/factory/`` for
     the first time must not, by itself, look like a new top-level ``docs`` folder.
     """
-    changed = frozenset(_lines(git.run(["diff", "--name-only", checked, ref])))
+    # --no-renames: a rename lists both paths, whatever the user's diff.renames config, so
+    # a manifest renamed to a non-manifest name still makes Stack and Commands stale.
+    changed = frozenset(_lines(git.run(["diff", "--no-renames", "--name-only", checked,
+                                        ref])))
     before = _ls_tree(git, checked)
     after = _ls_tree(git, ref)
     architecture_files = frozenset(
