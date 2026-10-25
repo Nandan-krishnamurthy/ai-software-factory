@@ -323,7 +323,7 @@ In every case the next increment reuses neither ID, and there are no warnings.
    - the source file name;
    - its location (repo path and commit, or "outside the repository");
    - its `git hash-object`;
-   - a transcription statement;
+   - a provenance statement for the format (`.txt` copied unchanged, or `.pdf` transcribed);
    - `Not reproduced:`.
 
    No helper was added, and the source file is not committed.
@@ -353,7 +353,7 @@ Before the change, every new D-B case and lint failed, and the AC1 fixtures alre
 
 **Changed existing tests:** none; T7.2 only adds tests.
 
-**Known limitation:** none beyond the hand-offs below. The HTML-only limitation of the first implementation was removed by the review correction above.
+**Known limitation:** a root-level file named like repository metadata is excluded whatever its suffix (D-B, after the review correction), so a root `changelog.py` or `notice.ts` does not count as code. This only matters when such a file is the repo's only code. Nested files with these names still count. Accepted ([backlog](backlog.md), Accepted limitations). The HTML-only limitation of the first implementation was removed by the review correction above.
 
 **Handed on:**
 - **Live proof in the M7 demo (D-F).** The roadmap's M7 demo runs on a sandbox: a new project with its PRD in `docs/`, and a PDF variant. Both must route to S02, labels must be created by S00, and the PDF must give `00-prd.md` with a `<!-- factory:prd-source` header. T7.2's tests check the station text and the detection logic, not a model run.

@@ -134,7 +134,7 @@ S00 writes this header at the top of `00-prd.md` when the requirements are **not
 Source: <file name, e.g. requirements.pdf>
 Location: <repo path> at commit <short SHA>, or: outside the repository
 Blob: <output of `git hash-object <file>`>
-Transcribed by the factory (S00). The source file is the record; the text below keeps its wording, and only its headings, lists and tables are restored as Markdown.
+<provenance statement for the format: see below>
 Not reproduced: <each element left out and why, e.g. the approval checkboxes carry no text>, or: nothing
 -->
 ```
@@ -142,4 +142,7 @@ Not reproduced: <each element left out and why, e.g. the approval checkboxes car
 - The first line is exactly `<!-- factory:prd-source`, so the header can be found by text search, and the comment does not render on GitHub.
 - `Location` gives the path and the commit (`git -C <T> log -1 --format=%h -- <path>`) when the source file is committed in the target, else `outside the repository`. The source file itself is not committed by S00.
 - `Blob` is the output of `git -C <T> hash-object <file>`. It identifies the exact source bytes and, for a committed file, matches its blob in the tree.
-- `Not reproduced` lists anything the text cannot carry. If a requirement itself cannot be reproduced as text (a PDF with no extractable text, or a diagram, image or form that carries requirements), S00 does not write the header: it stops and asks the human for a Markdown version.
+- The provenance statement depends on the format:
+  - `.txt`: `Copied unchanged by the factory (S00). The source file is the record.`
+  - `.pdf`: `Transcribed by the factory (S00). The source file is the record; the text below keeps its wording, and only its headings, lists and tables are restored as Markdown.`
+- `Not reproduced` lists anything the text cannot carry (for a `.txt` copy, normally `nothing`). If a requirement itself cannot be reproduced as text (a PDF with no extractable text, or a diagram, image or form that carries requirements), S00 does not write the header: it stops and asks the human for a Markdown version.

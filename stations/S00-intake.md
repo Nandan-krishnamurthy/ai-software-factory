@@ -28,7 +28,7 @@ Start a new increment: the first one of a project, or the next one once the curr
 - `gh repo view <R> --json defaultBranchRef,isEmpty,name` and `gh api user --jq .login`.
 
 ## Steps
-1. Run `python scripts/factory.py labels ensure`. It creates or updates only the factory's own labels, so a brand-new repo needs no manual label step. If it fails, report its error exactly and stop: step 2's checks show the cause (for example, no write access).
+1. Run `python scripts/factory.py labels ensure`. It creates or updates only the factory's own labels, so a brand-new repo needs no manual label step. If it fails, report its error exactly as printed and stop, without running any later step. The error shows the cause, for example `gh` not authenticated or no write access to `<R>`.
 2. Run `python scripts/factory.py doctor`. If it reports any `FAIL`, report the failing checks and stop. A `WARN` for `config` is expected before this station has run.
 3. Run `gh repo view <R> --json defaultBranchRef,isEmpty,name`. If `isEmpty` is true, stop: the factory cannot open a Planning PR without a default branch, and it never pushes to it (rule S1). Ask the human to push an initial commit (for example a README) to `<D>` themselves.
 4. Choose the increment:
