@@ -269,8 +269,8 @@ An **increment** is one pass through planning: one PRD or change request → one
 - **Which is which** (`state.is_existing_project`, T5.2): a target is an existing project when its default branch holds code, or the planning documents of an earlier increment. Code is any file that is none of these (T7.2):
   - under `docs/`, `.factory/`, `.github/`, `.claude/`, `.vscode/` or `.idea/`;
   - a `.git*` file, a README, `CODEOWNERS` or `.editorconfig`;
-  - repository metadata at the root with no suffix or a document suffix (`LICENSE`, `LICENSE-MIT`, `LICENCE`, `COPYING`, `NOTICE`, `CHANGELOG`, `AUTHORS`);
-  - a document or image (`.md`, `.pdf`, `.txt`, `.html`, `.png`, …).
+  - repository metadata at the root, with any suffix (`LICENSE`, `LICENSE-MIT`, `LICENCE`, `COPYING.LESSER`, `NOTICE`, `CHANGELOG.md`, `AUTHORS`); nested files with such names, like `src/notice_service.py`, still count;
+  - a document or image (`.md`, `.pdf`, `.txt`, `.png`, …). HTML counts as code (a static site), except under `docs/`.
 
   So a new repo holding only a README and its requirements (in `docs/`, or as a PDF) is a new project, and S00 is followed by S02. Anything else counts as code, so an unusual language still gets Codebase Discovery: wrongly treating a project as existing costs an S01 run, while wrongly treating it as new would plan over existing code.
 - **Starting the next increment:** `/factory-start <change-request>` is allowed once the current increment is `INCREMENT_COMPLETE` (every story done), and begins with S0, which allocates `00N-<slug>`. For an existing project the requirements and architecture are written as a **delta** (`templates/requirements-delta.md`, `templates/architecture-delta.md`): what exists, what changes, and the existing behaviour that must keep working.

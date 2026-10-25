@@ -306,10 +306,13 @@ In every case the next increment reuses neither ID, and there are no warnings.
    - every `.git*` file;
    - the `.claude/`, `.vscode/` and `.idea/` folders;
    - `CODEOWNERS` and `.editorconfig`;
-   - repository metadata at the root (`LICENSE*`, `LICENCE*`, `COPYING*`, `NOTICE*`, `CHANGELOG*`, `AUTHORS*`);
-   - the `.html` and `.htm` suffixes.
+   - repository metadata at the root, with any suffix (`LICENSE*`, `LICENCE*`, `COPYING*`, `NOTICE*`, `CHANGELOG*`, `AUTHORS*`).
 
-   **Narrowing:** the metadata names apply only to root-level files with no suffix or a document suffix. Otherwise `src/changelog_parser.py` or a root `changelog.py` would stop counting as code. Everything that counted before still counts: `Makefile`, `.eslintrc.json`, `.devcontainer/**`, data files.
+   **Narrowing:** the metadata names apply only to root-level files, so nested source such as `src/notice_service.py` or `src/changelog_parser.py` still counts as code. Everything that counted before still counts: `Makefile`, `.eslintrc.json`, `.devcontainer/**`, data files and HTML.
+
+   **Corrected by the review of PR #51** (`34ce5c38#1395`, 2026-10-25T12:29:07Z; approved in `34ce5c38#1412`, 2026-10-25T12:31:24Z):
+   - **The suffix restriction was removed.** The first implementation applied the metadata names only to suffix-less files. That kept `COPYING.LESSER`, `LICENSE-2.0` and `LICENSE.BSD` counting as code, which wrongly sends a new project to S01, the B-20 problem. A root file named like metadata is now excluded whatever its suffix. That includes a root `changelog.py`, which only matters if it is the repo's only code.
+   - **`.html` and `.htm` were removed from the document suffixes.** The first implementation excluded them, so a static site (`index.html` and images) was detected as a new project and Codebase Discovery was skipped. That was a regression from `main`, and against D-A. HTML now counts as code again, except under `docs/**`. S00's intake rule for an HTML requirements file (stop and ask) is unchanged.
 3. **D-C: S00 step 7 by format.**
    - `.md`/`.markdown`: copied unchanged.
    - `.txt`: copied unchanged below a source header.
@@ -338,7 +341,8 @@ In every case the next increment reuses neither ID, and there are no warnings.
   - `ExistingProjectTest.test_t72_layouts_that_are_new_projects`;
   - `ExistingProjectTest.test_t72_code_still_counts`;
   - `CollectSnapshotTest.test_readme_and_docs_prd_route_to_requirements` (AC1);
-  - `CollectSnapshotTest.test_repository_metadata_does_not_route_to_discovery`.
+  - `CollectSnapshotTest.test_repository_metadata_does_not_route_to_discovery`;
+  - `CollectSnapshotTest.test_static_html_site_needs_discovery` (review correction).
 - **Station lint of the S00 step order:** `IntakeStationTest.test_labels_are_ensured_before_the_first_doctor` (AC3).
 - **The intake rule and header:**
   - `IntakeStationTest.test_requirements_are_taken_by_format` (AC2);
@@ -349,7 +353,7 @@ Before the change, every new D-B case and lint failed, and the AC1 fixtures alre
 
 **Changed existing tests:** none; T7.2 only adds tests.
 
-**Known limitation:** a repository holding only HTML files (and no CSS, scripts or other code) is now detected as a new project (D-B). Accepted ([backlog](backlog.md), Accepted limitations).
+**Known limitation:** none beyond the hand-offs below. The HTML-only limitation of the first implementation was removed by the review correction above.
 
 **Handed on:**
 - **Live proof in the M7 demo (D-F).** The roadmap's M7 demo runs on a sandbox: a new project with its PRD in `docs/`, and a PDF variant. Both must route to S02, labels must be created by S00, and the PDF must give `00-prd.md` with a `<!-- factory:prd-source` header. T7.2's tests check the station text and the detection logic, not a model run.

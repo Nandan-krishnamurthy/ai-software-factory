@@ -702,6 +702,18 @@ class CollectSnapshotTest(unittest.TestCase):
         fake.put(PLAN, f"{DOCS}/00-prd.md", "PRD")
         self.assertEqual(derive_state(collect(fake)).next_station, "S02")
 
+    def test_static_html_site_needs_discovery(self):
+        """T7.2 review: a static site (HTML and images only) is an existing project, so S00
+        is followed by Codebase Discovery, as before T7.2."""
+        fake = FakeRepo()
+        for path in ("README.md", "index.html", "logo.png", "docs/prd.html"):
+            fake.put("main", path, "x")
+        fake.put(PLAN, ".factory/config.json", CONFIG)
+        fake.put(PLAN, f"{DOCS}/00-prd.md", "PRD")
+        snapshot = collect(fake)
+        self.assertTrue(snapshot.existing_project)
+        self.assertEqual(derive_state(snapshot).next_station, "S01")
+
     def test_second_increment_of_a_factory_built_project_needs_discovery(self):
         """T5.2: Task Tracker after increment 001: its code and the merged 001 documents
         are on main, and increment 002 is being planned."""
@@ -1174,12 +1186,16 @@ class ExistingProjectTest(unittest.TestCase):
                                  ".gitlab-ci.yml"],
             "licence and notice files": ["LICENSE", "LICENSE-MIT", "Licence", "COPYING",
                                          "NOTICE", "license.txt"],
+            "licence files with any suffix": ["README.md", "COPYING.LESSER", "LICENSE-2.0",
+                                              "LICENSE.BSD"],
+            "a root file named like metadata, whatever its suffix": ["README.md",
+                                                                     "changelog.py"],
             "changelog, authors and code owners": ["CHANGELOG", "CHANGELOG.md", "AUTHORS",
                                                    "CODEOWNERS"],
             "editor and agent settings": [".claude/settings.json", ".vscode/settings.json",
                                           ".idea/workspace.xml", ".editorconfig",
                                           "src/.editorconfig"],
-            "HTML documents": ["README.md", "spec.html", "docs-site/index.htm"],
+            "HTML under docs/": ["README.md", "docs/prd.html", "docs/site/index.htm"],
         }
         for why, paths in cases.items():
             with self.subTest(why=why):
@@ -1194,8 +1210,10 @@ class ExistingProjectTest(unittest.TestCase):
             "a dev container": ["README.md", ".devcontainer/devcontainer.json"],
             "data files": ["README.md", "data.csv"],
             "source named like metadata": ["README.md", "src/changelog_parser.py"],
-            "a root script named like metadata": ["README.md", "changelog.py"],
+            "nested source named like metadata": ["README.md", "src/notice_service.py"],
             "metadata outside the root": ["README.md", "vendor/lib/COPYING"],
+            "a static HTML site": ["README.md", "index.html", "logo.png"],
+            "an HTML page outside docs/": ["README.md", "site/about.htm"],
             "an unusual language": ["README.md", "main.zig"],
             "a settings folder that is not an editor's": ["README.md", ".config/app.toml"],
         }

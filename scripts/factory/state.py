@@ -622,12 +622,12 @@ def _parse_config_text(text: str | None) -> tuple[Config | None, str | None]:
 # else counts as code, so an unusual language still gets Codebase Discovery (T7.2 D-A).
 _NON_CODE_DIRS = ("docs/", ".factory/", ".github/", ".claude/", ".vscode/", ".idea/")
 _NON_CODE_NAMES = {"readme", "codeowners", ".editorconfig"}
-# Repository metadata at the root, e.g. LICENSE, LICENSE-MIT, COPYING, CHANGELOG.md. Only
-# with no suffix or a document suffix, so a root script such as changelog.py still counts.
+# Repository metadata at the root, with any suffix: LICENSE, LICENSE-MIT, COPYING.LESSER,
+# CHANGELOG.md, … Only at the root, so source such as src/notice_service.py still counts.
 _METADATA = re.compile(r"^(?:license|licence|copying|notice|changelog|authors)(?:[-_.].*)?$")
+# HTML is not here: a static site's index.html is the project's code.
 _DOCUMENT_SUFFIXES = {".md", ".markdown", ".rst", ".txt", ".adoc", ".pdf", ".doc", ".docx",
-                      ".odt", ".rtf", ".html", ".htm", ".png", ".jpg", ".jpeg", ".gif", ".svg",
-                      ".webp"}
+                      ".odt", ".rtf", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"}
 _INCREMENT_DOC = re.compile(r"^docs/factory/increments/(?P<inc>[^/]+)/")
 
 
@@ -637,8 +637,10 @@ def is_existing_project(paths: Iterable[str], increment: str | None = None) -> b
     Yes if it has code: any file that is not one of these (T7.2):
     - under ``docs/``, ``.factory/``, ``.github/``, ``.claude/``, ``.vscode/`` or ``.idea/``;
     - a ``.git*`` file, a README, ``CODEOWNERS`` or ``.editorconfig``;
-    - repository metadata at the root (a licence, notice, changelog or authors file);
-    - a document or an image (``.md``, ``.pdf``, ``.txt``, ``.html``, ``.png``, …).
+    - repository metadata at the root, with any suffix (a licence, notice, changelog or
+      authors file);
+    - a document or an image (``.md``, ``.pdf``, ``.txt``, ``.png``, …). HTML counts as
+      code (a static site), except under ``docs/``.
 
     Also yes if it holds the planning documents of an **earlier** increment (one other
     than ``increment``, the one being planned): its Planning PR was merged, so this is the
@@ -653,7 +655,7 @@ def is_existing_project(paths: Iterable[str], increment: str | None = None) -> b
         if path.lower().startswith(_NON_CODE_DIRS) or name.startswith(".git") \
                 or name in _NON_CODE_NAMES or suffix in _DOCUMENT_SUFFIXES:
             continue
-        if "/" not in path and _METADATA.match(name) and not suffix:
+        if "/" not in path and _METADATA.match(name):
             continue
         return True
     return False
