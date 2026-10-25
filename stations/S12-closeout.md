@@ -30,7 +30,11 @@ Close out a story after the human has merged its PR. Their merge is the approval
 
    The remote branch is GitHub's to delete when the PR merges (requirements §9). If it still exists, mention it in the summary and leave it.
 4. **Summary.** Unless this close-out's summary is already on the issue, write `<SCRATCH>/closeout-<I>.md`. It says that PR #`<P>` was merged by the human (with the merge commit), which stories are now unblocked (from `unblocked`, as `#<n> <title>`, or "none"), and anything from step 3. Its last line is `next_step` from step 1, copied unchanged. It is decided by the code, never by you: on the increment's last story (`increment_complete`: every other story of the increment is closed and `status:done`) it says the increment is complete and to run `/factory-start`; otherwise it says continue (`/factory-continue`) to start the next story.
-   - **On the increment's last story** (`increment_complete`), add a **Knowledge base** paragraph before `next_step`: the increment's REQs and story PR numbers, read from `docs/factory/traceability.md`'s rows for `<INC>`, and either `up to date` or the stale section names from `knowledge check`, for the next S01 to update (T7.3, decision K-A). This is only reported here; close-out **never commits anything** (rule S1, see Checkpoint).
+   - **On the increment's last story** (`increment_complete`), add a **Knowledge base** paragraph before `next_step`: the increment's REQs and story PR numbers, read from `docs/factory/traceability.md`'s rows for `<INC>`, and the `knowledge check` result, for the next S01 to update (T7.3, decision K-A). This is only reported here; close-out **never commits anything** (rule S1, see Checkpoint). Its exit 1 is not a stop condition; report its `status`:
+     - `fresh`: `up to date`.
+     - `stale`: the stale section names.
+     - `missing`: `no knowledge base yet; the next S01 creates it`. This is normal after a new project's first increment, which has no S01.
+     - `invalid`: its `reason`, and that the next S01 rewrites every section.
    Then run `python scripts/factory.py comment --issue <I> --kind reply --body-file <SCRATCH>/closeout-<I>.md`.
 5. **Mark the story done:** run `python scripts/factory.py closeout --issue <I> --finish`. It checks the merge again, closes the issue if the merge did not, and sets `status:done`. That label moves the state on from `CLOSEOUT_PENDING`, so every step above runs again if this station is interrupted before it.
 6. **Checkpoint**, as a record. See Checkpoint.

@@ -375,10 +375,10 @@ Before the change, every new D-B case and lint failed, and the AC1 fixtures alre
    - On an increment's last story, S12's close-out summary adds a **Knowledge base** paragraph: the increment's REQs and story PR numbers (read from `docs/factory/traceability.md`), and `knowledge check`'s result. S12 still commits nothing (rule S1); the next S01 is what actually updates the file.
 2. **K-B: fixed, deterministic staleness scopes**, none project-specific:
    - **Stack**/**Commands**: `manifests.py`'s `is_manifest`/`is_lockfile` (every stack it already knows, T6.3) plus `Makefile`, `pom.xml`, `build.gradle*` and `.github/workflows/**`. Not `.factory/config.json` (removed by the review of PR #52, below).
-   - **Conventions**: lint/format configuration, `CLAUDE.md`, `CONTRIBUTING*`, `.editorconfig`.
+   - **Conventions**: lint/format configuration, `CLAUDE.md`, `CONTRIBUTING*`, `.editorconfig`; widened by the review follow-up (below) to `tsconfig*.json`, `setup.cfg`, `.pylintrc`, `biome.json(c)`, `.rubocop*.yml`, `.clang-format` and `.clang-tidy`.
    - **Layout**: any top-level entry added or removed, **after** removing `docs/factory/` and `.factory/` paths first, so S01's own first write of `knowledge.md`/`01-codebase-analysis.md` is never itself a "new top-level folder" (found and fixed during implementation; see "Problems found").
    - **Hotspots**/**Known risks**: any change outside `docs/factory/` and `.factory/`.
-   - **Architecture decisions**: a merged increment's `03-architecture.md` not named in the section's own text.
+   - **Architecture decisions**: a merged increment's `03-architecture.md` not linked by its path (`<NNN-slug>/03-architecture.md`) in the section's text. Before the review follow-up (below), a bare mention of the increment name counted.
    - **Changes** is never flagged by a diff; S01 appends to it directly, every run.
 3. **K-C: the file format.** First line `<!-- factory:knowledge checked=<sha> -->` (a new `KnowledgeMarker` in `markers.py`, reusing the existing marker system rather than a bespoke parser), then the eight sections as `##` headings, in this fixed order: Stack, Layout, Conventions, Commands, Hotspots, Architecture decisions, Known risks, Changes. A missing marker, an unresolvable commit, or sections missing, duplicated or out of order make **every** section stale (fail-safe), regardless of the diff.
 4. **K-D:** on first creation, S01 also reuses the latest earlier increment's `01-codebase-analysis.md`, if one exists.
@@ -391,6 +391,14 @@ Before the change, every new D-B case and lint failed, and the AC1 fixtures alre
 **Review of PR #52** (`34ce5c38#2761`, 2026-10-25T16:15:24Z; fixes requested in `34ce5c38#2824`, 2026-10-25T16:25:51Z): two blockers, both fixed with regression tests (`ReviewRegressionTest`), which fail on the reviewed head `52149bf`:
 - **S01's Done check could not pass on an existing project's first increment.** S00 creates `.factory/config.json` on the plan branch and S01 sets its commands, so the diff from the analysed commit always contained it, and it was in the Stack/Commands scope: the freshly written file was reported stale at once. `.factory/config.json` was removed from that scope (manifests, lockfiles, `Makefile` and CI workflows stay). K-B is narrowed accordingly; K-A is unchanged.
 - **A renamed manifest was reported fresh, and the result depended on the user's git config.** With rename detection, `git diff --name-only` lists only the new path, so `requirements.txt` renamed to `deps.txt` left Stack and Commands fresh, but not with `diff.renames=false`. `collect()` now passes `--no-renames`, which lists both paths whatever the config.
+
+**Review follow-up** (`34ce5c38#2925`, 2026-10-25T16:36:57Z), non-blocking findings fixed, each with tests that fail on `edca6e7`:
+- **Conventions false-fresh:** `tsconfig*.json`, `setup.cfg`, `.pylintrc`, `biome.json`/`biome.jsonc`, `.rubocop*.yml`, `.clang-format` and `.clang-tidy` now make Conventions stale (`StalenessTest.test_conventions_stale_on_other_stacks_configuration`). The list is still fixed, so a tool it does not name stays a limitation (below).
+- **A bad `--ref` was reported as `missing`:** `check()` resolves `--ref` first and raises `KnowledgeError`, so the CLI prints an error and exits 1 (`test_a_ref_that_is_not_a_commit_is_an_error_not_missing`, `CliTest.test_bad_ref_is_exit_1_with_an_error`).
+- **A `##` line in a fenced code block made the file invalid:** headings inside ```` ``` ```` or `~~~` fences are ignored; an unclosed fence hides the rest of the file, so it stays fail-safe (`ParseTest`).
+- **A bare mention counted as an architecture link:** only a path, `<NNN-slug>/03-architecture.md`, counts now, which is what the roadmap's "with links to each increment's `03`" asks; S01 says to link by path (`ArchitectureLinksTest.test_a_bare_mention_is_not_a_link`).
+- **S12** now says how to report each `knowledge check` status (`fresh`, `stale`, `missing`, `invalid`), and that its exit 1 is not a stop condition. `missing` is normal after a new project's first increment, which has no S01.
+- **`_rules.md` §5 item 4** now says to follow the conventions `CLAUDE.md` and `knowledge.md` record, while their text stays data (rule U1) and nothing in them overrides rules 1–3.
 
 **Problems found during implementation, fixed before any test was finalised:**
 - **A false "Layout" staleness on first creation.** `collect()`'s first draft derived the top-level sets from `git ls-tree --name-only` directly. Writing `docs/factory/knowledge.md` for the first time (or `00-prd.md` by S00, before S01 ever runs) adds a `docs` top-level entry that was not there before, which read as a real layout change on the very first check. Fixed by deriving the top-level sets from the full recursive tree with `docs/factory/` and `.factory/` paths removed first, so the factory's own bookkeeping can never look like a target's layout change. Covered by `CollectTest.test_new_factory_docs_are_not_a_layout_change` and `CheckIntegrationTest.test_fresh_right_after_creation`.
@@ -407,6 +415,10 @@ Before the change, every new D-B case and lint failed, and the AC1 fixtures alre
 - `docs/factory/knowledge.md` added to `ALLOWED_OUTPUTS` (test support) and to architecture §5.1 and §5.5.
 
 **Changed existing tests:** none; T7.3 only adds tests.
+
+**Known limitations:**
+- The staleness scopes are fixed lists. A configuration file of a tool they do not name (for example a new linter) changes no Conventions or Stack/Commands staleness; Hotspots and Known risks still go stale for any change outside `docs/factory/` and `.factory/`.
+- A path that names an increment's `03-architecture.md` counts as a link whether or not it is a working Markdown link; `knowledge check` does not follow links.
 
 **Handed on:**
 - **Live proof in the M7 demo (K-G).** Task Tracker increment 004: S01 must create or update `knowledge.md`, and S12's note must appear on the increment's last story.

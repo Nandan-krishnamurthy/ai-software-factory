@@ -29,7 +29,7 @@ commit (``staleness()``, pure):
 * **Hotspots** and **Known risks**: any change outside ``docs/factory/`` and ``.factory/``
   (the target's own risk surface, as opposed to the factory's planning artefacts).
 * **Architecture decisions**: stale when a merged increment's ``03-architecture.md``
-  is not linked from this section's text (by increment name).
+  is not linked from this section's text, by path (``<NNN-slug>/03-architecture.md``).
 * **Changes** is never flagged by a diff: S01 appends to it directly, every time.
 
 **Fail-safe** (K-C): a missing file, a missing or malformed marker, an unresolvable commit,
@@ -46,7 +46,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from factory import manifests
-from factory.errors import GitError
+from factory.errors import FactoryError, GitError
 from factory.git import Git
 from factory.increments import is_increment
 from factory.markers import KnowledgeMarker, find
@@ -58,7 +58,10 @@ SECTIONS = ("Stack", "Layout", "Conventions", "Commands", "Hotspots",
 
 _HEADING = re.compile(r"^##[ \t]+(.+?)[ \t]*$", re.MULTILINE)
 _ARCH_FILE = re.compile(rf"^{re.escape(INCREMENTS_DIR)}/([^/]+)/03-architecture\.md$")
-_INCREMENT_NAME = re.compile(r"\b(\d{3}-[a-z0-9]+(?:-[a-z0-9]+)*)\b")
+# A link to an increment's architecture document: "<NNN-slug>/03-architecture.md", in any
+# relative or absolute form. A bare mention of the increment name is not a link.
+_ARCH_LINK = re.compile(r"(?<![a-z0-9-])(\d{3}-[a-z0-9]+(?:-[a-z0-9]+)*)/03-architecture\.md\b")
+_FENCE = re.compile(r"^[ ]{0,3}(`{3,}|~{3,})", re.MULTILINE)
 
 # Beyond the dependency manifests and lockfiles manifests.py already knows across every
 # stack (reused below, never duplicated here: T5.4 success criterion 8 keeps ecosystem
@@ -67,9 +70,14 @@ _INCREMENT_NAME = re.compile(r"\b(\d{3}-[a-z0-9]+(?:-[a-z0-9]+)*)\b")
 _STACK_COMMANDS_EXTRA = ("Makefile", "pom.xml", "build.gradle*")
 _CONVENTIONS_GLOBS = (
     "CLAUDE.md", "CONTRIBUTING*", ".editorconfig", ".eslintrc*", ".prettierrc*",
-    "ruff.toml", "pyproject.toml", ".flake8", "mypy.ini", ".stylelintrc*", "tslint.json",
-    ".golangci*",
+    "ruff.toml", "pyproject.toml", "setup.cfg", ".flake8", ".pylintrc", "mypy.ini",
+    ".stylelintrc*", "tslint.json", "tsconfig*.json", "biome.json", "biome.jsonc",
+    ".rubocop*.yml", ".clang-format", ".clang-tidy", ".golangci*",
 )
+
+
+class KnowledgeError(FactoryError):
+    """``knowledge check`` cannot run: the ``--ref`` it was given is not a commit."""
 
 
 # ----------------------------------------------------------------------------- inputs
@@ -131,7 +139,9 @@ def parse(text: str) -> KnowledgeFile:
     appear. A heading seen again later keeps only its first body (so a duplicate cannot
     silently replace a section further down)."""
     marker = find(text, KnowledgeMarker)
-    headings = list(_HEADING.finditer(text))
+    fenced = _fenced_spans(text)
+    headings = [m for m in _HEADING.finditer(text)
+                if not any(start <= m.start() < end for start, end in fenced)]
     sections: dict[str, str] = {}
     for i, m in enumerate(headings):
         name = m[1].strip()
@@ -149,9 +159,28 @@ def well_formed(kf: KnowledgeFile) -> bool:
 
 
 def architecture_links(section_text: str) -> frozenset[str]:
-    """The increment names (``NNN-slug``) mentioned in the "Architecture decisions"
-    section's text, however they are written (a link, a bare name, a bullet)."""
-    return frozenset(_INCREMENT_NAME.findall(section_text))
+    """The increments whose ``03-architecture.md`` the "Architecture decisions" section
+    links, by path (``<NNN-slug>/03-architecture.md``, as a Markdown link or plain text).
+    A bare mention of an increment name does not count: the roadmap asks for links."""
+    return frozenset(_ARCH_LINK.findall(section_text))
+
+
+def _fenced_spans(text: str) -> list[tuple[int, int]]:
+    """Where the fenced code blocks (``` or ~~~) are, so a ``##`` line inside one is not a
+    section heading. An unclosed fence runs to the end of the text."""
+    spans: list[tuple[int, int]] = []
+    opener: str | None = None
+    start = 0
+    for m in _FENCE.finditer(text):
+        mark = m[1]
+        if opener is None:
+            opener, start = mark, m.start()
+        elif mark[0] == opener[0] and len(mark) >= len(opener):
+            spans.append((start, m.end()))
+            opener = None
+    if opener is not None:
+        spans.append((start, len(text)))
+    return spans
 
 
 def staleness(sections: dict[str, str], diff: Diff) -> tuple[str, ...]:
@@ -232,7 +261,13 @@ def _read_file(git: Git, ref: str, path: str) -> str | None:
 
 
 def check(git: Git, ref: str = "HEAD") -> CheckResult:
-    """Read-only: is the target's ``knowledge.md`` fresh at ``ref``? Never writes anything."""
+    """Read-only: is the target's ``knowledge.md`` fresh at ``ref``? Never writes anything.
+    Raises ``KnowledgeError`` if ``ref`` is not a commit in the target, rather than
+    reporting the file as missing."""
+    try:
+        git.rev_parse(ref)
+    except GitError:
+        raise KnowledgeError(f"--ref {ref!r} is not a commit in the target") from None
     text = _read_file(git, ref, KNOWLEDGE_FILE.as_posix())
     if text is None:
         return CheckResult(missing=True, invalid=False)

@@ -55,17 +55,36 @@ class ParseTest(unittest.TestCase):
         self.assertEqual(tuple(kf.sections), knowledge.SECTIONS)  # the extra repeat is dropped
         self.assertNotIn("replaced?", kf.sections["Stack"])
 
+    def test_heading_inside_a_fenced_code_block_is_not_a_section(self):
+        # Review of PR #52: a `##` line in a code example made the whole file invalid.
+        for fence in ("```", "~~~", "````"):
+            with self.subTest(fence=fence):
+                doc = text("a" * 7, {"Hotspots": f"Example:\n{fence}\n## not a heading\n{fence}"})
+                kf = knowledge.parse(doc)
+                self.assertTrue(knowledge.well_formed(kf))
+                self.assertIn("## not a heading", kf.sections["Hotspots"])
+
+    def test_unclosed_fence_hides_the_rest_and_is_not_well_formed(self):
+        doc = text("a" * 7, {"Hotspots": "```\nnever closed"})
+        self.assertFalse(knowledge.well_formed(knowledge.parse(doc)))  # fail-safe
+
     def test_empty_text_is_not_well_formed(self):
         self.assertFalse(knowledge.well_formed(knowledge.parse("")))
 
 
 class ArchitectureLinksTest(unittest.TestCase):
-    def test_finds_increment_names_in_any_form(self):
+    def test_finds_links_to_architecture_documents_by_path(self):
         found = knowledge.architecture_links(
             "- [001-initial](../increments/001-initial/03-architecture.md): walking skeleton\n"
-            "- 002-add-due-dates: a new AppState field\n"
-            "Not an increment: 01-initial, 0001-initial, STORY-001.")
+            "- docs/factory/increments/002-add-due-dates/03-architecture.md: a new field\n"
+            "Not an increment: 01-initial/03-architecture.md, x003-y/03-architecture.md.")
         self.assertEqual(found, {"001-initial", "002-add-due-dates"})
+
+    def test_a_bare_mention_is_not_a_link(self):
+        # Review of PR #52: "Not yet reviewed: 002-x" must not count as linking 002-x.
+        found = knowledge.architecture_links(
+            "Not yet reviewed: 002-x. See 003-y/04-implementation-plan.md.")
+        self.assertEqual(found, frozenset())
 
     def test_empty_text_has_no_links(self):
         self.assertEqual(knowledge.architecture_links(""), frozenset())
@@ -102,6 +121,18 @@ class StalenessTest(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertIn("Conventions", self.stale(changed=frozenset({path})))
 
+    def test_conventions_stale_on_other_stacks_configuration(self):
+        # Review of PR #52: these were false-fresh for Conventions.
+        for path in ("tsconfig.json", "web/tsconfig.build.json", "setup.cfg", ".rubocop.yml",
+                     ".clang-format", ".clang-tidy", "biome.json", "biome.jsonc", ".pylintrc"):
+            with self.subTest(path=path):
+                self.assertIn("Conventions", self.stale(changed=frozenset({path})))
+
+    def test_source_files_are_not_conventions(self):
+        for path in ("src/setup.py", "src/tsconfig.ts", "biome.md"):
+            with self.subTest(path=path):
+                self.assertNotIn("Conventions", self.stale(changed=frozenset({path})))
+
     def test_layout_stale_on_a_top_level_change(self):
         result = self.stale(top_level_before=frozenset({"README.md"}),
                             top_level_after=frozenset({"README.md", "src"}))
@@ -126,7 +157,8 @@ class StalenessTest(unittest.TestCase):
 
     def test_architecture_decisions_fresh_when_every_increment_is_linked(self):
         sections = knowledge.parse(text("a" * 7, {
-            "Architecture decisions": "See 001-initial and 002-add-due-dates."})).sections
+            "Architecture decisions": "See increments/001-initial/03-architecture.md and "
+                                      "increments/002-add-due-dates/03-architecture.md."})).sections
         result = knowledge.staleness(sections, Diff(
             architecture_files=frozenset({"001-initial", "002-add-due-dates"})))
         self.assertEqual(result, ())
@@ -240,6 +272,14 @@ class CheckIntegrationTest(unittest.TestCase):
         result = knowledge.check(repo.git)
         self.assertEqual((result.missing, result.invalid), (False, True))
         self.assertIn("header", result.reason)
+
+    def test_a_ref_that_is_not_a_commit_is_an_error_not_missing(self):
+        # Review of PR #52: a bad --ref used to be reported as "missing".
+        repo = GitRepo(self)
+        checked = repo.commit("README.md", "hi")
+        repo.commit("docs/factory/knowledge.md", text(checked))
+        with self.assertRaisesRegex(knowledge.KnowledgeError, "no-such-ref"):
+            knowledge.check(repo.git, "no-such-ref")
 
     def test_unreadable_commit_is_invalid(self):
         repo = GitRepo(self)
@@ -362,6 +402,12 @@ class CliTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("stale", out)
         self.assertIn("Stack", out)
+
+    def test_bad_ref_is_exit_1_with_an_error(self):
+        code, out, err = self.run_cli("check", "--ref", "no-such-ref")
+        self.assertEqual(code, 1)
+        self.assertIn("error: --ref 'no-such-ref' is not a commit in the target", err)
+        self.assertNotIn("missing", out)
 
     def test_ref_argument_is_accepted(self):
         created = self.repo.commit("docs/factory/knowledge.md", text(self.checked))
