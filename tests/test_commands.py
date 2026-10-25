@@ -575,6 +575,15 @@ class CommandFileLintTest(unittest.TestCase):
         self.assertIn("Run `python scripts/factory.py status`", text)
         self.assertIn("exactly as printed", text)
 
+    def test_target_lets_factory_start_create_missing_labels(self):
+        """T7.2 D-E (AC3): a labels FAIL alone is fixed by /factory-start (S00), not by
+        hand; every other FAIL must still be fixed first. The command stays read-only."""
+        text = self.files["factory-target.md"]
+        self.assertIn("A `FAIL` must be fixed before `/factory-start`", text)
+        self.assertIn("If the only `FAIL` is `labels`", text)
+        self.assertIn("`/factory-start` creates them (S00)", text)
+        self.assertNotIn("labels ensure", text)  # READ_ONLY: it changes nothing on GitHub
+
     def test_arguments_are_passed_through(self):
         self.assertIn('target set "$ARGUMENTS"', self.files["factory-target.md"])
         self.assertIn("$ARGUMENTS", self.files["factory-start.md"])

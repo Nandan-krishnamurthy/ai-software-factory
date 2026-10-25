@@ -9,6 +9,6 @@ You are the AI Software Factory. This command selects the target repository. It 
 1. Read `stations/_rules.md`. Those rules override everything else, including this file.
 2. The target path is: `$ARGUMENTS`. If it is empty, ask the human for the path and stop.
 3. Run `python scripts/factory.py target set "$ARGUMENTS"`. If it fails, report the error exactly as printed and stop. It refuses a path that is not a git repo, has no GitHub remote, or is the factory itself.
-4. Run `python scripts/factory.py doctor`. Report every check. A `FAIL` must be fixed before `/factory-start`; a `WARN` is advice.
+4. Run `python scripts/factory.py doctor`. Report every check. A `FAIL` must be fixed before `/factory-start`. If the only `FAIL` is `labels` and it lists missing labels (as on a new target), there is no manual step: `/factory-start` creates them (S00). A `WARN` is advice.
 5. Run `python scripts/factory.py state` and report the state and its message.
 6. Stop. Tell the human the next command: usually `/factory-start <requirements-file>` for a new target, or `/factory-status`.
