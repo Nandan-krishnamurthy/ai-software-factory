@@ -209,7 +209,7 @@ Written in Python 3.11+ using only the standard library. It calls `git` and `gh`
 | `doctor` | Checks: `gh auth`, remote reachable, target is not the factory repo, clean working tree, required labels exist, branch protection (warns only), config valid | ✔ (read-only) |
 | `labels ensure` | Creates or updates the §4 labels, plus `factory:needs-human` and `factory:planning` | ✔ |
 | `state [--json]` | **Reconciler.** Works out the current state and the next action (§6) | ✔ (read-only) |
-| `increment show` / `increment next [--slug S]` | Reports the current increment and the next free `REQ-`/`STORY-` IDs; `next` allocates the next `NNN-slug` or refuses (§5.2). Changes nothing. | ✔ (read-only) |
+| `increment show` / `increment next [--slug S]` | Reports the current increment, the next free `REQ-`/`STORY-` IDs and warnings about IDs that are mentioned but never allocated; `next` allocates the next `NNN-slug` or refuses (§5.2). Changes nothing. | ✔ (read-only) |
 | `issues sync [--dry-run]` | Parses `05-stories.md` (§5.4), then creates only the issues that are missing, matched by their `STORY-###` marker. Refuses before Gate A, except with `--dry-run`. | ✔ |
 | `pick --authorized-by-continue` | Applies the unblocked rule (§4 of the requirements): open, `status:ready`, not `factory:needs-human`, every "Blocked by" issue closed (an issue it cannot see counts as open). Picks the oldest increment, then the lowest milestone, then the lowest issue number. Assigns the issue, then sets `status:in-progress` last, because that label is the lock. | ✔ (refuses without the flag, and while a story is `in-progress`, `in-review` or `changes-requested`) |
 | `checkpoint --issue N --station S09 --next S10 [--note …]` | Adds or updates the single machine-readable checkpoint comment. The evidence and AC-to-test map blocks already in it are always carried over; a note containing an evidence or map delimiter is refused, so only `verify run` and `verify map` write those blocks (T6.2) | ✔ |
@@ -273,8 +273,13 @@ An **increment** is one pass through planning: one PRD or change request → one
 
 `factory.py increment show|next` (`scripts/factory/increments.py`) implements these rules:
 - **Current increment:** the highest-numbered one with a local folder, a `factory/plan-<inc>` branch or a Planning PR.
-- **Next increment:** one above the highest increment number seen anywhere, including numbers seen only in story issue markers or abandoned plans. An increment number is therefore never reused.
-- **Next IDs:** one above the highest `REQ-`/`STORY-` number mentioned in any file under `docs/factory/`, in any story issue marker, or in any Planning PR body.
+- **Next increment:** one above the highest increment number seen anywhere, including numbers seen only in abandoned plans or in the markers of story issues that carry the `factory:story` label. An increment number is therefore never reused. A marker on an issue without the label does not count (T7.1); it is only warned about.
+- **Next IDs:** one above the highest *allocated* `REQ-`/`STORY-` number (T7.1). Only these allocate an ID:
+  - any `REQ-###` or `STORY-###` named in an increment's record files, `02-requirements.md` and `05-stories.md`. That covers the requirement bullets and story headings, and also an ID that a Gate A revision moved to `## Out of scope` (S05 revision mode), so a dropped ID is never handed out again. The record files are read in the working tree and, through the GitHub API by commit SHA, at the head commit of every Planning PR, whether open, merged or closed. An abandoned plan's IDs are therefore never handed out again, even after its branch is deleted;
+  - a story issue carrying both the `factory:story` label and the story marker, open or closed.
+
+  If a Planning PR's records cannot be read (an unknown or unreadable commit, or a file the API cannot return), every ID in that PR's body counts instead, and a warning says so. The fallback can count more IDs than needed, never fewer.
+- **Mentions are warnings, not allocations:** an ID written anywhere else does not use up a number. This covers any other file under `docs/factory/` (such as the codebase analysis, the plan or `traceability.md`), a Planning PR body, and the marker of an issue without the label. `increment show` and `increment next` warn about each mentioned ID that is not allocated, naming where it was seen. Warnings never change the exit code.
 - **Refusal:** `increment next` refuses (exit 1, with the reasons) while the current increment:
   - has not passed Gate A, unless its Planning PR was closed and its branch deleted (abandoned);
   - still has stories without issues;
