@@ -20,6 +20,13 @@ Output of `python scripts/factory.py issues sync --dry-run` on this branch:
 {{issues_sync_dry_run}}
 ```
 
+## Plan check
+Output of `python scripts/factory.py plan check --increment {{increment}}` on this branch:
+
+```text
+{{plan_check}}
+```
+
 ## Assumptions and open questions
 {{open_questions}}
 

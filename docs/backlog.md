@@ -100,7 +100,8 @@ This is the backlog that [03-factory-plan.md](03-factory-plan.md) §5 refers to 
 ### <a id="b-08"></a>B-08 Q6 scope: the story contract declares no areas
 - **What:** the roadmap's T6.3 asks for Q6 to check the files touched "against the story's declared areas". The story contract has no areas field. By the T6.3 decision, Q6 reports "Not checked: the story contract declares no areas" with the files touched, so scope stays a reviewer judgement. The roadmap's T7.4 also relies on per-story "declared files".
 - **Source:** [PR #38](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/38), "Q6 roadmap gap"; decision `12c41339#927` (see [task-log.md](task-log.md#t63-deterministic-pr-body-pr-render--pr-check))
-- **Status:** verified · **Owner:** T7.4, or a roadmap change · **State:** open
+- **T7.4 (decision P-A):** stories may now declare the files they expect to change, with estimated changed lines (`- Files: <path> (~<lines>), …` in `05-stories.md`). `plan check` uses them for the plan-time size check. The issue body is unchanged by decision, and `pr render` does not read the bullet, so Q6 still reports "Not checked". Wiring Q6 to the declared files would change the issue-body and PR-body contracts, which P-A kept out of T7.4.
+- **Status:** verified · **Owner:** unassigned (T7.4 delivered the declared files; Q6 itself is not assigned to any task) · **State:** open
 
 ## Guard gaps
 
@@ -186,6 +187,17 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
 - **Source:** [PR #52](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/52) (T7.3), decision K-G; [task-log.md](task-log.md#t73-target-knowledge-base)
 - **Status:** analysis · **Owner:** unassigned (candidate: the M7 demo, Task Tracker increment 004) · **State:** open
 
+### <a id="b-37"></a>B-37 Plan check: an overlapping change request, not yet run on a real target
+- **What:** T7.4's `plan check` is proven at the unit level only. That proof uses the real Task Tracker plans of increments 001–003 and an authored replay of the M5 change request. What has not been run live is S05 handling the result:
+  - writing the `- Files:` estimates;
+  - running `plan check` until it exits 0;
+  - recording an Open question for a flagged overlap, or stopping under rule H6;
+  - embedding the output unedited in the Planning PR.
+
+  The roadmap's M7 demo asks for exactly this: Task Tracker increment 004, a change request overlapping existing features, which `plan check` flags.
+- **Source:** [task-log.md](task-log.md#t74-plan-lint-and-overlap-detection) (T7.4, "Handed on"); the M7 demo in [05-roadmap-m6-m9.md](05-roadmap-m6-m9.md)
+- **Status:** analysis · **Owner:** unassigned (candidate: the M7 demo, Task Tracker increment 004) · **State:** open
+
 ## M6 demo findings
 
 Found while running the M6 demo on Task Tracker, increment `003-priority-filter` ([progress.md](progress.md#m6-deterministic-verification--review)). The recurrence of [B-18](#b-18) is recorded on that item.
@@ -257,3 +269,7 @@ Kept on purpose by the task that introduced them. Each is described in its PR.
 | T7.1 | An ID deleted from both record files (`02-requirements.md`, `05-stories.md`), instead of being moved to `## Out of scope` as S05 requires, can be handed out again, because only a Planning PR's final head is read ([B-34](#b-34)) | [PR #50](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/50), pre-merge review (`34ce5c38#739`) |
 | T7.1 | A stray mention inside a record file uses up an ID (the safe direction: the numbering skips, never reuses) | PR #50, pre-merge review (`34ce5c38#739`) |
 | T7.2 | A root-level file named like repository metadata (`license*`, `licence*`, `copying*`, `notice*`, `changelog*`, `authors*`) is excluded from project detection whatever its suffix, so a root `changelog.py` or `notice.ts` does not count as code. This only matters when such a file is the repo's only code; nested files with these names still count | [PR #51](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/51), review correction (`34ce5c38#1412`); [task-log.md](task-log.md#t72-intake-and-project-detection) |
+| T7.4 | `plan check`'s overlap score is lexical. A paraphrase in other words ("deadline" for "due date") is missed. Parallel wording is flagged: on the real plans, Task Tracker's REQ-034 ~ REQ-019 (both "reflected … within 100 ms of the user's action") scores 0.529, a known false positive that needs one Open question. The stop words and the singular rule are English. Every flag is a question for the human, never a verdict | [task-log.md](task-log.md#t74-plan-lint-and-overlap-detection) (P-C) |
+| T7.4 | A potential overlap is resolved only by one item of `## Open questions` or `## Changed or retired requirements` that names both IDs literally; a range such as "REQ-022 to REQ-026" does not name REQ-025 | [task-log.md](task-log.md#t74-plan-lint-and-overlap-detection) (P-C) |
+| T7.4 | The `- Files:` estimates are model-written, so the plan-time size check is only as good as the estimate; Q7 at Gate B still measures the real diff | [task-log.md](task-log.md#t74-plan-lint-and-overlap-detection) (P-A) |
+| T7.4 | "Done" for the overlap check is the local matrix's `Implemented` status, not GitHub's record of merged PRs, which `/factory-status` uses | [task-log.md](task-log.md#t74-plan-lint-and-overlap-detection) (P-B) |

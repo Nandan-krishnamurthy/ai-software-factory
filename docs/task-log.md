@@ -32,6 +32,7 @@ Each entry is taken from its PR description and from the session in which the hu
 | `c878c238` | `c878c238-890e-4dd2-a905-6956ecf1b25d` | T6.4, T6.5 preparation, documentation migration |
 | `c161a4ca` | `c161a4ca-39de-4e3c-bad1-4ee8caeeadcb` | Documentation migration PRs C and D, T6.5 |
 | `34ce5c38` | `34ce5c38-2316-4d05-b39a-d5a5cf9b33bc` | T7.1, T7.2, T7.3 |
+| `1821c3de` | `1821c3de-0747-4e19-a8a9-4e9b532df1bb` | T7.4 |
 
 ---
 
@@ -423,3 +424,110 @@ Before the change, every new D-B case and lint failed, and the AC1 fixtures alre
 **Handed on:**
 - **Live proof in the M7 demo (K-G).** Task Tracker increment 004: S01 must create or update `knowledge.md`, and S12's note must appear on the increment's last story.
 - **The header and every section are model-written.** `knowledge check` only checks the header and the diff-derived staleness; it never checks that a rewritten section's *content* is accurate. Gate A review is the safeguard, as for `01-codebase-analysis.md` today.
+
+---
+
+## T7.4 Plan lint and overlap detection
+
+| | |
+|---|---|
+| **Specification** | [05-roadmap-m6-m9.md](05-roadmap-m6-m9.md), "T7.4 Plan lint and overlap detection" |
+| **PR** | not yet opened |
+| **Status** | In review |
+
+**Approved decisions.** The scoping pass was `1821c3de#176` (2026-10-26T06:19:47Z). P-A to P-F were approved, with the conditions below, in `1821c3de#179` (2026-10-26T06:31:23Z).
+1. **P-A: story file estimates for the size check.**
+   - **The bullet:** `05-stories.md` gains an optional `- Files: <path> (~<lines>), …` metadata bullet (`stories.py`, `Story.files`), at most once per path. The estimate must be a whole number of at least 1.
+   - **A missing estimate is never zero.** A story without the bullet still parses, so `issues sync` and earlier plans are unaffected. `plan check` reports it as a `size` problem: "its size cannot be checked".
+   - **The issue body is unchanged.** `issues.issue_body` does not render the bullet (tested), so the GitHub issue contract is unchanged.
+   - **Lockfiles are left out** of the total, as Q7 does (`manifests.is_lockfile`).
+2. **P-B: Done is read locally.**
+   - **Done:** a row of the working tree's `docs/factory/traceability.md` that says `Implemented` (`status.parse_traceability`), for a requirement defined by an earlier increment's `02-requirements.md`.
+   - **No GitHub call.** A row reaches the default branch, where the plan branch starts, only together with its merged story PR (S11).
+   - **Not compared:** this increment's own rows and later increments' rows. An `Implemented` requirement that no increment defines is named in a note.
+3. **P-C: potential overlap, scored by an explicit rule** (`plan.py` docstring, architecture §5.4).
+   - **Words:**
+     - each requirement's statement without its `(PRD §…):` citation or any IDs;
+     - case-folded, letter-and-digit runs;
+     - made singular by one rule;
+     - without one-letter words, numbers and a fixed list of English function words. No domain word is listed anywhere.
+   - **Weight:** `1 + ln((M+1)/(d+1))`, the standard smoothed inverse document frequency over the `M` Done requirements, where `d` is how many of them use the word.
+   - **Score:** the shared words' weight ÷ the new requirement's total weight, rounded to 3 decimals and compared as rounded.
+   - **The thresholds:**
+     - `OVERLAP = 0.5` ("at least half of what the new requirement says"): a **potential overlap**, which fails the check until resolved;
+     - `NEAR = 0.4`: **related**, reported for the reviewer and never failing.
+   - **Resolution must be explicit:** an item (a list item with its continuation lines, or a paragraph) of the increment's `## Open questions` or `## Changed or retired requirements` that names both IDs literally.
+   - **Each candidate's output:** both statements, the shared words (heaviest first), the score and, when unresolved, what to do.
+4. **P-D: the checks.**
+   - **The Story Contract**, through a new non-raising `stories.check` that `parse` now wraps: AC count and numbering, the `Out of scope` section (`None` stays valid), and `Blocked by` cycles.
+   - **`ac-form`:** every AC reads `Given …, when …, then …`.
+   - **`coverage`, both directions:**
+     - every in-scope requirement (a `- **REQ-###**` bullet outside `## Out of scope`) is traced by a story;
+     - every traced REQ is in scope, or is an earlier requirement named under `## Changed or retired requirements`.
+   - **`size`:** the `Files` estimate against `limits.max_diff_lines`. At the limit passes, as Q7 does.
+   - **`requirements`:** no in-scope requirement, or a duplicate definition.
+   - **When the Story Contract is broken,** "every requirement is traced" is skipped, with a note, so a story that failed to parse cannot produce false coverage problems.
+5. **P-E: S05 integration.**
+   - **Normal mode, step 3:** `plan check` runs after `issues sync --dry-run` and before the commit and the Planning PR. It is repeated until it exits 0.
+   - **A potential overlap** is either a stop under rule H6, when the requirement only restates finished work, or one Open question naming the new REQ and every Done REQ it was flagged against. That is S05's only normal-mode edit to `02-requirements.md`.
+   - **Revision mode** runs it too.
+   - **The Planning PR** template has a new "Plan check" section, `{{plan_check}}`, holding the exact output.
+   - **Additions:** the Done check, the outputs and the stop conditions.
+   - **Step renumbering:** the later steps moved down by one, so "normal mode step 8" is now step 9.
+6. **P-F:** the stale task-log status rows (T6.5, T7.1–T7.3) and the non-blocking follow-ups from T7.3's final review are left for a separate documentation-only PR.
+
+**Interpretations, not deviations:**
+- **"AC form"** is read as the `Given …, when …, then …` form that S05 already prescribes. Before T7.4 only the `- AC<n>:` shape was checked. All 79 ACs of the three real Task Tracker plans already comply.
+- **"`Blocked by` cycles"** are checked within the plan. A story can only be blocked by stories that already exist, so a cycle across increments cannot form. A dependency on a story outside the file is still checked by `issues sync` against GitHub.
+- **"Each story's estimated size … (from its declared files)":** the story contract had no declared files ([B-08](backlog.md#b-08)). P-A adds them, with a per-file estimate, since a file list alone gives no size.
+- **"These become an Open question, or a stop under rule H6":** `plan check` itself never writes. It fails, and S05 records the question or stops.
+
+**Deviation from the specification:** none.
+
+**How the rule was settled.** It was prototyped on the real Task Tracker plans before any test was written, and changed once after that.
+- **The change:** the first draft weighed words by `ln((M+1)/(d+1))`. With that weight, a word every Done requirement uses weighs 0, so with a single Done requirement no overlap could ever be found. It was replaced by the standard smoothed form, `1 + ln(…)` (`ScoreTest.test_one_done_requirement_still_compares`).
+- **What it moved:** the change was made for that reason alone. It moved 003's REQ-034 ~ REQ-019 from 0.494 to 0.529, over the threshold, and that result was kept (below).
+- **The thresholds:**
+  - 0.5 was chosen before any real score was seen.
+  - The related band at 0.4, within 0.1 of it, was added after the prototype showed a related pair just under 0.5 (003's REQ-034 ~ REQ-019, then 0.494). Its purpose is to report such pairs rather than drop them silently. It can only add output, never a failure.
+  - No threshold and no word list was adjusted to make a fixture pass.
+
+**AC1, the M5 replay, and what is authored.**
+- **The history:** M5's change request was the one line "Add due dates to tasks" (still `002-add-due-dates/00-prd.md` on Task Tracker). S02 stopped and asked the human under H6 before writing any requirement for it ([progress.md](progress.md), M5).
+- **Authored, not history:** `tests/fixtures/plan/m5-replay/` records the request as one requirement whose statement is the request itself, verbatim. The file says that it is authored.
+- **The real plans** of increments 001, 002 and 003 are copied unchanged from Task Tracker's `main` at `e89fbb2` (read with `git show`; nothing in that repository was changed or run).
+- **The result:** against increment 001, with REQ-001..REQ-021 Done as at M5, the replay flags REQ-003, REQ-009, REQ-012 and REQ-014 as potential overlaps, each at 0.709 (shared words: due, date, task). REQ-001, REQ-002, REQ-015 and REQ-016 score 0.419 through "add-task form", and are reported as related only (`M5ReplayTest`).
+
+**AC2:** a `Blocked by` cycle planted in the real 002 plan fails with `dependency-cycle` (`RealPlansTest.test_002_with_a_planted_dependency_cycle_fails`). The small-plan form is `CheckTest.test_a_dependency_cycle_fails`.
+
+**Related work versus duplication, on the real plans:**
+- **002 (overdue highlighting)** talks about due dates throughout, and REQ-025 cites REQ-009. Yet nothing in it scores even 0.4, because its new words (overdue, label, today …) carry most of its weight. Its only problems are the two missing `Files` estimates, since the plan predates T7.4. With estimates added, it passes.
+- **A duplicate planted in 002** ("The user can set, change or clear the due date of a task") scores 1.0 against REQ-009. It also scores 0.687 against REQ-010, the same edit of the priority, which is parallel wording, not duplication. Both must be resolved.
+- **003 (priority filter)** has one potential overlap that is a **known false positive**: REQ-034 ("choosing a filter is reflected in the list within 100 ms of the user's action") against REQ-019 ("… is reflected in the UI within 100 ms of the user's action") scores 0.529. It is kept, not tuned away: the plan must say, in one Open question, that REQ-034 applies REQ-019's budget to a new action. REQ-031 ~ REQ-025 (0.424) is reported as related.
+
+**Verification (unit level):** `tests/test_plan.py`.
+- `WordsTest`.
+- `ParseRequirementsTest`.
+- `ScoreTest`: the formula number for number; exactly 0.5 is a potential overlap; 0.4 is related; under 0.4 is not reported; one Done requirement; a deterministic order.
+- `CheckTest`: each rule, the at-limit boundary, lockfiles, the notes, the JSON.
+- `OverlapResolutionTest`: resolved by an Open question or a Changed item; not by one ID, by IDs in different items, by a longer ID, or by another section.
+- `M5ReplayTest`, `RealPlansTest`: 001, 002 and 003, and mutated versions.
+- `CollectTest` and `CliTest`: the reading, the exit codes, `--json`, and the errors.
+
+`tests/test_stories.py` adds `FilesBulletTest`, `CheckTest`, and seven `Files` cases in `BAD_CASES`. `tests/test_stations.py` adds two S05 lints. `tests/test_templates.py` adds `test_embeds_plan_check_verbatim`.
+
+**Changed existing tests**, both in `tests/test_templates.py`, because the Planning PR template gained a section: `PLANNING_PR_SECTIONS` now lists "Plan check", and `PLANNING_PR_VALUES` gains `plan_check`. No assertion was removed or weakened.
+
+**Known limitations** (also in [backlog.md](backlog.md), Accepted limitations):
+- **The overlap score is lexical.**
+  - A paraphrase with different words ("deadline" for "due date") is missed.
+  - Parallel wording is flagged: 003's REQ-034 ~ REQ-019, and the planted REQ-027 ~ REQ-010.
+  - The stop-word list and the singular rule are English.
+  - Every flag is a question for the human, never an automatic verdict.
+- **Resolution matches literal IDs in one item.** A range such as "REQ-022 to REQ-026" does not name REQ-025.
+- **The `Files` estimates are model-written.** The plan-time check is only as good as the estimate, and Q7 at Gate B still measures the real diff.
+- **Done is read from the local matrix's `Implemented` status,** not from GitHub's record of merged PRs (P-B).
+
+**Handed on:**
+- **Live proof in the M7 demo** ([B-37](backlog.md#b-37)): Task Tracker increment 004, a change request overlapping existing features, which `plan check` must flag in its Planning PR.
+- **Q6 Scope stays "Not checked"** ([B-08](backlog.md#b-08)). The `Files` bullet is now there to use for it, but wiring it into `pr render` and the issue body was out of P-A's scope.

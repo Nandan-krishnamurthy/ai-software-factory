@@ -2,8 +2,8 @@
 
 import unittest
 
-from factory import state
-from factory.stories import RULES, StoriesError, Story, parse
+from factory import issues, state
+from factory.stories import RULES, StoriesError, Story, check, parse
 
 GOOD = """\
 # Stories: increment 001-initial
@@ -80,6 +80,11 @@ def with_story_3(**replace: str) -> str:
         assert old in story, old
         story = story.replace(old, new, 1)
     return GOOD + story
+
+
+def with_files(value: str) -> str:
+    """GOOD plus STORY-003 with a ``- Files:`` bullet (T7.4) after its Milestone."""
+    return with_story_3(**{"- Milestone: M2": f"- Milestone: M2\n- Files: {value}".rstrip()})
 
 
 class ParseGoodTest(unittest.TestCase):
@@ -189,7 +194,59 @@ BAD_CASES = [
      "STORY-003", "markers"),
     ("dependency cycle", GOOD.replace("- Blocked by: None", "- Blocked by: STORY-002"),
      "STORY-001", "dependency-cycle"),
+    # T7.4: the optional Files bullet
+    ("Files without an estimate", with_files("src/a.py"), "STORY-003", "files"),
+    ("Files estimate without ~", with_files("src/a.py (40)"), "STORY-003", "files"),
+    ("Files estimate of 0", with_files("src/a.py (~0)"), "STORY-003", "files"),
+    ("Files empty", with_files(""), "STORY-003", "files"),
+    ("Files None", with_files("None"), "STORY-003", "files"),
+    ("Files path twice", with_files("a.py (~1), a.py (~2)"), "STORY-003", "files"),
+    ("Files bullet twice", with_files("a.py (~1)\n- Files: b.py (~2)"), "STORY-003", "metadata"),
 ]
+
+
+class FilesBulletTest(unittest.TestCase):
+    """T7.4: the optional `- Files:` bullet, read by `plan check`, ignored by `issues sync`."""
+
+    FILES = "src/tasks.py (~40), `tests/test tasks.py` (~60), package-lock.json (~5)"
+
+    def test_absent_is_none_never_zero(self):
+        self.assertTrue(all(story.files is None for story in parse(GOOD)))
+
+    def test_paths_and_estimates_in_order(self):
+        story = parse(with_files(self.FILES))[2]
+        self.assertEqual(story.files, (("src/tasks.py", 40), ("tests/test tasks.py", 60),
+                                       ("package-lock.json", 5)))
+
+    def test_it_may_come_anywhere_among_the_metadata_bullets(self):
+        text = with_story_3(**{"- Traces to: REQ-004": "- Files: a.py (~3)\n- Traces to: REQ-004"})
+        self.assertEqual(parse(text)[2].files, (("a.py", 3),))
+
+    def test_the_issue_body_is_unchanged(self):
+        plain, declared = parse(with_story_3())[2], parse(with_files(self.FILES))[2]
+        numbers = {"STORY-002": 12}
+        body = issues.issue_body(declared, "001-initial", numbers)
+        self.assertEqual(body, issues.issue_body(plain, "001-initial", numbers))
+        self.assertNotIn("tasks.py", body)
+
+
+class CheckTest(unittest.TestCase):
+    """`check` returns what `parse` raises, and the stories that are valid on their own."""
+
+    def test_good_file_has_no_problems(self):
+        stories, problems = check(GOOD)
+        self.assertEqual(problems, [])
+        self.assertEqual([s.id for s in stories], ["STORY-001", "STORY-002"])
+
+    def test_valid_stories_are_kept_next_to_the_problems(self):
+        stories, problems = check(with_story_3(**{"Milestone: M2": "Milestone: two"}))
+        self.assertEqual([s.id for s in stories], ["STORY-001", "STORY-002"])
+        self.assertEqual([p.rule for p in problems], ["milestone"])
+
+    def test_a_cycle_keeps_the_stories_and_reports_it(self):
+        stories, problems = check(GOOD.replace("- Blocked by: None", "- Blocked by: STORY-002"))
+        self.assertEqual(len(stories), 2)
+        self.assertEqual([p.rule for p in problems], ["dependency-cycle"])
 
 
 class ParseBadTest(unittest.TestCase):

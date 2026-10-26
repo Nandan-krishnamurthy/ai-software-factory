@@ -86,6 +86,7 @@ The PR **title** is `[Planning] {{increment}}: <one-line description>`.
 | `{{requirements_coverage}}` | Every in-scope `REQ-###` with the stories that cover it, and every deferred or out-of-scope item with its reason |
 | `{{stories}}` | Table: `STORY-###`, title, milestone, blocked by, traces to |
 | `{{issues_sync_dry_run}}` | The exact output of `issues sync --dry-run`, unedited |
+| `{{plan_check}}` | The exact output of `plan check --increment <INC>` (T7.4), unedited |
 | `{{open_questions}}` | Assumptions made and questions for the reviewer, or `None` |
 | `{{risks}}` | Anything the reviewer should look at closely, or `None` |
 
