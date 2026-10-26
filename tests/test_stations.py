@@ -611,6 +611,38 @@ class DiscoveryStationTest(unittest.TestCase):
         self.assertEqual(order, ["1. ", "2. ", "3. ", "4. ", "5. "])
 
 
+class KnowledgeBaseReadersTest(unittest.TestCase):
+    """T7.3 Build: "S02–S08 read it as level-4 conventions (precedence is unchanged)". Each
+    station lists the knowledge base as an input, as data at level 4 next to CLAUDE.md, and
+    none of them writes it: S01 is the only writer (decision K-A)."""
+
+    READERS = ("S02", "S03", "S04", "S05", "S06", "S07", "S08")
+
+    def setUp(self):
+        self.by_id = {s.id: s for s in load_stations()}
+
+    def section(self, station_id, name):
+        return self.by_id[station_id].sections[name]
+
+    def test_s02_to_s08_read_the_knowledge_base_as_level_4_data(self):
+        for station_id in self.READERS:
+            with self.subTest(station=station_id):
+                lines = [line for line in self.section(station_id, "Inputs").splitlines()
+                         if "docs/factory/knowledge.md" in line]
+                self.assertEqual(len(lines), 1, "list the knowledge base once, under Inputs")
+                line = lines[0]
+                self.assertIn("`<T>/docs/factory/knowledge.md`, if it exists", line)
+                self.assertRegex(line, r"level[- ]4")
+                self.assertIn("`CLAUDE.md`", line)
+                self.assertIn("rule U1", line)
+
+    def test_only_s01_writes_the_knowledge_base(self):
+        for station_id in self.READERS:
+            with self.subTest(station=station_id):
+                self.assertNotIn("knowledge.md", self.section(station_id, "Outputs"))
+        self.assertIn("docs/factory/knowledge.md", self.section("S01", "Outputs"))
+
+
 class StoryStationsTest(unittest.TestCase):
     """T3.3: the story loop S06-S11, as in architecture §7.1."""
 

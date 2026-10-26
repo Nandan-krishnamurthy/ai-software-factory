@@ -32,7 +32,7 @@ Each entry is taken from its PR description and from the session in which the hu
 | `c878c238` | `c878c238-890e-4dd2-a905-6956ecf1b25d` | T6.4, T6.5 preparation, documentation migration |
 | `c161a4ca` | `c161a4ca-39de-4e3c-bad1-4ee8caeeadcb` | Documentation migration PRs C and D, T6.5 |
 | `34ce5c38` | `34ce5c38-2316-4d05-b39a-d5a5cf9b33bc` | T7.1, T7.2, T7.3 |
-| `1821c3de` | `1821c3de-0747-4e19-a8a9-4e9b532df1bb` | T7.4 |
+| `1821c3de` | `1821c3de-0747-4e19-a8a9-4e9b532df1bb` | T7.4, the T7 audit and its follow-up documentation PR |
 
 ---
 
@@ -225,8 +225,8 @@ The final review (`c878c238#1216`, 2026-10-21T12:15:58Z) found no blocking issue
 | | |
 |---|---|
 | **Specification** | [05-roadmap-m6-m9.md](05-roadmap-m6-m9.md), "T7.1 ID allocation from structured sources only" |
-| **PR** | [#50](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/50), not merged |
-| **Status** | In review |
+| **PR** | [#50](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/50), merged 2026-10-25T11:32:27Z, merge commit `5cc0e27` |
+| **Status** | Done, with one recorded deviation (every ID named in a record file is allocated) |
 
 **Approved decisions.** The questions were raised in `34ce5c38#146` (2026-10-25T07:47:22Z). Option C was approved in `34ce5c38#165` (2026-10-25T08:06:58Z), and implementation was approved in `34ce5c38#189` (2026-10-25T09:35:48Z), with the M5 test required to warn about both IDs.
 1. **D1, Option C: records at every Planning PR's head commit allocate IDs.**
@@ -295,8 +295,8 @@ In every case the next increment reuses neither ID, and there are no warnings.
 | | |
 |---|---|
 | **Specification** | [05-roadmap-m6-m9.md](05-roadmap-m6-m9.md), "T7.2 Intake and project detection" |
-| **PR** | [#51](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/51), not merged |
-| **Status** | In review |
+| **PR** | [#51](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/51), merged 2026-10-25T13:09:27Z, merge commit `024c857` |
+| **Status** | Done |
 
 **Approved decisions.** The scoping pass was `34ce5c38#971` (2026-10-25T11:41:41Z). Decisions D-A to D-F were confirmed, with the recommended options, in `34ce5c38#1092` (2026-10-25T11:57:18Z).
 1. **D-A: keep T5.2's detection approach and close its gaps.**
@@ -367,8 +367,8 @@ Before the change, every new D-B case and lint failed, and the AC1 fixtures alre
 | | |
 |---|---|
 | **Specification** | [05-roadmap-m6-m9.md](05-roadmap-m6-m9.md), "T7.3 Target knowledge base" |
-| **PR** | [#52](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/52), not merged |
-| **Status** | In review |
+| **PR** | [#52](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/52), merged 2026-10-26T06:12:55Z, merge commit `1bd6218` |
+| **Status** | Done, with one recorded deviation (S12 reports what changed; S01 writes it, K-A) |
 
 **Approved decisions.** The scoping pass was `34ce5c38#1722` (2026-10-25T13:11:46Z). Decisions K-A to K-G were confirmed, with the recommended options, in `34ce5c38#1801` (2026-10-25T14:08:57Z).
 1. **K-A: S01 is the only writer of `docs/factory/knowledge.md` (a deviation, recorded below).**
@@ -425,6 +425,10 @@ Before the change, every new D-B case and lint failed, and the AC1 fixtures alre
 - **Live proof in the M7 demo (K-G).** Task Tracker increment 004: S01 must create or update `knowledge.md`, and S12's note must appear on the increment's last story.
 - **The header and every section are model-written.** `knowledge check` only checks the header and the diff-derived staleness; it never checks that a rewritten section's *content* is accurate. Gate A review is the safeguard, as for `01-codebase-analysis.md` today.
 
+**After merge** (the T7 follow-up documentation PR, 2026-10-26):
+- **The final review's non-blocking findings are now recorded** as [B-41](backlog.md#b-41). They are unchanged on `main`.
+- **"S02–S08 read it as level-4 conventions"** had been checked only by reading the stations (T7 audit, `1821c3de#1497`). It is now pinned by `KnowledgeBaseReadersTest` in `tests/test_stations.py`.
+
 ---
 
 ## T7.4 Plan lint and overlap detection
@@ -432,8 +436,8 @@ Before the change, every new D-B case and lint failed, and the AC1 fixtures alre
 | | |
 |---|---|
 | **Specification** | [05-roadmap-m6-m9.md](05-roadmap-m6-m9.md), "T7.4 Plan lint and overlap detection" |
-| **PR** | [#53](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/53), not merged |
-| **Status** | In review |
+| **PR** | [#53](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/53), merged 2026-10-26T08:16:55Z, merge commit `481970c` |
+| **Status** | Done |
 
 **Approved decisions.** The scoping pass was `1821c3de#176` (2026-10-26T06:19:47Z). P-A to P-F were approved, with the conditions below, in `1821c3de#179` (2026-10-26T06:31:23Z).
 1. **P-A: story file estimates for the size check.**
@@ -561,3 +565,4 @@ Before the change, every new D-B case and lint failed, and the AC1 fixtures alre
 - **Live proof in the M7 demo** ([B-37](backlog.md#b-37)): Task Tracker increment 004, a change request overlapping existing features, which `plan check` must flag in its Planning PR.
 - **Q6 Scope stays "Not checked"** ([B-08](backlog.md#b-08)). The `Files` bullet is now there to use for it, but wiring it into `pr render` and the issue body was out of P-A's scope.
 - **The review's follow-ups:** [B-38](backlog.md#b-38), [B-39](backlog.md#b-39) and [B-40](backlog.md#b-40).
+- **After merge:** the second review's non-blocking findings (`1821c3de#1385`) are recorded as [B-42](backlog.md#b-42). The M7 milestone is not complete: its demo ([B-37](backlog.md#b-37)) has not been run or recorded in [progress.md](progress.md).
