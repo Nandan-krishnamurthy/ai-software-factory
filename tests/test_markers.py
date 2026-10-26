@@ -6,6 +6,7 @@ import unittest
 
 from factory.markers import (
     CheckpointMarker,
+    KnowledgeMarker,
     PlanningMarker,
     PrMarker,
     QuestionMarker,
@@ -31,6 +32,8 @@ EXAMPLES = [
                      sha="0" * 40, fix_attempts=0, review_round=3, ts="2026-09-24T10:00:00Z"),
     ReplyMarker(),
     QuestionMarker(key="baseline-002-due-dates"),
+    KnowledgeMarker(checked="abc1234"),
+    KnowledgeMarker(checked="0" * 40),
 ]
 
 
@@ -44,6 +47,18 @@ class QuestionMarkerTest(unittest.TestCase):
             with self.subTest(key=key), self.assertRaises(ValueError):
                 QuestionMarker(key=key)
         self.assertEqual(parse_all("<!-- factory:question key=Bad_Key -->"), [])
+
+
+class KnowledgeMarkerTest(unittest.TestCase):
+    """T7.3: the header of the target's docs/factory/knowledge.md."""
+
+    def test_format_and_invalid_commits(self):
+        self.assertEqual(build(KnowledgeMarker(checked="abc1234")),
+                         "<!-- factory:knowledge checked=abc1234 -->")
+        for checked in ("", "abc123", "g" * 7, "A" * 7, "0" * 41, "abc 123"):
+            with self.subTest(checked=checked), self.assertRaises(ValueError):
+                KnowledgeMarker(checked=checked)
+        self.assertEqual(parse_all("<!-- factory:knowledge checked=ABC1234 -->"), [])
 
 
 class RoundTripTest(unittest.TestCase):
@@ -62,6 +77,8 @@ class RoundTripTest(unittest.TestCase):
         self.assertEqual(build(ReplyMarker()), "<!-- factory:reply -->")
         self.assertTrue(build(CHECKPOINT).startswith(
             '<!-- factory:checkpoint {"station":"S09","next":"S10",'))
+        self.assertEqual(build(KnowledgeMarker(checked="abc1234def")),
+                         "<!-- factory:knowledge checked=abc1234def -->")
 
     def test_markers_inside_surrounding_text(self):
         body = "\n".join(["# Add due date", build(EXAMPLES[0]), "Some text", build(ReplyMarker())])
@@ -142,6 +159,9 @@ class MalformedTest(unittest.TestCase):
         "factory:story id=STORY-007 increment=001-initial -->",            # no opener
         "<!-- not-factory:story id=STORY-007 increment=001-initial -->",
         "",
+        "<!-- factory:knowledge -->",                                      # missing attr
+        "<!-- factory:knowledge checked=ABC1234 -->",                      # upper-case sha
+        "<!-- factory:knowledge checked=abc1234 extra=1 -->",              # unknown attr
     ]
 
     def test_malformed_markers_are_ignored(self):

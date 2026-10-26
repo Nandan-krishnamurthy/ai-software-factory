@@ -11,6 +11,7 @@ the human's in single-account mode (D5).
     <!-- factory:reply -->
     <!-- factory:reply to=IC_kwDOabc -->     (answers one feedback item, T4.2)
     <!-- factory:question key=baseline-002-due-dates -->   (a question issue, T5.1)
+    <!-- factory:knowledge checked=<sha> -->     (top of docs/factory/knowledge.md, T7.3)
 
 ``build`` is strict and raises ``ValueError`` on bad input (that is a factory bug).
 ``parse_all`` / ``find`` are tolerant of whitespace, line breaks and CRLF, and silently
@@ -144,10 +145,22 @@ class QuestionMarker:
             raise ValueError(f"invalid question key: {self.key!r}")
 
 
+@dataclass(frozen=True)
+class KnowledgeMarker:
+    """At the top of the target's ``docs/factory/knowledge.md`` (T7.3): the commit its
+    sections were last checked against (``factory.py knowledge check``)."""
+
+    KIND: ClassVar[str] = "knowledge"
+    checked: str
+
+    def __post_init__(self):
+        _check(_SHA, self.checked, "commit sha")
+
+
 Marker = (StoryMarker | PlanningMarker | PrMarker | CheckpointMarker | ReplyMarker
-          | QuestionMarker)
+          | QuestionMarker | KnowledgeMarker)
 _ATTR_KINDS = {cls.KIND: cls for cls in (StoryMarker, PlanningMarker, PrMarker, ReplyMarker,
-                                          QuestionMarker)}
+                                          QuestionMarker, KnowledgeMarker)}
 
 
 def build(marker: Marker) -> str:

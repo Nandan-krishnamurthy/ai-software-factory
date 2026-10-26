@@ -210,6 +210,7 @@ Written in Python 3.11+ using only the standard library. It calls `git` and `gh`
 | `labels ensure` | Creates or updates the §4 labels, plus `factory:needs-human` and `factory:planning` | ✔ |
 | `state [--json]` | **Reconciler.** Works out the current state and the next action (§6) | ✔ (read-only) |
 | `increment show` / `increment next [--slug S]` | Reports the current increment, the next free `REQ-`/`STORY-` IDs and warnings about IDs that are mentioned but never allocated; `next` allocates the next `NNN-slug` or refuses (§5.2). Changes nothing. | ✔ (read-only) |
+| `knowledge check [--ref R] [--json]` | **Target knowledge base** (T7.3). Reads `docs/factory/knowledge.md` at `--ref` (default `HEAD`), local git only (no GitHub call). Exit 0 only if it exists, carries a well-formed `factory:knowledge` header naming a commit this repo can read, its eight sections (`Stack`, `Layout`, `Conventions`, `Commands`, `Hotspots`, `Architecture decisions`, `Known risks`, `Changes`) are present once each in that order, and none is stale against what changed since that commit (manifests, lockfiles, `Makefile` and CI workflows for Stack/Commands, but not the factory's own `.factory/config.json`, which S00 and S01 write on the plan branch; renames count as both paths; lint/format config and `CLAUDE.md` for Conventions; any top-level addition or removal for Layout; any change outside `docs/factory/` and `.factory/` for Hotspots and Known risks; a merged increment's `03-architecture.md` not linked by its path, `<NNN-slug>/03-architecture.md`, for Architecture decisions). A missing file, a malformed or unreadable header, or sections missing, duplicated or out of order make every section stale (fail-safe); a `##` line inside a fenced code block is not a heading. A `--ref` that is not a commit is an error (exit 1), not `missing`. S01 is the only writer, from this result (K-A); the command itself never writes. | ✔ (read-only) |
 | `issues sync [--dry-run]` | Parses `05-stories.md` (§5.4), then creates only the issues that are missing, matched by their `STORY-###` marker. Refuses before Gate A, except with `--dry-run`. | ✔ |
 | `pick --authorized-by-continue` | Applies the unblocked rule (§4 of the requirements): open, `status:ready`, not `factory:needs-human`, every "Blocked by" issue closed (an issue it cannot see counts as open). Picks the oldest increment, then the lowest milestone, then the lowest issue number. Assigns the issue, then sets `status:in-progress` last, because that label is the lock. | ✔ (refuses without the flag, and while a story is `in-progress`, `in-review` or `changes-requested`) |
 | `checkpoint --issue N --station S09 --next S10 [--note …]` | Adds or updates the single machine-readable checkpoint comment. The evidence and AC-to-test map blocks already in it are always carried over; a note containing an evidence or map delimiter is refused, so only `verify run` and `verify map` write those blocks (T6.2) | ✔ |
@@ -248,6 +249,7 @@ This targets the top requirements risk: a model marking its own work as passed. 
 │   └── log.md                          # append-only; one line per station run
 └── docs/factory/
     ├── traceability.md                 # global matrix across all increments
+    ├── knowledge.md                    # stack, layout, conventions, risks (T7.3)
     └── increments/
         ├── 001-initial/
         │   ├── 00-prd.md
@@ -363,6 +365,7 @@ Each story becomes an issue titled `STORY-###: <title>`, with the body from `tem
 | **Every other comment or reply the factory posts** | `<!-- factory:reply -->` (or a more specific `factory:*` marker) |
 | Rework reply to one feedback item (§7.2) | `<!-- factory:reply to=<comment id> -->`: the id of the human comment it answers |
 | Body of a question issue labelled `factory:needs-human` (S1 red baseline) | `<!-- factory:question key=baseline-002-due-dates -->`: `factory.py question ask` finds it by this key, so it never opens a second issue for an open question |
+| First line of `docs/factory/knowledge.md` in the target (T7.3) | `<!-- factory:knowledge checked=<sha> -->`: the commit `factory.py knowledge check` last checked its sections against |
 
 The reconciler finds everything by these markers, not by titles, which a human may edit.
 

@@ -110,6 +110,7 @@ It never merges a PR, never pushes to the default branch, never starts a story w
 | `.factory/log.md` | One line per station run |
 | `docs/factory/increments/<NNN-slug>/` | `00-prd.md` … `05-stories.md`, and `01-codebase-analysis.md` for an existing project |
 | `docs/factory/traceability.md` | REQ → story → PR → tests, across all increments |
+| `docs/factory/knowledge.md` | The target's recorded stack, layout, conventions, commands, hotspots, architecture decisions and known risks, kept across increments; S01 creates or updates it |
 | GitHub | Story issues with `status:*` labels, PRs, and `<!-- factory:… -->` markers in their bodies and comments |
 
 ## Working on the factory itself

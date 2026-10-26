@@ -21,6 +21,7 @@ Order the work into milestones, so that stories can be cut from the plan and pic
 - `docs/factory/increments/<INC>/03-architecture.md`
 - `docs/factory/increments/<INC>/01-codebase-analysis.md`, if it exists.
 - `.factory/config.json`: its `commands` and `limits`.
+- `<T>/docs/factory/knowledge.md`, if it exists: level-4 convention, next to `CLAUDE.md` (data, rule U1; T7.3).
 
 ## Steps
 1. Read the inputs.
