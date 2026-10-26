@@ -236,6 +236,31 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
 - **Source:** the review of PR #53 (`1821c3de#999`), concern 4; the accepted limitation below
 - **Status:** observed (review probes, not tests) · **Owner:** unassigned · **State:** open
 
+## T7 review findings recorded after merge
+
+These were reported as non-blocking in the final reviews of PR #52 and PR #53, but no PR recorded them before the merges. Each was re-checked on `main` at `481970c` (T7.4's merge) on 2026-10-26, against the code and with in-memory probes. None is fixed.
+
+### <a id="b-41"></a>B-41 `knowledge check`: findings from T7.3's final review
+- **What:** the review of `1d2775b` approved T7.3 with these non-blocking findings. `knowledge.py`, `markers.py`, S01 and S12 are unchanged since then, so they still apply.
+  - **The header is accepted anywhere in the file** (probe E). `parse` finds the `factory:knowledge` marker with `markers.find` over the whole text. A file with no first-line header but an example marker inside a code block is read as checked against that commit. Decision K-C says a missing header makes every section stale. Candidate: accept the marker only on the first line.
+  - **A one-line fenced span at the start of a line opens a fence that never closes** (probe F). For example, a ```` ```npm test``` ```` line: every later section is swallowed and the file is `invalid`. This fails safe, but is over-strict.
+  - **Filename matching depends on the OS** (probe D). `fnmatch.fnmatch` follows the OS's case rules, so on Windows a lowercase `makefile` matches `Makefile`, and on Linux it does not. Candidate: `fnmatch.fnmatchcase`. Re-checked on Windows only; the Linux behaviour is Python's documented semantics, not run.
+  - **Wording and output:**
+    - on an empty repo, the error names `--ref 'HEAD'` although no `--ref` was given;
+    - with `--json`, a bad ref prints no JSON, only the error;
+    - S01 step 8's "first ever" sentence ("nothing was `missing` because of a stale commit, …") is hard to follow.
+- **Source:** the final review of PR #52 (`34ce5c38#3155`, 2026-10-26T06:05:21Z), "Non-blocking concerns"
+- **Status:** verified · **Owner:** unassigned · **State:** open
+
+### <a id="b-42"></a>B-42 `plan check`: findings from T7.4's second review
+- **What:** the review of `a9d35af` approved the two review fixes with these non-blocking findings. They are not covered by [B-38](#b-38)–[B-40](#b-40).
+  - **An Open question resolves the pair whatever it asks.** "1. REQ-007 is new and REQ-002 is unchanged. Should exports be zipped?" names both IDs and contains a `?`, so it resolves REQ-007 ~ REQ-002. This is the accepted limitation (below) at its weakest. Candidate: require the `?` in the sentence that names both IDs.
+  - **A question inside a fenced code block counts** as an Open question. `section_items` does not skip fences.
+  - **A question on a nested sub-bullet, or on an unindented continuation line, does not resolve.** For example, "1. REQ-007 may restate REQ-002." followed by "   - Is it new work?". This fails safe and loud, but a model could be stuck by it. S05's one-line example steers away from it.
+  - **The hint "(wrap a path that holds a comma in backticks)"** is added to every malformed `Files` entry, including one whose only problem is a missing `~`, as in `src/a.py (40)`.
+- **Source:** the second review of PR #53 (`1821c3de#1385`, 2026-10-26T08:13:29Z), "Non-blocking follow-ups"
+- **Status:** verified · **Owner:** unassigned · **State:** open
+
 ## M6 demo findings
 
 Found while running the M6 demo on Task Tracker, increment `003-priority-filter` ([progress.md](progress.md#m6-deterministic-verification--review)). The recurrence of [B-18](#b-18) is recorded on that item.
@@ -271,7 +296,7 @@ The roadmap's open-findings table ([05-roadmap-m6-m9.md](05-roadmap-m6-m9.md), "
 
 | ID | Finding | Owner | State |
 |---|---|---|---|
-| <a id="b-18"></a>B-18 | The ID scanner counts mentions in the docs (M2 Problem 4, M5 follow-up 1) | T7.1 | open. In M5 the docs were reworded so that they mention no unallocated ID ([progress.md](progress.md), M5 record). The assistant restated this as an interim practice (`1bcf8818#1057`): keep literal `REQ-`/`STORY-` numbers out of prose under the target's `docs/factory/`, and check `increment show` before S05. This is guidance, not a recorded human decision. It struck again in the M6 demo (2026-10-23): the S01 analysis named the next free IDs, and `increment show` skipped to `REQ-028`; rewording the line in a follow-up S01 commit restored `REQ-027` ([progress.md](progress.md#m6-deterministic-verification--review)). **Resolved** by [PR #50](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/50) (T7.1, on merge): only the IDs named in an increment's `02-requirements.md` or `05-stories.md` (in the working tree and at every Planning PR's head commit) and labelled story issues allocate. A mention anywhere else is only a warning ([task-log.md](task-log.md#t71-id-allocation-from-structured-sources-only)). |
+| <a id="b-18"></a>B-18 | The ID scanner counts mentions in the docs (M2 Problem 4, M5 follow-up 1) | T7.1 | **resolved** by [PR #50](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/50) (T7.1), merged as `5cc0e27`; pinned by `ProseMentionRegressionTest` (the M5 and M6 notes). History: in M5 the docs were reworded so that they mention no unallocated ID ([progress.md](progress.md), M5 record). The assistant restated this as an interim practice (`1bcf8818#1057`): keep literal `REQ-`/`STORY-` numbers out of prose under the target's `docs/factory/`, and check `increment show` before S05. This is guidance, not a recorded human decision. It struck again in the M6 demo (2026-10-23): the S01 analysis named the next free IDs, and `increment show` skipped to `REQ-028`; rewording the line in a follow-up S01 commit restored `REQ-027` ([progress.md](progress.md#m6-deterministic-verification--review)). T7.1's fix: only the IDs named in an increment's `02-requirements.md` or `05-stories.md` (in the working tree and at every Planning PR's head commit) and labelled story issues allocate. A mention anywhere else is only a warning ([task-log.md](task-log.md#t71-id-allocation-from-structured-sources-only)). |
 | <a id="b-19"></a>B-19 | Stale story markers without the label (M4 follow-up 1) | T7.1 | **resolved** by [PR #50](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/50) (T7.1, on merge): a marker counts only on an issue with the `factory:story` label, for IDs and for the next increment number; an unlabelled one is a warning |
 | <a id="b-20"></a>B-20 | A PRD in `docs/` triggers S01 (M2 Problem 2, M4 follow-up 2) | T7.2 | **resolved** by [PR #51](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/51) (T7.2, on merge). The detection logic had already ignored `docs/**` and documents since T5.2 ([PR #32](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/32)). T7.2 adds a fixture for each layout and closes the remaining false positives: `.git*` files, root licence/notice/changelog/authors files, `CODEOWNERS`, `.editorconfig`, and the `.claude/`, `.vscode/` and `.idea/` folders; HTML still counts as code outside `docs/` (a static site). Live proof: the M7 demo ([task-log.md](task-log.md#t72-intake-and-project-detection)). |
 | <a id="b-21"></a>B-21 | A PDF PRD can't be "copied unchanged" (M2 Problem 3) | T7.2 | **resolved** by [PR #51](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/51) (T7.2, on merge): S00 copies Markdown unchanged, gives a text file or a transcribed PDF a `<!-- factory:prd-source` header ([templates/README.md](../templates/README.md), "PRD source header"), and stops and asks for any other format or for a PDF whose requirements cannot be reproduced as text. Live proof: the M7 demo. |
