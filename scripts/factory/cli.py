@@ -20,6 +20,7 @@ from factory import (
     knowledge,
     labels,
     pick,
+    plan,
     prbody,
     questions,
     signals,
@@ -120,6 +121,33 @@ def build_parser() -> argparse.ArgumentParser:
                         help="the commit to check against (default: HEAD)")
     kcheck.add_argument("--json", action="store_true", help="machine-readable output")
     kcheck.set_defaults(handler=_knowledge_check, needs_target=True)
+
+    plan_parser = subparsers.add_parser(
+        "plan", help="check an increment's plan before its Planning PR (T7.4)")
+    plan_sub = plan_parser.add_subparsers(dest="plan_command", metavar="<action>")
+    plan_sub.required = True
+    plan_check = plan_sub.add_parser(
+        "check", help="lint the increment's requirements and stories, and report overlap "
+                      "with Done requirements",
+        description="Reads the increment's 02-requirements.md and 05-stories.md, every "
+                    "increment's 02-requirements.md, docs/factory/traceability.md and "
+                    ".factory/config.json from the active target's working tree. Checks the "
+                    "Story Contract (1-5 ACs, an Out of scope section, no Blocked by cycle), "
+                    "that every AC reads 'Given ..., when ..., then ...', REQ coverage both "
+                    "ways, and each story's '- Files:' estimate against max_diff_lines (a "
+                    "missing estimate is a problem, never zero). Scores each in-scope "
+                    "requirement against every Done one (Implemented, defined by an earlier "
+                    f"increment): a score of {plan.OVERLAP} or more is a potential overlap that "
+                    "fails until it is recorded explicitly, as '- <done>: changed by <new>' "
+                    "under '## Changed or retired requirements' or as a question naming both "
+                    "IDs under '## Open questions' (naming both IDs alone is not enough); "
+                    f"{plan.NEAR} or more is reported as related. "
+                    "Exit 0 only with no problem and no unresolved overlap. Read-only: no git, "
+                    "no GitHub, never writes.")
+    plan_check.add_argument("--increment", required=True, metavar="INC",
+                            help="the increment folder to check, e.g. 002-add-search")
+    plan_check.add_argument("--json", action="store_true", help="machine-readable output")
+    plan_check.set_defaults(handler=_plan_check, needs_target=True)
 
     issues_parser = subparsers.add_parser("issues", help="manage the story issues")
     issues_sub = issues_parser.add_subparsers(dest="issues_command", metavar="<action>")
@@ -704,6 +732,15 @@ def _trace(args: argparse.Namespace) -> int:
 def _knowledge_check(args: argparse.Namespace) -> int:
     result = knowledge.check(Git(args.target.path), args.ref)
     print(json.dumps(result.to_dict(), indent=2) if args.json else knowledge.render(result))
+    return 0 if result.ok else 1
+
+
+def _plan_check(args: argparse.Namespace) -> int:
+    result = plan.collect(args.target.path, args.increment)
+    if args.json:
+        _print_safe(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
+    else:
+        _print_safe(plan.render(result))
     return 0 if result.ok else 1
 
 

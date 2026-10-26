@@ -33,7 +33,8 @@ PR_SECTIONS = [
 ]
 PLANNING_PR_SECTIONS = [
     "Summary", "Planning documents", "Requirements coverage", "Stories",
-    "Issues to be created", "Assumptions and open questions", "Risks / notes for reviewer",
+    "Issues to be created", "Plan check", "Assumptions and open questions",
+    "Risks / notes for reviewer",
     "How to review (Gate A)",
 ]
 # The delta documents of an existing project (T5.2, requirements §2.2).
@@ -149,6 +150,7 @@ PLANNING_PR_VALUES = {
     "requirements_coverage": "- REQ-001 → STORY-001",
     "stories": "| STORY-001 | Walking skeleton | M1 | None | REQ-001 |",
     "issues_sync_dry_run": "would create: STORY-001 Walking skeleton",
+    "plan_check": "Plan check: 001-initial\nResult: PASS",
     "open_questions": "None",
     "risks": "None",
 }
@@ -325,6 +327,12 @@ class PlanningPrTemplateTest(unittest.TestCase):
         body = section_body(self.text, "Issues to be created")
         self.assertIn("issues sync --dry-run", body)
         self.assertIn("```text\n{{issues_sync_dry_run}}\n```", body)
+
+    def test_embeds_plan_check_verbatim(self):
+        # T7.4: S05 embeds the output of `plan check` unedited.
+        body = section_body(self.text, "Plan check")
+        self.assertIn("`python scripts/factory.py plan check --increment {{increment}}`", body)
+        self.assertIn("```text\n{{plan_check}}\n```", body)
 
     def test_explains_gate_a_and_that_the_human_merges(self):
         body = section_body(self.text, "How to review (Gate A)")

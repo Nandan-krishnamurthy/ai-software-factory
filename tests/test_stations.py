@@ -424,6 +424,40 @@ class StationFilesTest(unittest.TestCase):
         self.assertIn("python scripts/factory.py feedback --pr <N>", steps)
         self.assertIn("python scripts/factory.py comment --pr <N> --kind reply", steps)
 
+    def test_s05_runs_plan_check_before_the_planning_pr(self):
+        """T7.4: `plan check` gates the Planning PR, and its output is embedded unedited."""
+        s05 = {s.id: s for s in self.stations}["S05"]
+        steps = s05.sections["Steps"]
+        normal, revision = steps.split("### Revision mode", 1)
+        check = "python scripts/factory.py plan check --increment <INC>"
+        self.assertLess(normal.index("python scripts/factory.py issues sync --dry-run"),
+                        normal.index(check))
+        self.assertLess(normal.index(check), normal.index("Commit and push"))
+        self.assertLess(normal.index(check),
+                        normal.index("python scripts/factory.py pr --head factory/plan-<INC>"))
+        self.assertIn("the `plan check` output from step 3 **unedited**", normal)
+        self.assertIn(check, revision)
+        self.assertIn("`plan check` output", revision)
+        self.assertIn(f"`{check}` exits 0, and the PR body contains its output, unedited.",
+                      s05.sections["Done check"])
+
+    def test_s05_declares_file_estimates_and_resolves_overlaps_only_in_open_questions(self):
+        s05 = {s.id: s for s in self.stations}["S05"]
+        steps = s05.sections["Steps"]
+        self.assertIn("Each story has a `- Files:` bullet after `Milestone`", steps)
+        self.assertIn("`<path> (~<lines>)`", steps)
+        self.assertIn("limits.max_diff_lines", steps)
+        # A flagged overlap is a candidate: a stop (rule H6) or an Open question, nothing else.
+        self.assertIn("It is a candidate, not a verdict", steps)
+        self.assertIn("stop and ask the human (rule H6)", steps)
+        self.assertIn("add one item to `## Open questions` in `02-requirements.md`", steps)
+        self.assertIn("This is the only change S05 makes to `02-requirements.md` in normal mode",
+                      steps)
+        self.assertIn("Normal mode, only when `plan check` flags a potential overlap",
+                      s05.sections["Outputs"])
+        self.assertIn("only restates a requirement that is already Done: ask the human (rule H6)",
+                      s05.sections["Stop conditions"])
+
 
 class ExistingProjectPlanningTest(unittest.TestCase):
     """T5.2: /factory-start for an existing project and for the next increment."""

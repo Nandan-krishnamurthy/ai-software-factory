@@ -6,6 +6,7 @@ The format is strict, so ``issues sync`` never has to guess (architecture §5.4)
     - Traces to: REQ-003, REQ-007
     - Blocked by: STORY-005            (or "None")
     - Milestone: M2
+    - Files: src/export.py (~60), tests/test_export.py (~80)   (optional; plan check needs it)
     #### Story
     As a user, I want … so that ….
     #### Acceptance criteria
@@ -23,7 +24,14 @@ Rules:
 * Anything before the first story, and under ``#``/``##`` headings (e.g. one per
   milestone), is free text and is ignored. Every ``###`` heading must be a story heading.
   Headings inside fenced code blocks are content.
-* The three metadata bullets come straight after the heading, each exactly once.
+* The three metadata bullets come straight after the heading, each exactly once. The
+  optional ``Files`` bullet (T7.4) may join them, at most once: each file the story is
+  expected to change with its estimated changed lines, ``<path> (~<lines>)``, comma-separated.
+  The estimate is the item's final ``(~<lines>)``, so a path may contain parentheses
+  (``app/(auth)/page.tsx (~40)``). A path may be wrapped in backticks, and must be if it
+  contains a comma. ``issues sync`` ignores it (the issue body is unchanged); ``plan
+  check`` sums it against ``limits.max_diff_lines``. A story without it is valid here, and
+  ``plan check`` reports that its size cannot be checked; it never counts as zero.
 * The five ``####`` sections are all required, in this order, and none may be empty
   (write ``None``). Deeper headings inside a section are content.
 * 1–5 acceptance criteria, numbered AC1, AC2, … in order. An indented line continues the
@@ -33,7 +41,7 @@ Rules:
 * No story may contain a ``<!-- factory:`` marker: only the factory adds markers.
 
 Every problem is reported, each naming the story, the line and the rule it broke
-(``RULES``). Parsing is pure: no I/O.
+(``RULES``). ``check`` returns the problems, ``parse`` raises them. Parsing is pure: no I/O.
 """
 
 import re
@@ -46,6 +54,7 @@ MIN_ACS, MAX_ACS = 1, 5
 MAX_TITLE = 200  # the issue title is "STORY-###: <title>"; GitHub allows 256
 SECTIONS = ("Story", "Acceptance criteria", "Out of scope", "Technical notes", "Test plan")
 METADATA = ("Traces to", "Blocked by", "Milestone")
+OPTIONAL_METADATA = ("Files",)  # T7.4: per-file changed-line estimates, read by plan check
 
 # Rule names used in problems (and in their messages).
 RULES = {
@@ -56,6 +65,7 @@ RULES = {
     "traces-to": "a story traces to one or more REQ-### IDs",
     "blocked-by": "Blocked by is `None` or STORY-### IDs",
     "milestone": "Milestone is M<number>",
+    "files": "Files is a comma-separated list of `<path> (~<lines>)`, each path once",
     "sections": f"the sections are {', '.join(SECTIONS)}, in that order, none empty",
     "acceptance-criteria": f"{MIN_ACS}–{MAX_ACS} ACs, `- AC<n>: …`, numbered from AC1",
     "markers": "stories must not contain `<!-- factory:` markers",
@@ -72,6 +82,10 @@ _HEADING = re.compile(r"^(?P<hashes>#{1,6})\s+(?P<text>.*?)\s*#*\s*$")
 _BULLET = re.compile(r"^[-*]\s+(?P<key>[A-Za-z][A-Za-z ]*?)\s*:\s*(?P<value>.*?)\s*$")
 _AC = re.compile(r"^[-*]\s+(?:\[[ xX]\]\s+)?AC(?P<n>\d+)\s*[:.]\s*(?P<text>.*?)\s*$")
 _FENCE = re.compile(r"^\s*(```|~~~)")
+# `<path> (~<lines>)`: the estimate is the final `(~N)`, so the path may hold parentheses
+# (`app/(auth)/page.tsx`). A backticked path may hold anything but a backtick.
+_FILE = re.compile(r"^(?:`(?P<quoted>[^`]*\S[^`]*)`|(?P<bare>[^`\s][^`]*?))"
+                   r"\s+\(~(?P<lines>\d+)\)$")
 
 
 @dataclass(frozen=True)
@@ -113,6 +127,9 @@ class Story:
     technical_notes: str
     test_plan: str
     line: int = 0
+    # (path, estimated changed lines) from the optional `- Files:` bullet; None when the
+    # story declares none (T7.4: plan check reports it, never as zero).
+    files: tuple[tuple[str, int], ...] | None = None
 
     @property
     def issue_title(self) -> str:
@@ -121,6 +138,15 @@ class Story:
 
 def parse(text: str, source: str = "05-stories.md") -> list[Story]:
     """Parse and validate. Returns the stories in file order, or raises ``StoriesError``."""
+    stories, problems = check(text)
+    if problems:
+        raise StoriesError(source, problems)
+    return stories
+
+
+def check(text: str) -> tuple[list[Story], list[Problem]]:
+    """Parse and validate without raising: the stories that are valid on their own, in file
+    order, and every problem (including dependency cycles between the valid stories)."""
     problems: list[Problem] = []
     blocks = _split(text, problems)
     stories: list[Story] = []
@@ -137,9 +163,7 @@ def parse(text: str, source: str = "05-stories.md") -> list[Story]:
     if not blocks and not problems:
         problems.append(Problem(None, "no-stories", "no `### STORY-###: <title>` heading found"))
     problems += dependency_cycles(stories)
-    if problems:
-        raise StoriesError(source, problems)
-    return stories
+    return stories, problems
 
 
 def dependency_cycles(stories: list[Story]) -> list[Problem]:
@@ -245,10 +269,11 @@ def _parse_story(story_id: str, title: str, line: int, body: list[tuple[int, str
             current.append((number, text))
         elif text.strip():
             bullet = _BULLET.match(text.strip())
-            key = _canonical(bullet["key"], METADATA) if bullet else None
+            key = _canonical(bullet["key"], METADATA + OPTIONAL_METADATA) if bullet else None
             if key is None:
                 problem("metadata", f"{text.strip()!r} is not one of the bullets "
-                        f"{', '.join(f'`- {k}: …`' for k in METADATA)}", number)
+                        f"{', '.join(f'`- {k}: …`' for k in METADATA)} (or the optional "
+                        f"`- Files: …`)", number)
             elif key in metadata:
                 problem("metadata", f"`{key}` appears twice", number)
             else:
@@ -264,6 +289,7 @@ def _parse_story(story_id: str, title: str, line: int, body: list[tuple[int, str
     if story_id in blocked:
         problem("blocked-by", "a story cannot be blocked by itself",
                 metadata["Blocked by"][1])
+    files = _files(metadata.get("Files"), problem)
     milestone = ""
     if "Milestone" in metadata:
         milestone, at = metadata["Milestone"]
@@ -291,7 +317,8 @@ def _parse_story(story_id: str, title: str, line: int, body: list[tuple[int, str
     return Story(
         id=story_id, title=title, traces_to=traces, blocked_by=blocked, milestone=milestone,
         story=texts["Story"], acceptance_criteria=acs, out_of_scope=texts["Out of scope"],
-        technical_notes=texts["Technical notes"], test_plan=texts["Test plan"], line=line)
+        technical_notes=texts["Technical notes"], test_plan=texts["Test plan"], line=line,
+        files=files)
 
 
 def _canonical(name: str, allowed: tuple[str, ...]) -> str | None:
@@ -319,6 +346,49 @@ def _ids(entry, pattern, rule, form, problem, *, allow_none) -> tuple[str, ...]:
     if duplicates:
         problem(rule, f"listed twice: {', '.join(duplicates)}", at)
     return tuple(dict.fromkeys(items))
+
+
+def _files(entry, problem) -> tuple[tuple[str, int], ...] | None:
+    """The optional ``- Files:`` bullet: ``((path, lines), …)``, or ``None`` if absent."""
+    if entry is None:
+        return None
+    value, at = entry
+    if value.count("`") % 2:
+        problem("files", f"{value!r} has a backtick that is not closed", at)
+        return None
+    items = [item.strip() for item in _split_outside_backticks(value)]
+    if not value or any(not item for item in items):
+        problem("files", f"{value!r} must be a comma-separated list of `<path> (~<lines>)`", at)
+        return None
+    files = []
+    for item in items:
+        match = _FILE.match(item)
+        if match is None or int(match["lines"]) < 1:
+            problem("files", f"{item!r} is not `<path> (~<lines>)` with an estimate of at "
+                    "least 1 changed line (wrap a path that holds a comma in backticks)", at)
+            return None
+        files.append(((match["quoted"] or match["bare"]).strip(), int(match["lines"])))
+    paths = [path for path, _ in files]
+    duplicates = sorted({path for path in paths if paths.count(path) > 1})
+    if duplicates:
+        problem("files", f"listed twice: {', '.join(duplicates)}", at)
+        return None
+    return tuple(files)
+
+
+def _split_outside_backticks(value: str) -> list[str]:
+    """``value`` cut at the commas that are not inside a backticked span."""
+    parts, current, quoted = [], [], False
+    for char in value:
+        if char == "`":
+            quoted = not quoted
+        if char == "," and not quoted:
+            parts.append("".join(current))
+            current = []
+        else:
+            current.append(char)
+    parts.append("".join(current))
+    return parts
 
 
 def _acceptance_criteria(section, problem) -> tuple[str, ...]:
