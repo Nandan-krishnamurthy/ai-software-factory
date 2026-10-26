@@ -456,7 +456,7 @@ Before the change, every new D-B case and lint failed, and the AC1 fixtures alre
    - **The thresholds:**
      - `OVERLAP = 0.5` ("at least half of what the new requirement says"): a **potential overlap**, which fails the check until resolved;
      - `NEAR = 0.4`: **related**, reported for the reviewer and never failing.
-   - **Resolution must be explicit:** an item (a list item with its continuation lines, or a paragraph) of the increment's `## Open questions` or `## Changed or retired requirements` that names both IDs literally.
+   - **Resolution must be explicit:** an item (a list item with its continuation lines, or a paragraph) of the increment's `## Open questions` or `## Changed or retired requirements` that names both IDs literally. **Amended by the review of PR #53 (below):** naming both IDs is no longer enough.
    - **Each candidate's output:** both statements, the shared words (heaviest first), the score and, when unresolved, what to do.
 4. **P-D: the checks.**
    - **The Story Contract**, through a new non-raising `stories.check` that `parse` now wraps: AC count and numbering, the `Out of scope` section (`None` stays valid), and `Blocked by` cycles.
@@ -518,16 +518,46 @@ Before the change, every new D-B case and lint failed, and the AC1 fixtures alre
 
 **Changed existing tests**, both in `tests/test_templates.py`, because the Planning PR template gained a section: `PLANNING_PR_SECTIONS` now lists "Plan check", and `PLANNING_PR_VALUES` gains `plan_check`. No assertion was removed or weakened.
 
+**Review of PR #53.** The read-only review (`1821c3de#999`, 2026-10-26T07:42:25Z, of head `aadab05`) found no blocker. The human asked for two fixes before merging (`1821c3de#1002`, 2026-10-26T07:58:24Z). Neither changes the scoring formula or the thresholds.
+1. **`Files` paths with parentheses.**
+   - **The problem:** `app/(auth)/login/page.tsx (~40)` was rejected. Route groups like this are ordinary paths in some web frameworks.
+   - **Why it was rejected:** `_FILE` in `stories.py` excluded parentheses from paths.
+   - **The fix:** an item's estimate is now its final `(~<lines>)`, so the parentheses in a path are not ambiguous. A path may be wrapped in backticks, and must be if it contains a comma: items are split only at commas outside backticks.
+   - **Still rejected:** an unclosed backtick, empty backticks, an estimate alone, text after the backticks, and a bare path holding a comma.
+   - **Tests:** `FilesBulletTest.test_paths_with_parentheses` and `test_a_backticked_path_may_hold_a_comma` fail on `aadab05`. Five new `BAD_CASES` guard against weakening; they are rejected before and after. `CheckTest.test_paths_with_parentheses_are_counted` is also new.
+2. **Explicit overlap resolution.**
+   - **The problem:** any item naming both IDs resolved a potential overlap, including "REQ-003 remains unchanged; REQ-022 is new" and Task Tracker 002's own "None. REQ-003 … stay in force unchanged … by REQ-022 to REQ-026". Neither says how the two relate.
+   - **The fix:** `plan.resolution` now accepts only two forms:
+     - under `## Changed or retired requirements`, an entry in the form `templates/README.md` already documents, `- <done>[, …]: changed by <new>[, …] (<how>)`, with the earlier requirement first. The human's example, `REQ-022: changed by REQ-003`, has the IDs the other way round, and that order is not accepted;
+     - under `## Open questions`, a list item that names both IDs and contains `?`.
+   - **Updated to match:** S05 step 3 (with an example question), the "To resolve" text, the CLI help and architecture §5.4.
+   - **Found while fixing it:** `section_items` joined an unindented paragraph to the list item above it, so a statement could borrow a later paragraph's `?`. The original 003 test did exactly that. An item now continues only on indented lines, which is how `parse_requirements` already reads requirement bullets.
+   - **Tests:** 14 new negative cases in `OverlapResolutionTest`, every one of which fails on `aadab05`:
+     - the misleading statement, in both sections, as a paragraph and as a bullet;
+     - the real 002 paragraph shape;
+     - a reversed `changed by` entry, a `retired` entry, prose that is not an entry, and a paragraph that is not a list item;
+     - a question that is not a list item, and a list item with no question;
+     - the borrowed `?`.
+
+     Valid resolutions still pass: an Open question, a `changed by` entry, several IDs, and an indented continuation. Unresolved overlaps still fail.
+
+**Changed existing tests in the review fixes:**
+- `OverlapResolutionTest.test_a_planted_duplicate_is_flagged_with_its_reason` pins the new "To resolve" text.
+- `RealPlansTest.test_003_…` now records its Open question as a question, through `replace_once`. Its earlier statement "resolved" only by borrowing the next paragraph's `?`.
+
+**The review's other findings** are recorded as follow-ups, not fixed here: [B-38](backlog.md#b-38) (enforcement in code), [B-39](backlog.md#b-39) (parser edge cases), [B-40](backlog.md#b-40) (lexical false positives and misses). [B-37](backlog.md#b-37) gains what the M7 demo should check.
+
 **Known limitations** (also in [backlog.md](backlog.md), Accepted limitations):
 - **The overlap score is lexical.**
   - A paraphrase with different words ("deadline" for "due date") is missed.
   - Parallel wording is flagged: 003's REQ-034 ~ REQ-019, and the planted REQ-027 ~ REQ-010.
   - The stop-word list and the singular rule are English.
   - Every flag is a question for the human, never an automatic verdict.
-- **Resolution matches literal IDs in one item.** A range such as "REQ-022 to REQ-026" does not name REQ-025.
+- **Resolution takes two explicit forms only,** with literal IDs: `- <done>: changed by <new>`, or a question (a list item with `?`) under Open questions. A range such as "REQ-022 to REQ-026" does not name REQ-025. A question that names both IDs resolves the pair whatever it asks: the check sees that the question was recorded, not whether it is a good one, and the human judges it at Gate A.
 - **The `Files` estimates are model-written.** The plan-time check is only as good as the estimate, and Q7 at Gate B still measures the real diff.
 - **Done is read from the local matrix's `Implemented` status,** not from GitHub's record of merged PRs (P-B).
 
 **Handed on:**
 - **Live proof in the M7 demo** ([B-37](backlog.md#b-37)): Task Tracker increment 004, a change request overlapping existing features, which `plan check` must flag in its Planning PR.
 - **Q6 Scope stays "Not checked"** ([B-08](backlog.md#b-08)). The `Files` bullet is now there to use for it, but wiring it into `pr render` and the issue body was out of P-A's scope.
+- **The review's follow-ups:** [B-38](backlog.md#b-38), [B-39](backlog.md#b-39) and [B-40](backlog.md#b-40).

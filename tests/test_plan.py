@@ -341,6 +341,12 @@ class CheckTest(unittest.TestCase):
         self.assertIn("the estimate is 270 changed lines in 2 file(s), over max_diff_lines "
                       "(269)", result.problems[0].message)
 
+    def test_paths_with_parentheses_are_counted(self):
+        result = run(stories=replace_once(STORY, "src/export.py (~120)",
+                                          "app/(auth)/export/page.tsx (~120)"))
+        self.assertEqual(result.problems, [])
+        self.assertEqual(result.stories[0].estimate, 270)
+
     def test_lockfiles_are_not_counted(self):
         result = run(stories=replace_once(STORY, "(~150)", "(~150), package-lock.json (~900)"))
         self.assertEqual(result.problems, [])
@@ -401,8 +407,9 @@ class CheckTest(unittest.TestCase):
 
 
 class OverlapResolutionTest(unittest.TestCase):
-    """A potential overlap fails until an item of Open questions or Changed or retired
-    requirements names both IDs."""
+    """A potential overlap fails until the increment records the pair explicitly: an entry
+    `- <done>: changed by <new>` under Changed or retired requirements, or a question naming
+    both IDs under Open questions. Naming both IDs is not enough (review of PR #53)."""
 
     def flagged(self, result: plan.Result) -> plan.Overlap:
         return next(o for o in result.overlaps if (o.new.id, o.done.id) == ("REQ-007", "REQ-002"))
@@ -418,8 +425,9 @@ class OverlapResolutionTest(unittest.TestCase):
         self.assertIn("potential overlap, UNRESOLVED", text)
         self.assertIn("shared words:", text)
         self.assertIn("REQ-002: The invoice list shows every invoice, newest first.", text)
-        self.assertIn("To resolve: add an item to `## Open questions` in 02-requirements.md "
-                      "that names REQ-007 and REQ-002", text)
+        self.assertIn("To resolve: add a question to `## Open questions` in 02-requirements.md, "
+                      "a list item that names REQ-007 and REQ-002 and asks it", text)
+        self.assertIn("Naming both IDs without a question does not resolve it.", text)
 
     def test_an_open_question_naming_both_resolves_it(self):
         requirements = open_question(DUPLICATE, "1. REQ-007 may restate REQ-002, which is Done. "
@@ -450,6 +458,58 @@ class OverlapResolutionTest(unittest.TestCase):
                                     "PDF export. Dropped at Gate A (REQ-007, REQ-002).")
         self.assertTrue(self.flagged(run(requirements=requirements,
                                          stories=DUPLICATE_STORY)).unresolved)
+
+    def changed(self, entry: str) -> plan.Overlap:
+        requirements = replace_once(DUPLICATE, "## Changed or retired requirements\nNone.",
+                                    f"## Changed or retired requirements\n{entry}")
+        return self.flagged(run(requirements=requirements, stories=DUPLICATE_STORY))
+
+    def asked(self, item: str) -> plan.Overlap:
+        return self.flagged(run(requirements=open_question(DUPLICATE, item),
+                                stories=DUPLICATE_STORY))
+
+    def test_a_misleading_statement_naming_both_does_not(self):
+        # "REQ-003 remains unchanged; REQ-022 is new" says nothing about how they relate.
+        misleading = "REQ-002 remains unchanged; REQ-007 is new."
+        for text in (misleading, f"- {misleading}", f"None. {misleading}"):
+            with self.subTest(section="Changed", text=text):
+                self.assertTrue(self.changed(text).unresolved)
+            with self.subTest(section="Open questions", text=text):
+                self.assertTrue(self.asked(text).unresolved)
+
+    def test_the_real_002_changed_paragraph_does_not(self):
+        # The shape of Task Tracker 002's own Changed section: it names the earlier IDs and
+        # the new range, and states that nothing changed.
+        self.assertTrue(self.changed("None. REQ-002 stays in force unchanged. Only an "
+                                     "assumption is superseded, by REQ-005 to REQ-007.").unresolved)
+
+    def test_changed_entries_must_be_the_documented_form(self):
+        for entry in ("- REQ-007: changed by REQ-002 (the order is reversed).",
+                      "- REQ-002: retired (REQ-007 replaces it).",
+                      "- REQ-002 is changed by REQ-007.",
+                      "REQ-002: changed by REQ-007 (a paragraph, not a list item)."):
+            with self.subTest(entry=entry):
+                self.assertTrue(self.changed(entry).unresolved)
+
+    def test_a_changed_entry_may_list_several_ids(self):
+        overlap = self.changed("- REQ-001, REQ-002: changed by REQ-004 and REQ-007 (both now "
+                               "carry the customer).")
+        self.assertEqual(overlap.resolved_by, "Changed or retired requirements, line 9")
+
+    def test_an_open_question_must_be_a_list_item_that_asks(self):
+        for item in ("REQ-007 may restate REQ-002. Is it new work?",  # a paragraph
+                     "1. REQ-007 may restate REQ-002; it is new work."):  # no question
+            with self.subTest(item=item):
+                self.assertTrue(self.asked(item).unresolved)
+        self.assertEqual(self.asked("1. REQ-007 may restate REQ-002.\n   Is it new work?")
+                         .resolved_by, "Open questions, line 15")  # an indented continuation
+
+    def test_a_paragraph_does_not_lend_its_question_to_the_item_above(self):
+        # Found while fixing the review: an unindented paragraph after a list item used to be
+        # joined to it, so a statement borrowed the paragraph's "?".
+        overlap = self.asked("- REQ-007 is new work, not a copy of REQ-002.\n"
+                             "None. The question \"Should exports be zipped?\" was answered.")
+        self.assertTrue(overlap.unresolved)
 
 
 # ----------------------------------------------------------------------------- the fixtures
@@ -626,9 +686,9 @@ class RealPlansTest(unittest.TestCase):
         self.assertEqual(result.problems, [])  # every AC of 003 has the Given/when/then form
         self.assertFalse(result.ok)
         increments["003-priority-filter"] = (
-            requirements.replace("## Open questions\n", "## Open questions\n- REQ-034 applies "
-                                 "REQ-019's 100 ms budget to choosing a filter; it is new "
-                                 "work, not a duplicate.\n", 1), with_estimates(stories))
+            replace_once(requirements, "## Open questions\n", "## Open questions\n- REQ-034 "
+                         "may restate REQ-019 (Done). Is it new work? (Assumed: yes, it applies "
+                         "the 100 ms budget to choosing a filter.)\n"), with_estimates(stories))
         self.assertTrue(Target(self, increments, MATRIX_TT).check("003-priority-filter").ok)
 
 

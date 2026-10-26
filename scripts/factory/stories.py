@@ -27,9 +27,11 @@ Rules:
 * The three metadata bullets come straight after the heading, each exactly once. The
   optional ``Files`` bullet (T7.4) may join them, at most once: each file the story is
   expected to change with its estimated changed lines, ``<path> (~<lines>)``, comma-separated.
-  ``issues sync`` ignores it (the issue body is unchanged); ``plan check`` sums it against
-  ``limits.max_diff_lines``. A story without it is valid here, and ``plan check`` reports
-  that its size cannot be checked; it never counts as zero.
+  The estimate is the item's final ``(~<lines>)``, so a path may contain parentheses
+  (``app/(auth)/page.tsx (~40)``). A path may be wrapped in backticks, and must be if it
+  contains a comma. ``issues sync`` ignores it (the issue body is unchanged); ``plan
+  check`` sums it against ``limits.max_diff_lines``. A story without it is valid here, and
+  ``plan check`` reports that its size cannot be checked; it never counts as zero.
 * The five ``####`` sections are all required, in this order, and none may be empty
   (write ``None``). Deeper headings inside a section are content.
 * 1–5 acceptance criteria, numbered AC1, AC2, … in order. An indented line continues the
@@ -80,7 +82,10 @@ _HEADING = re.compile(r"^(?P<hashes>#{1,6})\s+(?P<text>.*?)\s*#*\s*$")
 _BULLET = re.compile(r"^[-*]\s+(?P<key>[A-Za-z][A-Za-z ]*?)\s*:\s*(?P<value>.*?)\s*$")
 _AC = re.compile(r"^[-*]\s+(?:\[[ xX]\]\s+)?AC(?P<n>\d+)\s*[:.]\s*(?P<text>.*?)\s*$")
 _FENCE = re.compile(r"^\s*(```|~~~)")
-_FILE = re.compile(r"^`?(?P<path>[^`()]*?[^`()\s])`?\s+\(~(?P<lines>\d+)\)$")
+# `<path> (~<lines>)`: the estimate is the final `(~N)`, so the path may hold parentheses
+# (`app/(auth)/page.tsx`). A backticked path may hold anything but a backtick.
+_FILE = re.compile(r"^(?:`(?P<quoted>[^`]*\S[^`]*)`|(?P<bare>[^`\s][^`]*?))"
+                   r"\s+\(~(?P<lines>\d+)\)$")
 
 
 @dataclass(frozen=True)
@@ -348,7 +353,10 @@ def _files(entry, problem) -> tuple[tuple[str, int], ...] | None:
     if entry is None:
         return None
     value, at = entry
-    items = [item.strip() for item in value.split(",")]
+    if value.count("`") % 2:
+        problem("files", f"{value!r} has a backtick that is not closed", at)
+        return None
+    items = [item.strip() for item in _split_outside_backticks(value)]
     if not value or any(not item for item in items):
         problem("files", f"{value!r} must be a comma-separated list of `<path> (~<lines>)`", at)
         return None
@@ -357,15 +365,30 @@ def _files(entry, problem) -> tuple[tuple[str, int], ...] | None:
         match = _FILE.match(item)
         if match is None or int(match["lines"]) < 1:
             problem("files", f"{item!r} is not `<path> (~<lines>)` with an estimate of at "
-                    "least 1 changed line", at)
+                    "least 1 changed line (wrap a path that holds a comma in backticks)", at)
             return None
-        files.append((match["path"], int(match["lines"])))
+        files.append(((match["quoted"] or match["bare"]).strip(), int(match["lines"])))
     paths = [path for path, _ in files]
     duplicates = sorted({path for path in paths if paths.count(path) > 1})
     if duplicates:
         problem("files", f"listed twice: {', '.join(duplicates)}", at)
         return None
     return tuple(files)
+
+
+def _split_outside_backticks(value: str) -> list[str]:
+    """``value`` cut at the commas that are not inside a backticked span."""
+    parts, current, quoted = [], [], False
+    for char in value:
+        if char == "`":
+            quoted = not quoted
+        if char == "," and not quoted:
+            parts.append("".join(current))
+            current = []
+        else:
+            current.append(char)
+    parts.append("".join(current))
+    return parts
 
 
 def _acceptance_criteria(section, problem) -> tuple[str, ...]:

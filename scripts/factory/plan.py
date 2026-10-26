@@ -45,8 +45,10 @@ in-scope requirement of this increment is scored against each Done requirement:
   requirement's words, rounded to 3 decimals: the share of what the new requirement says
   that the Done one already says. It is 0 when the new requirement has no weight.
 * ``score >= OVERLAP`` (0.5: at least half) is a **potential overlap**. It fails the check
-  until it is resolved: an item of this increment's ``## Open questions`` or
-  ``## Changed or retired requirements`` that names both IDs.
+  until this increment records the pair explicitly (``resolution``): an entry
+  ``- <done>: changed by <new> (<how>)`` under ``## Changed or retired requirements``, or
+  a question (a list item with ``?``) under ``## Open questions`` that names both IDs.
+  Merely naming both IDs, as in "REQ-003 stays unchanged; REQ-022 is new", is not enough.
 * ``NEAR <= score < OVERLAP`` (0.4) is **related**: reported for the reviewer, never failing.
 
 Every candidate shows both statements and the shared words, so the reviewer sees why it
@@ -74,7 +76,6 @@ IMPLEMENTED = "Implemented"  # the traceability matrix's Status (templates/trace
 OPEN_QUESTIONS = "Open questions"
 CHANGED = "Changed or retired requirements"
 OUT_OF_SCOPE = "Out of scope"
-RESOLVING_SECTIONS = (OPEN_QUESTIONS, CHANGED)
 MAX_QUOTE = 160
 
 # English function words only, never domain words (success criterion 8).
@@ -100,6 +101,11 @@ _FENCE = re.compile(r"^\s*(```|~~~)")
 _REQ_BULLET = re.compile(r"^\s{0,3}(?:[-*+]|\d+[.)])\s+\*\*(?P<id>REQ-\d{3,})\*\*\s*(?P<rest>.*)$")
 _CITATION = re.compile(r"^(?:\(.*?\)\s*)?:\s*")  # `(PRD §…): ` or a bare `: `
 _ITEM = re.compile(r"^\s{0,3}(?:[-*+]|\d+[.)])\s")
+_IDS = re.compile(r"\bREQ-\d{3,}\b")
+_ID_LIST = r"REQ-\d{3,}(?:\s*(?:,|and)\s*REQ-\d{3,})*"
+# `- REQ-005[, REQ-006]: changed by REQ-022[, REQ-023] (<how>)` (templates/README.md)
+_CHANGED_ENTRY = re.compile(rf"^\s{{0,3}}(?:[-*+]|\d+[.)])\s+(?P<old>{_ID_LIST})\s*:\s*"
+                            rf"changed\s+by\s+(?P<new>{_ID_LIST})\b", re.I)
 _ID = re.compile(r"\b(?:REQ|STORY)-\d+\b")
 _WORD = re.compile(r"[^\W_]+")
 _GIVEN_WHEN_THEN = re.compile(r"^given\b.*?\bwhen\b.*?\bthen\b", re.I | re.S)
@@ -288,16 +294,19 @@ def _singular(word: str) -> str:
 
 
 def section_items(lines: list[tuple[int, str]]) -> list[tuple[int, str]]:
-    """A section cut into items: each list item (with the lines that continue it) or
-    paragraph, as ``(first line, text)``."""
+    """A section cut into items, as ``(first line, text)``: each list item with its indented
+    continuation lines, and each paragraph. An unindented line after a list item starts a
+    new item, so a paragraph can never lend its words (or its ``?``) to the item above it."""
     items: list[list] = []
     current: list | None = None
+    in_list = False
     for number, text in lines:
         if not text.strip():
             current = None
-        elif current is None or _ITEM.match(text):
+        elif current is None or _ITEM.match(text) or (in_list and not text[:1].isspace()):
             current = [number, text.strip()]
             items.append(current)
+            in_list = bool(_ITEM.match(text))
         else:
             current[1] += " " + text.strip()
     return [(number, text) for number, text in items]
@@ -335,13 +344,21 @@ def score_all(new: list[Requirement], done: list[Requirement]) -> list[Overlap]:
 
 
 def resolution(doc: RequirementsDoc, new: str, done: str) -> str | None:
-    """Where this increment records the pair: the first item of ``## Open questions`` or
-    ``## Changed or retired requirements`` that names both IDs."""
+    """Where this increment explicitly records the pair. Naming both IDs is not enough:
+
+    * ``## Changed or retired requirements``: a list item in the documented form
+      (templates/README.md) ``- <done>[, …]: changed by <new>[, …] (<how>)``, the earlier
+      requirement first;
+    * ``## Open questions``: a list item that names both IDs and asks a question (``?``).
+    """
+    for number, text in section_items(doc.sections.get(CHANGED.casefold(), [])):
+        entry = _CHANGED_ENTRY.match(text)
+        if entry and done in _IDS.findall(entry["old"]) and new in _IDS.findall(entry["new"]):
+            return f"{CHANGED}, line {number}"
     both = (re.compile(rf"\b{re.escape(new)}\b"), re.compile(rf"\b{re.escape(done)}\b"))
-    for name in RESOLVING_SECTIONS:
-        for number, text in section_items(doc.sections.get(name.casefold(), [])):
-            if all(p.search(text) for p in both):
-                return f"{name}, line {number}"
+    for number, text in section_items(doc.sections.get(OPEN_QUESTIONS.casefold(), [])):
+        if _ITEM.match(text) and "?" in text and all(p.search(text) for p in both):
+            return f"{OPEN_QUESTIONS}, line {number}"
     return None
 
 
@@ -539,10 +556,12 @@ def render(result: Result) -> str:
                   f"  {o.new.id}: {_quote(o.new.statement)}",
                   f"  {o.done.id}: {_quote(o.done.statement)}"]
         if o.unresolved:
-            lines.append(f"  To resolve: add an item to `## {OPEN_QUESTIONS}` in "
-                         f"{REQUIREMENTS_FILE} that names {o.new.id} and {o.done.id} (is "
-                         f"{o.new.id} new work?), or stop and ask the human (rule H6) if it "
-                         "restates finished work.")
+            lines.append(f"  To resolve: add a question to `## {OPEN_QUESTIONS}` in "
+                         f"{REQUIREMENTS_FILE}, a list item that names {o.new.id} and "
+                         f"{o.done.id} and asks it (for example: Is {o.new.id} new work, or "
+                         f"does {o.done.id} already cover it?), or stop and ask the human "
+                         "(rule H6) if it restates finished work. Naming both IDs without "
+                         "a question does not resolve it.")
     if not result.overlaps:
         lines.append(f"- None scoring {NEAR:.3f} or more")
     if result.notes:

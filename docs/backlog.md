@@ -195,8 +195,46 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
   - embedding the output unedited in the Planning PR.
 
   The roadmap's M7 demo asks for exactly this: Task Tracker increment 004, a change request overlapping existing features, which `plan check` flags.
+- **What the demo should also record** (from the review of PR #53):
+  - which Done requirements the real change request is flagged against, and whether each flag was a real overlap ([B-40](#b-40));
+  - that the Open question S05 writes is a list item asking a question, which is the only form that resolves the overlap;
+  - that the Planning PR's "Plan check" section matches a fresh `plan check` run on the plan branch ([B-38](#b-38)).
 - **Source:** [task-log.md](task-log.md#t74-plan-lint-and-overlap-detection) (T7.4, "Handed on"); the M7 demo in [05-roadmap-m6-m9.md](05-roadmap-m6-m9.md)
 - **Status:** analysis · **Owner:** unassigned (candidate: the M7 demo, Task Tracker increment 004) · **State:** open
+
+## Handed on by T7.4
+
+### <a id="b-38"></a>B-38 `plan check` is enforced only by S05's text
+- **What:** nothing in code requires `plan check` to have passed, or its output in the Planning PR to be the real, unedited output. Only S05's steps and Done check say so.
+  - The state engine reports `GATE_A_WAITING` as soon as the Planning PR is open.
+  - S05b creates the issues after the merge without re-running the check.
+  - `issues sync --dry-run` has the same gap today.
+
+  A plan that skips the check, or a pasted output that was edited, is caught only by the human at Gate A.
+- **Candidates:** S05b, or `issues sync` itself, re-runs `plan check` on the merged plan and refuses on a failure; or a check of the Planning PR body against a fresh run, like `pr check` does for story PRs.
+- **Source:** the review of PR #53 (`1821c3de#999`), concern 3
+- **Status:** verified · **Owner:** unassigned · **State:** open
+
+### <a id="b-39"></a>B-39 `plan check` parser edge cases
+- **What:** found by the review of PR #53, none of them silent:
+  - **A `Files` list of only lockfiles** gives an estimate of 0, which passes the size check.
+  - **A bold `**REQ-###**` bullet under `## Changed or retired requirements`** counts as an in-scope requirement of the increment. It then needs a story, and is scored against its own Done self. S02 forbids such bullets, and the result fails loudly.
+  - **An unindented continuation line** of a requirement bullet is dropped from its statement, which only affects the score.
+  - **Coverage is lenient:** a story may trace any earlier REQ that `## Changed or retired requirements` merely mentions, including one no increment defines. Resolution was made strict by the review fixes; coverage was not.
+  - **A bare path ending in another `(~N)`,** such as `a (~3) (~4)`, parses as the path `a (~3)`.
+- **Source:** the review of PR #53 (`1821c3de#999`), concern 5; [task-log.md](task-log.md#t74-plan-lint-and-overlap-detection)
+- **Status:** verified · **Owner:** unassigned · **State:** open
+
+### <a id="b-40"></a>B-40 Overlap scoring: lexical false positives and misses
+- **What:** the review of PR #53 tried realistic ways S02 might word the M5 request, beyond the verbatim replay. Each was still flagged against at least one Done requirement. But:
+  - **Wrong Done requirements were flagged too.** "The user can optionally give a task a due date when creating it, and the task shows it." also flags REQ-004, a priority requirement, at 0.737 through parallel wording. A wording with "next to its title" flags REQ-002, a validation message, at 0.612.
+  - **Synonyms are missed.** "Tasks can be given a deadline." flags nothing.
+  - **The exact AC1 set needs the verbatim wording.** {REQ-003, REQ-009, REQ-012, REQ-014} comes from the request's own words only.
+
+  Each false positive costs one Open question and is shown to the human. Each miss is silent. The scoring formula and thresholds were deliberately left unchanged.
+- **Next step:** measure the rate on the M7 demo's real change request ([B-37](#b-37)) before deciding whether the rule needs more, such as phrases, synonyms or a second signal.
+- **Source:** the review of PR #53 (`1821c3de#999`), concern 4; the accepted limitation below
+- **Status:** observed (review probes, not tests) · **Owner:** unassigned · **State:** open
 
 ## M6 demo findings
 
@@ -270,6 +308,6 @@ Kept on purpose by the task that introduced them. Each is described in its PR.
 | T7.1 | A stray mention inside a record file uses up an ID (the safe direction: the numbering skips, never reuses) | PR #50, pre-merge review (`34ce5c38#739`) |
 | T7.2 | A root-level file named like repository metadata (`license*`, `licence*`, `copying*`, `notice*`, `changelog*`, `authors*`) is excluded from project detection whatever its suffix, so a root `changelog.py` or `notice.ts` does not count as code. This only matters when such a file is the repo's only code; nested files with these names still count | [PR #51](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/51), review correction (`34ce5c38#1412`); [task-log.md](task-log.md#t72-intake-and-project-detection) |
 | T7.4 | `plan check`'s overlap score is lexical. A paraphrase in other words ("deadline" for "due date") is missed. Parallel wording is flagged: on the real plans, Task Tracker's REQ-034 ~ REQ-019 (both "reflected … within 100 ms of the user's action") scores 0.529, a known false positive that needs one Open question. The stop words and the singular rule are English. Every flag is a question for the human, never a verdict | [task-log.md](task-log.md#t74-plan-lint-and-overlap-detection) (P-C) |
-| T7.4 | A potential overlap is resolved only by one item of `## Open questions` or `## Changed or retired requirements` that names both IDs literally; a range such as "REQ-022 to REQ-026" does not name REQ-025 | [task-log.md](task-log.md#t74-plan-lint-and-overlap-detection) (P-C) |
+| T7.4 | A potential overlap is resolved only by an explicit record with literal IDs: `- <done>: changed by <new>` under `## Changed or retired requirements`, or a question (a list item with `?`) naming both IDs under `## Open questions`. A range such as "REQ-022 to REQ-026" does not name REQ-025. The check sees that a question was recorded, not whether it is a good one; the human judges that at Gate A | [task-log.md](task-log.md#t74-plan-lint-and-overlap-detection) (P-C, review of PR #53) |
 | T7.4 | The `- Files:` estimates are model-written, so the plan-time size check is only as good as the estimate; Q7 at Gate B still measures the real diff | [task-log.md](task-log.md#t74-plan-lint-and-overlap-detection) (P-A) |
 | T7.4 | "Done" for the overlap check is the local matrix's `Implemented` status, not GitHub's record of merged PRs, which `/factory-status` uses | [task-log.md](task-log.md#t74-plan-lint-and-overlap-detection) (P-B) |

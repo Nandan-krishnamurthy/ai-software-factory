@@ -202,6 +202,11 @@ BAD_CASES = [
     ("Files None", with_files("None"), "STORY-003", "files"),
     ("Files path twice", with_files("a.py (~1), a.py (~2)"), "STORY-003", "files"),
     ("Files bullet twice", with_files("a.py (~1)\n- Files: b.py (~2)"), "STORY-003", "metadata"),
+    ("Files unclosed backtick", with_files("`app/(auth)/page.tsx (~40)"), "STORY-003", "files"),
+    ("Files empty backticks", with_files("`` (~3)"), "STORY-003", "files"),
+    ("Files estimate only", with_files("(~3)"), "STORY-003", "files"),
+    ("Files text after the backticks", with_files("`a.py` b (~3)"), "STORY-003", "files"),
+    ("Files comma in a bare path", with_files("src/a,b.py (~3)"), "STORY-003", "files"),
 ]
 
 
@@ -217,6 +222,19 @@ class FilesBulletTest(unittest.TestCase):
         story = parse(with_files(self.FILES))[2]
         self.assertEqual(story.files, (("src/tasks.py", 40), ("tests/test tasks.py", 60),
                                        ("package-lock.json", 5)))
+
+    def test_paths_with_parentheses(self):
+        # Review of PR #53: route groups such as `app/(auth)/` are ordinary paths. The
+        # estimate is the item's final `(~N)`, so the parentheses are not ambiguous.
+        files = ("app/(auth)/login/page.tsx (~40), `src/(group)/a b.ts` (~5), "
+                 "routes/(app)/+page.svelte (~12)")
+        self.assertEqual(parse(with_files(files))[2].files,
+                         (("app/(auth)/login/page.tsx", 40), ("src/(group)/a b.ts", 5),
+                          ("routes/(app)/+page.svelte", 12)))
+
+    def test_a_backticked_path_may_hold_a_comma(self):
+        self.assertEqual(parse(with_files("`data/a,b.csv` (~3), src/a.py (~4)"))[2].files,
+                         (("data/a,b.csv", 3), ("src/a.py", 4)))
 
     def test_it_may_come_anywhere_among_the_metadata_bullets(self):
         text = with_story_3(**{"- Traces to: REQ-004": "- Files: a.py (~3)\n- Traces to: REQ-004"})

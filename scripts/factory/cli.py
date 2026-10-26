@@ -138,8 +138,10 @@ def build_parser() -> argparse.ArgumentParser:
                     "missing estimate is a problem, never zero). Scores each in-scope "
                     "requirement against every Done one (Implemented, defined by an earlier "
                     f"increment): a score of {plan.OVERLAP} or more is a potential overlap that "
-                    "fails until an item under '## Open questions' or '## Changed or retired "
-                    f"requirements' names both IDs; {plan.NEAR} or more is reported as related. "
+                    "fails until it is recorded explicitly, as '- <done>: changed by <new>' "
+                    "under '## Changed or retired requirements' or as a question naming both "
+                    "IDs under '## Open questions' (naming both IDs alone is not enough); "
+                    f"{plan.NEAR} or more is reported as related. "
                     "Exit 0 only with no problem and no unresolved overlap. Read-only: no git, "
                     "no GitHub, never writes.")
     plan_check.add_argument("--increment", required=True, metavar="INC",
