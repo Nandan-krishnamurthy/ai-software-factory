@@ -432,7 +432,7 @@ Before the change, every new D-B case and lint failed, and the AC1 fixtures alre
 | | |
 |---|---|
 | **Specification** | [05-roadmap-m6-m9.md](05-roadmap-m6-m9.md), "T7.4 Plan lint and overlap detection" |
-| **PR** | not yet opened |
+| **PR** | [#53](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/53), not merged |
 | **Status** | In review |
 
 **Approved decisions.** The scoping pass was `1821c3de#176` (2026-10-26T06:19:47Z). P-A to P-F were approved, with the conditions below, in `1821c3de#179` (2026-10-26T06:31:23Z).
