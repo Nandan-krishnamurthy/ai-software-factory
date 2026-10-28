@@ -180,12 +180,18 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
 ### <a id="b-35"></a>B-35 Reading a closed Planning PR's records after its branch is deleted, against live GitHub
 - **What:** T7.1 reads each Planning PR's records at its head commit by SHA, so that an abandoned plan's IDs are never reused, even after its `factory/plan-<inc>` branch is deleted. GitHub keeps a closed PR's head commit (`refs/pull/<n>/head`), but this has been tested only with a fake GitHub. A live check needs GitHub writes on a throwaway repo: push a record file, open a PR with a planning marker, close it, delete the branch, and run `increment show`. Every Planning PR read live so far (Task Tracker #1, #26, #33) still has its branch.
 - **Source:** T7.1, Step 6 of the approved implementation prompt; declined for now by the human (`34ce5c38#481`, 2026-10-25T10:44:41Z). See [task-log.md](task-log.md#t71-id-allocation-from-structured-sources-only).
-- **Status:** analysis · **Owner:** unassigned (candidate: the M7 demo) · **State:** open
+- **M7 demo, 2026-10-27: not run.** Decision D5 authorised it on the PDF sandbox (`1821c3de#1911`). But it needs the human to close that sandbox's Planning PR unmerged and delete its branch, and the human's Phase B instruction was that the PR must stay open and unmerged (`858cb907#2`). What was seen instead: with the plan open, `increment show` gave `REQ-017`, `STORY-006`, so an open plan's IDs are reserved. That is not this item's closed-and-deleted case ([progress.md](progress.md#m7-plans--target-knowledge)). Both sandboxes' Planning PRs (#1 each) are still open and could serve a later run.
+- **Status:** analysis · **Owner:** unassigned (the M7 demo did not run it) · **State:** open
 
 ### <a id="b-36"></a>B-36 Target knowledge base: S01's creation/update and S12's note, not yet run on a real target
 - **What:** T7.3's `knowledge check` is proven at the unit level only, against real throwaway git repositories, not fake ones. What has not been run live is the **model-authored** half: S01 actually creating or updating `docs/factory/knowledge.md` by hand from `knowledge check`'s result (including reusing an earlier increment's `01-codebase-analysis.md` on first creation, K-D), and S12 actually posting the Knowledge base paragraph on an increment's last story (K-A).
 - **Source:** [PR #52](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/52) (T7.3), decision K-G; [task-log.md](task-log.md#t73-target-knowledge-base)
-- **Status:** analysis · **Owner:** unassigned (candidate: the M7 demo, Task Tracker increment 004) · **State:** open
+- **M7 demo, Task Tracker increment 004 (2026-10-27/28): partly shown** ([progress.md](progress.md#m7-plans--target-knowledge)).
+  - **Creation (shown):** S01 created `docs/factory/knowledge.md` on the target's first S01 run with the file `missing`, reusing 003's analysis (K-D). Header `checked=e89fbb2…`, the eight sections in order, and Architecture decisions linking `001`, `002` and `003/03-architecture.md` by path. S01's Done check, `knowledge check` → `fresh`, `"ok": true`, passed (commit `2ccaef1`).
+  - **S12's note (shown):** on the increment's last story (#41, PR #42), the close-out summary had the Knowledge base paragraph (REQ-037..REQ-041, PR #42, and the `knowledge check` status), and S12 committed nothing (K-A).
+  - **Use by S02–S04 (shown, with a limit):** `02`, `03` and `04` cite the file. The same session wrote it, so this shows use, not independent learning.
+  - **Not shown: the update.** S01 reusing and updating an existing file (T7.3 AC1) needs a later increment, and decision D4 (`1821c3de#1911`) deferred it rather than create a demo-only increment 005. The file is now `stale` (Hotspots, Architecture decisions, Known risks, against `e89fbb2`), which is the input that run needs.
+- **Status:** verified (creation and S12's note); analysis (the update) · **Owner:** unassigned (the next real increment on Task Tracker) · **State:** open (the update half)
 
 ### <a id="b-37"></a>B-37 Plan check: an overlapping change request, not yet run on a real target
 - **What:** T7.4's `plan check` is proven at the unit level only. That proof uses the real Task Tracker plans of increments 001–003 and an authored replay of the M5 change request. What has not been run live is S05 handling the result:
@@ -200,7 +206,17 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
   - that the Open question S05 writes is a list item asking a question, which is the only form that resolves the overlap;
   - that the Planning PR's "Plan check" section matches a fresh `plan check` run on the plan branch ([B-38](#b-38)).
 - **Source:** [task-log.md](task-log.md#t74-plan-lint-and-overlap-detection) (T7.4, "Handed on"); the M7 demo in [05-roadmap-m6-m9.md](05-roadmap-m6-m9.md)
-- **Status:** analysis · **Owner:** unassigned (candidate: the M7 demo, Task Tracker increment 004) · **State:** open
+- **M7 demo, Task Tracker increment 004, Planning PR #40 (2026-10-27): shown** ([progress.md](progress.md#m7-plans--target-knowledge)).
+  - **`Files` estimates:** written for the one story, which estimated 231 lines, then 368 and 385 after the two Gate A rounds. Q7 measured 333 at Gate B.
+  - **Run until it exits 0, in three runs:**
+    - first plan: exit 1, 3 unresolved potential overlaps, then PASS;
+    - Gate A round 1: exit 1, 2 new unresolved, then PASS;
+    - round 2: PASS on the first run.
+  - **Open questions:** S05 judged each flagged pair not to be a restatement. It recorded each as a numbered list item with a `?`, naming both IDs (Open questions 8, 9, 11 and 12), and `plan check` reported every pair "resolved in Open questions".
+  - **Embedded unedited, and matching a fresh run** ([B-38](#b-38)): in all three rounds, the fresh run on the plan branch was identical to the PR body's copy. (On the two sandboxes' first increments it was not: [B-43](#b-43).)
+  - **The flags and verdicts** are under [B-40](#b-40).
+  - **The change request's real overlap,** FR-017 restating REQ-010, never reached `plan check`. S02 stopped on it under rule H6, and the human kept it out of scope (`858cb907#917`).
+- **Status:** verified · **Owner:** the M7 demo · **State:** **resolved** by the M7 record ([progress.md](progress.md#m7-plans--target-knowledge))
 
 ## Handed on by T7.4
 
@@ -211,6 +227,7 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
   - `issues sync --dry-run` has the same gap today.
 
   A plan that skips the check, or a pasted output that was edited, is caught only by the human at Gate A.
+- **M7 demo:** checked by hand, the embedded output matched a fresh run in all three rounds of Task Tracker's Planning PR #40. On both sandboxes' first increments it did not, for a harmless reason ([B-43](#b-43)), which a code check like this would have to allow for.
 - **Candidates:** S05b, or `issues sync` itself, re-runs `plan check` on the merged plan and refuses on a failure; or a check of the Planning PR body against a fresh run, like `pr check` does for story PRs.
 - **Source:** the review of PR #53 (`1821c3de#999`), concern 3
 - **Status:** verified · **Owner:** unassigned · **State:** open
@@ -233,8 +250,28 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
 
   Each false positive costs one Open question and is shown to the human. Each miss is silent. The scoring formula and thresholds were deliberately left unchanged.
 - **Next step:** measure the rate on the M7 demo's real change request ([B-37](#b-37)) before deciding whether the rule needs more, such as phrases, synonyms or a second signal.
-- **Source:** the review of PR #53 (`1821c3de#999`), concern 4; the accepted limitation below
-- **Status:** observed (review probes, not tests) · **Owner:** unassigned · **State:** open
+- **Measured in the M7 demo (Task Tracker increment 004, 36 Done requirements compared):**
+
+  | `plan check` run | Pair | Score | Kind |
+  |---|---|---|---|
+  | First plan | REQ-037 ~ REQ-022 | 1.000 | potential |
+  | | REQ-038 ~ REQ-022 | 0.827 | potential |
+  | | REQ-038 ~ REQ-023 | 0.827 | potential |
+  | | REQ-037 ~ REQ-023 | 0.462 | related |
+  | | REQ-038 ~ REQ-024 | 0.499 | related |
+  | After both Gate A rounds (final) | REQ-037 ~ REQ-022 | 0.943 | potential |
+  | | REQ-038 ~ REQ-022, REQ-023 | 0.759 each | potential |
+  | | REQ-038 ~ REQ-024 | 0.541 | potential |
+  | | REQ-040 ~ REQ-025 | 0.924 | potential |
+  | | REQ-037 ~ REQ-023 | 0.410 | related |
+  | | REQ-040 ~ REQ-031 | 0.495 | related |
+  | | REQ-039, REQ-041 | — | no candidate at or above 0.400 |
+
+  - **Verdict on every potential flag: related, not a duplicate.** Each pairs a new "Due today" requirement with the matching "Overdue" requirement of 002, which says the same about a different label and date. S05 recorded that judgment as Open questions 8, 9, 11 and 12 ("Assumed: yes", new work), and the human approved it by merging PR #40. So the rate was **5 potential flags, 0 duplicates**, at a cost of 4 Open questions.
+  - **A score of 1.000 for a different feature:** every weighted word of the first REQ-037 also appears in REQ-022, even the label's own words, "due" and "today". The words alone cannot tell "due today" from "due before today".
+  - **A miss that did not matter here:** the change request's real duplicate, FR-017 against REQ-010, was never scored, because S02 caught it and kept it out of the requirements ([B-37](#b-37)).
+- **Source:** the review of PR #53 (`1821c3de#999`), concern 4; the accepted limitation below; the M7 demo ([progress.md](progress.md#m7-plans--target-knowledge))
+- **Status:** observed (review probes, and one live change request) · **Owner:** unassigned · **State:** open
 
 ## T7 review findings recorded after merge
 
@@ -261,6 +298,24 @@ These were reported as non-blocking in the final reviews of PR #52 and PR #53, b
 - **Source:** the second review of PR #53 (`1821c3de#1385`, 2026-10-26T08:13:29Z), "Non-blocking follow-ups"
 - **Status:** verified · **Owner:** unassigned · **State:** open
 
+## M7 demo findings
+
+Found while running the M7 demo on the two new sandboxes and on Task Tracker, increment `004-edit-priority-due-today` ([progress.md](progress.md#m7-plans--target-knowledge)). Recurrences are recorded on [B-30](#b-30) and [B-32](#b-32); the live results of T7.2–T7.4 on [B-20](#b-20)–[B-22](#b-22) and [B-35](#b-35)–[B-40](#b-40).
+
+### <a id="b-43"></a>B-43 S05's embedded `plan check` output differs from a fresh run on a project's first increment
+- **What:** S05 runs `plan check` at step 3 and creates `docs/factory/traceability.md` at step 4. On a project's first increment, the output S05 embeds in the Planning PR therefore has a `Notes:` line, "No docs/factory/traceability.md: there are no Done requirements to compare". A fresh `plan check` on the committed plan branch does not have it. The result is the same (`PASS`, 0 compared); only the text differs. But a reviewer, or a future code check of the embedded output against a fresh run ([B-38](#b-38)), sees a mismatch. Later increments are not affected, because the matrix already exists: Task Tracker increment 004's three rounds matched.
+- **Candidates:** run `plan check` after step 4; or make the note independent of whether the matrix exists (for example "0 Done requirements to compare").
+- **Source:** the M7 demo, Phase A (`factory-sandbox-m7-md` Planning PR #1, 2026-10-26) and Phase B (`factory-sandbox-m7-pdf` Planning PR #1, 2026-10-27): in both, `diff` of the embedded and the fresh output shows only the 3 lines of the `Notes:` block. [S05](../stations/S05-stories.md) steps 3–4. Not fixed during the demo, by the human's instruction.
+- **Status:** verified · **Owner:** unassigned · **State:** open
+
+### <a id="b-44"></a>B-44 Returning from an S11 stop to S09 is not described, and S09 cannot re-verify an unchanged commit
+- **What:** two gaps, both met on Task Tracker #41.
+  - **After an answered S11 question.** When `pr render` stops S11 (here on rule H3) and the human answers, the state engine names S11 again, which would hit the same problem: the fix is a change to the branch, which only S08 or S09 make. S11 documents `--station S11 --next S09` only for two cases, new `<D>` commits (step 1) and a failed final-commit check (step 7). The assistant used that hand-back for the answered question too, and said so.
+  - **Re-verifying a commit that has not changed.** After S11 step 7 failed on a flaky run, S09 had to verify the same commit again. S09 step 3 always commits a `.factory/log.md` line before `verify run`, which would move the branch off the commit to be verified. The assistant skipped that commit for this run, so the log has no line for it.
+- **Candidates:** S11's stop conditions say that, once a `pr render` question is answered, the station records S11 → S09; and S09 skips its step-3 commit when the story's tests are unchanged and only the evidence is missing for the branch head.
+- **Source:** the M7 demo, Phase C (Task Tracker #41 and PR #42, 2026-10-28); [S11](../stations/S11-pr.md) steps 1, 4 and 7; [S09](../stations/S09-test.md) step 3
+- **Status:** verified · **Owner:** unassigned · **State:** open
+
 ## M6 demo findings
 
 Found while running the M6 demo on Task Tracker, increment `003-priority-filter` ([progress.md](progress.md#m6-deterministic-verification--review)). The recurrence of [B-18](#b-18) is recorded on that item.
@@ -273,6 +328,7 @@ Found while running the M6 demo on Task Tracker, increment `003-priority-filter`
 ### <a id="b-30"></a>B-30 A `Changed test:` line must give a full path for a change outside any test
 - **What:** `prbody.changed_tests` matches a change outside any test (an import, a locator helper) by checking that the declared text contains the file's full path. `Changed test: due-date-priority.spec.ts …` did not match `tests/e2e/due-date-priority.spec.ts`, so `pr render` reported rule H3 problems, and also warned that the declared line named no change. [S09](../stations/S09-test.md) step 2 does not say that a full path is needed. Candidates: say so in S09, or also match by file name.
 - **Source:** the M6 demo, point 2: S11 stopped and asked on Task Tracker #34; the human approved an empty commit (`3f48c51`) with full-path lines; `scripts/factory/prbody.py` (`changed_tests`)
+- **M7 demo, Task Tracker #41 (2026-10-28):** a related case, with a different cause. The S09 commit `03aabd8` widened the existing import on line 2 of `src/app/controller.test.ts`, a modified line outside any test, and wrote no `Changed test:` line at all. `pr render` stopped with "rule H3: a line outside any test in `src/app/controller.test.ts` changed without a `Changed test:` line", and S11 asked on #41. The human chose to avoid the change rather than declare it (#41, 2026-10-28T06:53:43Z): `fad92c6` restored the line and added the new imports on a separate line, which the rule does not count. A second stop-and-ask round in two demos for an import line. Candidates, besides those above: S09 step 2 could say that an edited import is a change to declare, or the rule could treat a widened import as an addition.
 - **Status:** verified · **Owner:** unassigned · **State:** open
 
 ### <a id="b-31"></a>B-31 No factory path for changing an acceptance criterion after Gate A
@@ -282,7 +338,8 @@ Found while running the M6 demo on Task Tracker, increment `003-priority-filter`
 
 ### <a id="b-32"></a>B-32 Vitest sometimes cannot start a worker on a cold start
 - **What:** on the Windows machine used, the first `npm test` after a pause sometimes fails before Playwright runs: Vitest reports `Failed to start forks worker for test files …/src/ui/render.test.ts` (`Timeout waiting for worker to respond`), that file does not run, and every test that ran passes. `verify run` then records `test fail`, which can spend a fix attempt. Every rerun has passed. It is environmental, on the target's side (Vitest's pool), but the factory cannot tell such a failure from a real one.
-- **Source:** the B-26 integration (Task Tracker PR #31, 2026-10-22); the M6 demo, point 2 (`verify run` on `383ae7a`)
+- **Source:** the B-26 integration (Task Tracker PR #31, 2026-10-22); the M6 demo, point 2 (`verify run` on `383ae7a`); the M7 demo (below)
+- **M7 demo, Task Tracker #41 (2026-10-28):** S11 step 7's `verify run` on `88cb913`, a commit that changed only `traceability.md` and the log, failed the same way: 131 of 131 tests that ran passed, there was `1 error`, and Playwright did not run. The same code had passed twice on `fad92c6`. The factory recorded S11 → S09 and stopped rather than retry. On the human's go-ahead (`858cb907#1969`), the re-run on the same commit passed: Vitest 169, Playwright 94. No fix attempt was spent, because S11 sends the story back to S09 and does not count it.
 - **Status:** observed · **Owner:** unassigned · **State:** open
 
 ### <a id="b-33"></a>B-33 Q7 Size counts the factory's own `.factory/log.md` lines
@@ -296,11 +353,11 @@ The roadmap's open-findings table ([05-roadmap-m6-m9.md](05-roadmap-m6-m9.md), "
 
 | ID | Finding | Owner | State |
 |---|---|---|---|
-| <a id="b-18"></a>B-18 | The ID scanner counts mentions in the docs (M2 Problem 4, M5 follow-up 1) | T7.1 | **resolved** by [PR #50](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/50) (T7.1), merged as `5cc0e27`; pinned by `ProseMentionRegressionTest` (the M5 and M6 notes). History: in M5 the docs were reworded so that they mention no unallocated ID ([progress.md](progress.md), M5 record). The assistant restated this as an interim practice (`1bcf8818#1057`): keep literal `REQ-`/`STORY-` numbers out of prose under the target's `docs/factory/`, and check `increment show` before S05. This is guidance, not a recorded human decision. It struck again in the M6 demo (2026-10-23): the S01 analysis named the next free IDs, and `increment show` skipped to `REQ-028`; rewording the line in a follow-up S01 commit restored `REQ-027` ([progress.md](progress.md#m6-deterministic-verification--review)). T7.1's fix: only the IDs named in an increment's `02-requirements.md` or `05-stories.md` (in the working tree and at every Planning PR's head commit) and labelled story issues allocate. A mention anywhere else is only a warning ([task-log.md](task-log.md#t71-id-allocation-from-structured-sources-only)). |
+| <a id="b-18"></a>B-18 | The ID scanner counts mentions in the docs (M2 Problem 4, M5 follow-up 1) | T7.1 | **resolved** by [PR #50](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/50) (T7.1), merged as `5cc0e27`; pinned by `ProseMentionRegressionTest` (the M5 and M6 notes). History: in M5 the docs were reworded so that they mention no unallocated ID ([progress.md](progress.md), M5 record). The assistant restated this as an interim practice (`1bcf8818#1057`): keep literal `REQ-`/`STORY-` numbers out of prose under the target's `docs/factory/`, and check `increment show` before S05. This is guidance, not a recorded human decision. It struck again in the M6 demo (2026-10-23): the S01 analysis named the next free IDs, and `increment show` skipped to `REQ-028`; rewording the line in a follow-up S01 commit restored `REQ-027` ([progress.md](progress.md#m6-deterministic-verification--review)). T7.1's fix: only the IDs named in an increment's `02-requirements.md` or `05-stories.md` (in the working tree and at every Planning PR's head commit) and labelled story issues allocate. A mention anywhere else is only a warning ([task-log.md](task-log.md#t71-id-allocation-from-structured-sources-only)). **M7 demo (live):** after S01 committed an analysis and a knowledge base mentioning ten existing IDs in prose, `increment show` still gave `REQ-037`, `STORY-018`, with no warnings; both sandboxes started at `REQ-001`/`STORY-001` ([progress.md](progress.md#m7-plans--target-knowledge)). |
 | <a id="b-19"></a>B-19 | Stale story markers without the label (M4 follow-up 1) | T7.1 | **resolved** by [PR #50](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/50) (T7.1, on merge): a marker counts only on an issue with the `factory:story` label, for IDs and for the next increment number; an unlabelled one is a warning |
-| <a id="b-20"></a>B-20 | A PRD in `docs/` triggers S01 (M2 Problem 2, M4 follow-up 2) | T7.2 | **resolved** by [PR #51](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/51) (T7.2, on merge). The detection logic had already ignored `docs/**` and documents since T5.2 ([PR #32](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/32)). T7.2 adds a fixture for each layout and closes the remaining false positives: `.git*` files, root licence/notice/changelog/authors files, `CODEOWNERS`, `.editorconfig`, and the `.claude/`, `.vscode/` and `.idea/` folders; HTML still counts as code outside `docs/` (a static site). Live proof: the M7 demo ([task-log.md](task-log.md#t72-intake-and-project-detection)). |
-| <a id="b-21"></a>B-21 | A PDF PRD can't be "copied unchanged" (M2 Problem 3) | T7.2 | **resolved** by [PR #51](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/51) (T7.2, on merge): S00 copies Markdown unchanged, gives a text file or a transcribed PDF a `<!-- factory:prd-source` header ([templates/README.md](../templates/README.md), "PRD source header"), and stops and asks for any other format or for a PDF whose requirements cannot be reproduced as text. Live proof: the M7 demo. |
-| <a id="b-22"></a>B-22 | S00 runs `doctor` before `labels ensure` (M2 Problem 1) | T7.2 | **resolved** by [PR #51](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/51) (T7.2, on merge): S00 runs `labels ensure` first, then `doctor`; `/factory-target` says that missing labels alone are created by `/factory-start`. Live proof: the M7 demo. |
+| <a id="b-20"></a>B-20 | A PRD in `docs/` triggers S01 (M2 Problem 2, M4 follow-up 2) | T7.2 | **resolved** by [PR #51](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/51) (T7.2, on merge). The detection logic had already ignored `docs/**` and documents since T5.2 ([PR #32](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/32)). T7.2 adds a fixture for each layout and closes the remaining false positives: `.git*` files, root licence/notice/changelog/authors files, `CODEOWNERS`, `.editorconfig`, and the `.claude/`, `.vscode/` and `.idea/` folders; HTML still counts as code outside `docs/` (a static site). Live proof: the M7 demo ([task-log.md](task-log.md#t72-intake-and-project-detection)). **Shown (2026-10-26/27):** both sandboxes, holding only `README.md` and `docs/prd.md` or `docs/prd.pdf`, routed S00 → S02 ([progress.md](progress.md#m7-plans--target-knowledge)). |
+| <a id="b-21"></a>B-21 | A PDF PRD can't be "copied unchanged" (M2 Problem 3) | T7.2 | **resolved** by [PR #51](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/51) (T7.2, on merge): S00 copies Markdown unchanged, gives a text file or a transcribed PDF a `<!-- factory:prd-source` header ([templates/README.md](../templates/README.md), "PRD source header"), and stops and asks for any other format or for a PDF whose requirements cannot be reproduced as text. Live proof: the M7 demo. **Shown (2026-10-27):** `00-prd.md` of `factory-sandbox-m7-pdf` starts with the header; its `Blob` equals `git hash-object docs/prd.pdf`; 518 of 518 words match the PDF text, and 42 of 42 non-blank lines match the approved Markdown apart from the declared inline styles ([progress.md](progress.md#m7-plans--target-knowledge)). The stop-and-ask path for an unreadable PDF was not exercised. |
+| <a id="b-22"></a>B-22 | S00 runs `doctor` before `labels ensure` (M2 Problem 1) | T7.2 | **resolved** by [PR #51](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/51) (T7.2, on merge): S00 runs `labels ensure` first, then `doctor`; `/factory-target` says that missing labels alone are created by `/factory-start`. Live proof: the M7 demo. **Shown (2026-10-26/27):** on both new sandboxes, `labels ensure` reported `9 created` before `doctor`, which then reported `labels OK`, with no manual step ([progress.md](progress.md#m7-plans--target-knowledge)). |
 | <a id="b-23"></a>B-23 | The Gate A `/changes` revision round has never been demonstrated (M2, M4, M5) | M6 demo | **resolved**: demonstrated in the M6 demo, point 1, on Task Tracker's Planning PR #33 ([progress.md](progress.md#m6-deterministic-verification--review)) |
 | <a id="b-24"></a>B-24 | `main` has no branch protection (M5 follow-up 3) | T9.6 (`doctor`) and the runbook | open |
 | <a id="b-25"></a>B-25 | Close-out wording on an increment's last story (M5 follow-up 2) | T6.4 | **resolved** by [PR #39](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/39) |
