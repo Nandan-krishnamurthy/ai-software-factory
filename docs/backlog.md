@@ -105,7 +105,7 @@ This is the backlog that [03-factory-plan.md](03-factory-plan.md) §5 refers to 
 
 ## Guard gaps
 
-The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` outside the target, the `/tmp` mapping and computed verbs. B-10, B-11, B-14, B-15 and B-28 are not named in T9.5's Build, so whether they belong to T9.5 is a scope decision for that task.
+The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` outside the target, the `/tmp` mapping and computed verbs. B-10, B-11, B-14, B-15 and B-45 (B-28's optional guard block) are not named in T9.5's Build, so whether they belong to T9.5 is a scope decision for that task. B-28 itself was resolved by a standalone task before T8.1.
 
 ### <a id="b-09"></a>B-09 Computed arguments are not analysed
 - **What:** for example `gh pr $(echo merge) 5`.
@@ -162,7 +162,23 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
   6. Optional defence in depth: the guard blocks rewriting `refs/remotes/origin/*` and `remote set-head` in the target.
   7. Unit tests use fakes, with no network; Windows Git Bash and PowerShell, like the rest of the engine.
 - **Source:** found during the review of B-26 ([PR #45](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/45)), 2026-10-22: the code paths above and a `guard.decide` check of the three commands; the `remote set-url` check, 2026-10-23
-- **Status:** verified (the commands are allowed, and the code reads local refs); analysis (the acceptance criteria) · **Owner:** unassigned: T9.5 (guard hardening) or a standalone hardening task sequenced by the human; **due before T8.1** (the headless runner, which runs unattended between gates), the human's decision on 2026-10-23 · **State:** open. ADR-0004 is unchanged; making its "default branch on `origin`" authoritative may call for an amendment or a new ADR.
+- **Standalone task, 2026-10-28:** the human sequenced B-28 as a standalone hardening task before T8.1 (`097efb85#173`, 2026-10-28T10:52:41Z). The task's PR proposes the criteria above as decided, and records the design as [ADR-0005](adr/0005-approved-config-from-github.md) ([task-log.md](task-log.md#b-28-approved-config-from-github-not-local-refs)). For each proposed criterion:
+  1. **Met, via GitHub's API rather than `ls-remote`.** The default branch's name and head come from GitHub for the repository `/factory-target` recorded (`repos/<R>`, `git/ref/heads/<D>`). The config's `default_branch` and `repo` must match, or nothing runs. `ls-remote` was not used for this because it follows the `origin` URL, which `set-url`, `remote.origin.url` and `insteadOf` can change. The clone's `origin` must still be the recorded repository (`check_origin`), because `remote_head` and `fetch` use it.
+  2. **Met.** The config is read through GitHub's contents API at that exact commit. `verify map` and `pr render` need the commit in the clone for their diffs, so they fetch it by its SHA if it is missing, and otherwise nothing runs.
+  3. **Met.** Real-git regression tests cover `update-ref`, `remote set-head`, `symbolic-ref`, a forged `origin/main` not on the remote, and also `git replace` and grafts, which the design found to have the same effect. The factory's git now ignores replace refs and grafts.
+  4. **Met.** `config_source` is `<branch>@<full SHA>`. `verify check`, `verify map`, `verdict check`, `pr render` and `pr check` reject a source that is not the head of GitHub's default branch or an ancestor of it (GitHub's compare API), and evidence recorded before B-28 ("run `verify run` again").
+  5. **Met.** Every GitHub failure, malformed answer or mismatch, a missing config and an unfetchable commit: nothing runs or is accepted, and the reason is stated.
+  6. **Not done** (optional): the guard is unchanged; see [B-45](#b-45).
+  7. **Met.** Unit tests use fakes with no network; the real-git tests use a throwaway local clone and contact no remote.
+- **Status:** verified (the commands are allowed, and the code reads local refs; the fix, by `tests/test_config_source.py`) · **Owner:** standalone hardening task before T8.1 (the human's decisions of 2026-10-23 and 2026-10-28) · **State:** **resolved** by the B-28 PR (on merge); what remains is [B-45](#b-45)
+
+### <a id="b-45"></a>B-45 What B-28 left: an optional guard block, and the clone's own object store
+- **What:**
+  - **The guard still allows repointing the remote-tracking refs** (`update-ref refs/remotes/origin/*`, `remote set-head`, `symbolic-ref refs/remotes/origin/HEAD`, `remote set-url`). B-28 no longer reads any of them, so they change nothing the factory trusts. Blocking them in the target would only be defence in depth (B-28's optional criterion 6), and the project's test code would not pass through the guard anyway.
+  - **Objects already in the clone are not re-hashed when git reads them.** A rewritten loose object, pack or commit-graph file in the target's `.git` could change what a local diff shows (`verify map`, `pr render`). Replace refs and grafts are ignored since B-28, and the approved config itself is read from GitHub, so neither is affected. Candidates: take the diff from GitHub's compare API, or verify the objects involved.
+  - **An older approved config is still accepted.** A `config_source` that is an ancestor of the default branch's head passes, as B-28's criterion 4 states. If a merged PR changes `commands.*` after `verify run`, the evidence names the older commands until S11 step 1 sends the story back to S09 for the new commits. S11 step 1 is station text and reads `origin/<D>` after a fetch. Candidate: also compare the commands and `test_reports` at the evidence's source with those at the head.
+- **Source:** the B-28 design and its probes (git 2.52, 2026-10-28); [ADR-0005](adr/0005-approved-config-from-github.md), "Not decided here"; [S11](../stations/S11-pr.md) step 1
+- **Status:** analysis · **Owner:** T9.5 for the guard block (a scope decision for that task); unassigned for the rest · **State:** open
 
 ## Verification not yet done
 

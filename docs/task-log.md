@@ -33,6 +33,7 @@ Each entry is taken from its PR description and from the session in which the hu
 | `c161a4ca` | `c161a4ca-39de-4e3c-bad1-4ee8caeeadcb` | Documentation migration PRs C and D, T6.5 |
 | `34ce5c38` | `34ce5c38-2316-4d05-b39a-d5a5cf9b33bc` | T7.1, T7.2, T7.3 |
 | `1821c3de` | `1821c3de-0747-4e19-a8a9-4e9b532df1bb` | T7.4, the T7 audit and its follow-up documentation PR |
+| `097efb85` | `097efb85-defc-4f51-af7e-29b021ce53d0` | The pre-T8 assessment, B-28 |
 
 ---
 
@@ -566,3 +567,47 @@ Before the change, every new D-B case and lint failed, and the AC1 fixtures alre
 - **Q6 Scope stays "Not checked"** ([B-08](backlog.md#b-08)). The `Files` bullet is now there to use for it, but wiring it into `pr render` and the issue body was out of P-A's scope.
 - **The review's follow-ups:** [B-38](backlog.md#b-38), [B-39](backlog.md#b-39) and [B-40](backlog.md#b-40).
 - **After merge:** the second review's non-blocking findings (`1821c3de#1385`) are recorded as [B-42](backlog.md#b-42). The M7 milestone is not complete: its demo ([B-37](backlog.md#b-37)) has not been run or recorded in [progress.md](progress.md).
+
+---
+
+## B-28 Approved config from GitHub, not local refs
+
+| | |
+|---|---|
+| **Specification** | [backlog.md](backlog.md#b-28), B-28: "Expected behaviour" and "Proposed acceptance criteria" 1–7 (marked "not decided"). B-28 is a backlog item, not a roadmap task. |
+| **PR** | the B-28 PR, branch `task/B-28-authoritative-config-source`, not merged |
+| **Status** | In review |
+
+**Approved decisions.**
+- **B-28 is due before T8.1,** the human's decision on 2026-10-23 ([backlog.md](backlog.md#b-28)).
+- **B-28 runs as a standalone hardening task before T8.1,** not in T9.5. Its roadmap position is unchanged ([ADR-0001](adr/0001-strict-sequential-roadmap.md)). The human approved this in `097efb85#173` (2026-10-28T10:52:41Z). The same message asked the task to choose the source of truth, to decide on the ADR, and to report any decision that still needs the human.
+
+**Proposed decisions** (analysis; the human decides them by reviewing and merging the PR):
+1. **R-A: GitHub's API is the source of truth.** The default branch's name, its head and the config come from `repos/<R>`, `git/ref/heads/<D>` and `contents/.factory/config.json?ref=<SHA>`, for the repository `/factory-target` recorded. B-28's criterion 1 also allowed `git ls-remote --symref origin HEAD`. That was not chosen, because `ls-remote` follows the `origin` URL, which `remote set-url`, `remote.origin.url` and an `insteadOf` rewrite can all change (B-28's own `set-url` finding).
+2. **R-B: the config is read through GitHub, not from the clone.** `verify run` therefore needs no fetch. `verify map` and `pr render` still need the head commit in the clone for their diffs: they fetch it by its SHA if it is missing (`local_commit`), and otherwise nothing runs.
+3. **R-C: the config must agree.** Its `default_branch` must be the branch GitHub names (B-28 criterion 1), and its `repo` must be the recorded repository (an addition).
+4. **R-D: `origin` must still be the recorded repository** (`check_origin`, an addition). It is compared through `git remote get-url`, which applies `insteadOf`. `remote_head` keeps using `ls-remote origin`, and every consumer runs this check before it.
+5. **R-E: `config_source` is `<branch>@<full SHA>`.** A source counts as approved when it is GitHub's head, or an ancestor of it according to GitHub's compare API (B-28 criterion 4, "a commit of the remote default branch"). The stricter rule, head only, was not chosen: it would also reject evidence after unrelated merges, and S11 step 1 already sends a story back to S09 when the default branch moves. The residual case is recorded in [B-45](backlog.md#b-45).
+6. **R-F: replace refs and grafts are ignored** by every git call the factory makes (`Git._env`). This is an addition. The probes found that `git replace` changes what a commit reads as, contents and parents both, and that a graft file changes its parents. Either could make the approved commit show the story's config, or move a merge base so that a diff hides a change. `GIT_NO_REPLACE_OBJECTS=1` ignores replace refs. `GIT_GRAFT_FILE` points below the null device (`os.devnull`), a path that cannot exist. Pointing it at the null device itself also ignores grafts, but git then prints a deprecation hint on every call.
+7. **R-G: one checked path for consumers.** `check_trusted` is `check` plus `source_problems`. A static test fails if any module other than `evidence.py` calls `evidence.check(` directly, or if any factory code reads `origin/HEAD`, `origin/main` or `refs/remotes`.
+8. **R-H: a new ADR, not an amendment.** An accepted ADR is not rewritten ([README](README.md), "Writing an ADR"), and the decision spans tasks: T8.1's runner and T9's target-root invocation both rely on it. So the decision is recorded as [ADR-0005](adr/0005-approved-config-from-github.md), and ADR-0004's Status names the part it supersedes. The rest of ADR-0004 stands.
+9. **R-I: criterion 6, the optional guard block, is not done.** The fix reads no local ref, the project's test code bypasses the guard anyway, and guard hardening belongs to T9.5 ([B-45](backlog.md#b-45)).
+
+**Deviations from B-28's proposed criteria:**
+- **Criterion 1:** GitHub's API rather than `ls-remote` (R-A). Criterion 1 allowed either.
+- **Criterion 3:** the replace-ref and graft cases are added (R-F).
+- **Criterion 2:** the config is read from GitHub, not from the commit in the clone. The commit is fetched only for the diffs (R-B).
+
+**Evidence:**
+- **Tests:** `tests/test_config_source.py` (40 tests). The suite went from 1030 tests to 1070 (5 skipped, as before), and `ruff` is clean.
+- **Tests first:** before the change, the new tests failed or errored (`run_verification` took no GitHub source). The replace-ref and graft tests failed on their assertions: the old code read the forged config and the shortened diff.
+- **Changed existing tests:** the fakes now serve the approved config from GitHub (`ApprovedOnGitHub` in `tests/test_evidence.py`), and the expectations changed:
+  - `config_source` is `main@<full SHA>`;
+  - `verify map`'s diff base is GitHub's head SHA (`test_acmap`);
+  - `test_unknown_default_branch_runs_nothing` now fails on GitHub, not on `origin/HEAD`;
+  - `test_ci_runs_are_read_when_required` sets GitHub's config instead of the clone's copy of the base (`test_prbody`).
+
+**Handed on:**
+- [B-45](backlog.md#b-45): the optional guard block (T9.5); the clone's own object store; an older approved config accepted until S11 step 1 notices that the default branch moved.
+- **Evidence recorded before B-28 is rejected** ("run `verify run` again"). No story was in progress: Task Tracker was at `INCREMENT_COMPLETE`, and both M7 sandboxes were at Gate A ([progress.md](progress.md#m7-plans--target-knowledge)).
+- **Not run live.** The first live run is the next `verify run` on a target, at the latest T8.1's demo.
