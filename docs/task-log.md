@@ -575,7 +575,7 @@ Before the change, every new D-B case and lint failed, and the AC1 fixtures alre
 | | |
 |---|---|
 | **Specification** | [backlog.md](backlog.md#b-28), B-28: "Expected behaviour" and "Proposed acceptance criteria" 1–7 (marked "not decided"). B-28 is a backlog item, not a roadmap task. |
-| **PR** | the B-28 PR, branch `task/B-28-authoritative-config-source`, not merged |
+| **PR** | [#56](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/56), branch `task/B-28-authoritative-config-source`, not merged |
 | **Status** | In review |
 
 **Approved decisions.**

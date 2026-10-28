@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| **Status** | Proposed in the B-28 PR; accepted when the human merges it |
-| **Decided** | 2026-10-23: B-28 is due before T8.1 ([backlog.md](../backlog.md#b-28)). 2026-10-28: B-28 runs as a standalone hardening task before T8.1 (`097efb85#173`, 2026-10-28T10:52:41Z). The design below is proposed in the PR and decided by its merge |
+| **Status** | Proposed in [PR #56](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/56); accepted when the human merges it |
+| **Decided** | 2026-10-23: B-28 is due before T8.1 ([backlog.md](../backlog.md#b-28)). 2026-10-28: B-28 runs as a standalone hardening task before T8.1 (`097efb85#173`, 2026-10-28T10:52:41Z). The design below is proposed in PR #56 and decided by its merge |
 | **Recorded** | 2026-10-28 |
 | **Scope** | Where `verify run`, `verify check`, `verify map`, `verdict check`, `pr render` and `pr check` find the approved `.factory/config.json`, and the default-branch commit their diffs are taken against |
 | **Supersedes** | Where [ADR-0004](0004-configured-commands-bash-approved-only.md) decision 2 reads the default branch from (`origin/HEAD`). The rest of ADR-0004 stands |
