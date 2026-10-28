@@ -510,3 +510,119 @@ All are in the [backlog](backlog.md), under "M6 demo findings".
 - The target was deactivated to write this record (rule S3): `.factory-local/target.json` and `.claude/settings.local.json` were removed, and `factory.py target show` reports "no active target".
 - **Task Tracker** is at **`IDLE_AT_GATE_C`** in increment `003-priority-filter`: `main` at 74214dd, clean; #34 done; #35 (STORY-016) and #36 (STORY-017) ready. Run `/factory-target C:\Projects\task-tracker-factory-test` before the next factory command.
 - The factory never merged anything or pushed to `main` in any repo.
+
+---
+
+## M7: Plans & Target Knowledge
+
+| | |
+|---|---|
+| **Demo run** | 2026-10-26 to 2026-10-28, in three phases with waits for the human between them: **A** 2026-10-26 10:52–11:04 UTC; **B** 2026-10-27 08:37–08:53 UTC; **C** 2026-10-27 10:25 UTC to 2026-10-28 07:52 UTC |
+| **Targets** | **A:** `Nandan-krishnamurthy/factory-sandbox-m7-md` (new, private, `C:\Projects\factory-sandbox-m7-md`). **B:** `Nandan-krishnamurthy/factory-sandbox-m7-pdf` (new, private, `C:\Projects\factory-sandbox-m7-pdf`). **C:** `Nandan-krishnamurthy/task-tracker-factory-test` (`C:\Projects\task-tracker-factory-test`), increment `003-priority-filter` complete at `e89fbb2`. Both sandboxes were created by the human for this demo (decision D1); the old `factory-sandbox` was not used or changed. |
+| **Inputs** | **A:** a Word Count CLI PRD, committed as `docs/prd.md` (blob `881db2c`, commit `1f6357b`). **B:** the same text as a 2-page text PDF, `docs/prd.pdf` (blob `d244747`, commit `b9f4aed`), made by the human from an HTML rendering of the Markdown. **C:** a change request kept outside the target, `C:\Projects\task-tracker-cr-004.md` (1469 bytes, SHA-256 `7312fbd8…9820`): FR-017 "The user can edit a task's priority", FR-018 "A task due today shows a 'Due today' badge", and 7 open questions. It was drafted by the assistant at the human's request, limited to decision D3's sentence, and approved and saved by the human. |
+| **Factory code** | `main` at `e12d7e5` (T7.1–T7.4 and PR #54 merged) for the whole demo; `python -m unittest` (1030 tests, 5 skipped) and `ruff` green at the preflight. The factory's tracked files did not change. |
+| **Sources** | The plan and decisions D1–D5 were agreed in session `1821c3de-0747-4e19-a8a9-4e9b532df1bb` (`1821c3de#1908`, the plan; `1821c3de#1911`, 2026-10-26T09:52:28Z, D1–D5). Phases B–D ran in session `858cb907-3941-4fd9-9207-a215d434e3d4`. Command outputs were saved in session `1821c3de`'s scratchpad folder `m7-demo` (outside the repository), indexed by `phaseB-evidence.md` and `phaseC-evidence.md`. |
+| **Result** | ✅ **The roadmap's M7 demo was shown, with one documented deviation and one deferral.**<br>• **New project, Markdown and PDF:** both route S00 → **S02**, S00 creates the labels, and the IDs start at `REQ-001`/`STORY-001`.<br>• **Task Tracker increment 004:** S01 created `knowledge.md`; prose ID mentions did not move the numbering; `plan check` flagged overlaps with Done requirements, which S05 resolved as Open questions; one story was merged; S12 posted the Knowledge base paragraph.<br>• **Deviation:** S12 reports on `knowledge.md` and commits nothing to it (decision K-A), where the roadmap says "updated by S12".<br>• **Deferred (D4):** "the second increment's S01 reuses and updates the file" (T7.3 AC1) needs a later increment. |
+
+### Tasks
+The PR numbers in this table are pull requests of `ai-software-factory`.
+
+| Task | `ai-software-factory` PR | Status |
+|---|---|---|
+| T7.1 ID allocation from structured sources only | [#50](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/50) | merged |
+| T7.2 Intake and project detection | [#51](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/51) | merged |
+| T7.3 Target knowledge base | [#52](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/52) | merged |
+| T7.4 Plan lint and overlap detection | [#53](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/53) | merged |
+| T7 follow-ups (merged statuses, review findings, knowledge-base station lint) | [#54](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/54) | merged. **M7 is complete** once this record is merged. |
+
+### Demo steps and results (roadmap §M7)
+
+**Phase A: new project with a Markdown PRD, 2026-10-26** (approved at `1821c3de#2035`, 10:52:42Z)
+
+| Step | Result |
+|---|---|
+| `/factory-target` | ✅ `target set` OK. `doctor`: the only `FAIL` was `labels` (all 9 missing), plus two expected `WARN`s: `config`, and `branch protection` (HTTP 403 on a private free-plan repo). State `UNCONFIGURED` |
+| S00 | ✅ **`labels ensure` before `doctor`:** `9 created, 0 updated, 0 unchanged`, then `doctor` `labels OK`, 0 failed. `increment next` → `001-initial`, `REQ-001`, `STORY-001`. `00-prd.md` is a byte-identical copy (`cmp`; both blobs `881db2c`). State `PLANNING`, next **S02, not S01**. Commit `432da7c` (10:55:38Z) |
+| S02–S04 | ✅ REQ-001..REQ-016 (10 PRD headings, 10 coverage rows); architecture and plan, M1 the walking skeleton. Commits `7adbb8b`, `d6f76e0`, `6d4dbb9` |
+| S05 | ✅ `issues sync --dry-run`: `5 to create`. `plan check`: **`Result: PASS`**, estimates 212, 200, 105, 115 and 115 lines (limit 400), 0 problems, **0 Done requirements compared**. Commit `254c03f` (11:03:14Z) |
+| Gate A | ✅ [Planning PR #1](https://github.com/Nandan-krishnamurthy/factory-sandbox-m7-md/pull/1) at 11:03:55Z, labelled `factory:planning`, the dry run and `plan check` embedded. State `GATE_A_WAITING`. ⚠️ A fresh `plan check` on the plan branch differs from the embedded copy ([B-43](backlog.md#b-43)) |
+
+PR #1 was left open and unmerged, as the plan says. The target was deactivated on the human's approval (`1821c3de#2285`, 2026-10-27T08:10:30Z), after checking both files and saving copies.
+
+**Phase B: new project with a PDF PRD, 2026-10-27** (`858cb907#2`, 08:37:20Z)
+
+| Step | Result |
+|---|---|
+| `/factory-target`, `/factory-status` | ✅ As in Phase A: the only `FAIL` was `labels`; `UNCONFIGURED`; next IDs `REQ-001`, `STORY-001`, next increment `001-initial`, no warnings |
+| S00 | ✅ `labels ensure` (9 created) before `doctor` (0 failed). The PDF had extractable text on both pages, no images, annotations or form fields, so S00 transcribed it rather than stopping. `00-prd.md` starts with `<!-- factory:prd-source`: `Source: prd.pdf`, `Location: docs/prd.pdf at commit b9f4aed`, `Blob: d24474720368bfa72bbe623f3c7743c05b286ae7`, the PDF provenance statement, and `Not reproduced:` (the inline bold and monospace styles, fonts, table borders, bullet shapes and page layout). State `PLANNING`, next **S02**. Commit `3c2f0ec` (08:43:41Z) |
+| Transcription checks | ✅ **The hand check:** `git hash-object docs/prd.pdf` and the blob in `main`'s tree both equal the header's `Blob`, and the commit matches `git log -1 -- docs/prd.pdf`.<br>✅ **Wording:** 518 of 518 words match the PDF's extracted text, in order.<br>✅ **Against the approved `prd.md`:** after removing only blank lines and the `**`/backticks the header declares not reproduced, 42 of 42 non-blank lines are identical. 10/10 headings, 19/19 list items, 10/10 table rows |
+| S02–S05 | ✅ REQ-001..REQ-016, five stories (218, 118, 102, 97 and 175 lines). `plan check` **PASS**, 0 compared. Commits `be47d53`, `7b20c9f`, `3ad9b16`, `899fc04` |
+| Gate A | ✅ [Planning PR #1](https://github.com/Nandan-krishnamurthy/factory-sandbox-m7-pdf/pull/1) at 08:52:04Z; `GATE_A_WAITING`. `increment show` then gives `REQ-017`, `STORY-006`: the open plan's IDs are reserved. ⚠️ The same `plan check` mismatch as Phase A ([B-43](backlog.md#b-43)) |
+| B-35 | ⏭️ **Not run** ([B-35](backlog.md#b-35)). It needs the human to close this Planning PR unmerged and delete its branch, and the human's Phase B instruction was that the PR stays open and unmerged (`858cb907#2`). Decision D5 had authorised B-35 on this sandbox, but the later instruction took precedence |
+
+PR #1 was left open. The target was deactivated after checking the two files and saving copies.
+
+**Phase C: Task Tracker increment 004, 2026-10-27 to 2026-10-28**
+
+| Step | Result |
+|---|---|
+| Preflight | ⚠️ Three attempts stopped before anything was activated:<br>• the change-request file did not exist (P4 is the human's step);<br>• it was still missing after the human reported saving it. The guard blocked the assistant's write to `C:\Projects\task-tracker-cr-004.md` with no active target, as designed, so the approved text went to the scratch folder and the human copied it into place;<br>• an untracked `docs/task-tracker-cr-004.md` (the same text, with CRLF line endings) was in the factory repo, and the human removed it.<br>The fourth preflight passed (`858cb907#668`, 10:25:13Z) |
+| C1 | ✅ `doctor` 0 `FAIL`, 1 `WARN` ([B-24](backlog.md#b-24)); `INCREMENT_COMPLETE` (003); `increment show` → `REQ-037`, `STORY-018`, no warnings; `knowledge check` → `missing` |
+| S00 | ✅ `labels ensure` (9 unchanged) then `doctor`; `increment next --slug edit-priority-due-today` → `004-edit-priority-due-today`; `00-prd.md` copied unchanged (blob `71e8e8e`); next **S01**. Commit `54bd184` (10:29:43Z) |
+| S01 | ✅ Baseline **green**: install, build, typecheck and `npm test` exited 0 (Vitest 158 passed, Playwright 89 passed); lint `null`. **S01 created `docs/factory/knowledge.md`**, reusing 003's analysis (K-D): header `checked=e89fbb2…`, the eight sections in order, and Architecture decisions links `001`, `002` and `003/03-architecture.md`. `knowledge check` → **`fresh`, `"ok": true`**. Commit `2ccaef1`. `doctor` failed once before that commit, only on `working tree` (the three files S01 had just written) |
+| C3 prose IDs | ✅ After S01, `increment show` still gave `REQ-037`, `STORY-018`, `"warnings": []`, although the new files mention REQ-010, REQ-018 to REQ-024, REQ-026 and REQ-031 in prose. No file names a future ID, so the warning path was not exercised |
+| S02 | ⏸️ **Stop under rule H6:** FR-017 restates REQ-010 (Done, PR #22), and names nothing beyond it. The human chose to treat it as already delivered (`858cb907#917`, 10:44:58Z): Out of scope, REQ-010 protected, the decision recorded under Current system as in 002. REQ-037 and REQ-038 written. Commit `4a157ca` |
+| S03–S04 | ✅ `isDueToday` derived at render time, like "Overdue"; one milestone. Commits `f46d7f5`, `720fa94`. One `state` call timed out on GitHub (`gh api …/branches`, 60 s); the retry succeeded |
+| S05 | ✅ `plan check` first run: **FAIL, 0 problems, 3 unresolved overlaps** (REQ-037 ~ REQ-022 1.000; REQ-038 ~ REQ-022 0.827; REQ-038 ~ REQ-023 0.827). S05 judged none a restatement and added Open questions 8 and 9; the re-run **PASS**. [Planning PR #40](https://github.com/Nandan-krishnamurthy/task-tracker-factory-test/pull/40) at 12:18:39Z. A fresh run on the plan branch was **identical** to the embedded one |
+| C4 | 🟡 `02`, `03` and `04` cite `knowledge.md` for the conventions they follow; `05-stories.md` does not. The same session wrote the knowledge base and these documents, so this shows use, not that a separate reader learned from it |
+| Gate A `/changes` round 1 | ✅ The human's `/changes` at 12:34:52Z: active tasks only, "Overdue" at midnight without a refresh, update on due-date edits, keep FR-017 out, keep the REQ-022/023 findings. S05 revision: REQ-037/038 revised, new REQ-039 and REQ-040, REQ-022 recorded as changed by REQ-039, Open question 10 added. `plan check` failed on 2 new pairs (REQ-038 ~ REQ-024 0.541, REQ-040 ~ REQ-025 0.924), resolved as Open questions 11 and 12, then **PASS**. Commit `e292177`, reply at 13:08:02Z |
+| Gate A `/changes` round 2 | ✅ The human's `/changes` at 13:29:23Z answered Open question 10 and asked for one test of both midnight behaviours. New REQ-041; AC3 extended; estimate 385 of 400. `plan check` **PASS** on the first run. Commit `e82101e`, reply at 13:34:00Z. Fresh runs matched the embedded output in both rounds |
+| Merge → S05b | ✅ The human merged PR #40 at 13:38:08Z (`9bdf5d9`); `issues sync` created **#41** (STORY-018) at 13:39:45Z; `IDLE_AT_GATE_C` |
+| S06–S08 | ✅ `pick` → #41; branch `story/41-due-today-label` (`a4a3bc3`); `4bf90a2`: `isDueToday`, `msUntilNextMidnight`, an injected `setTimer` in the controller, the label and its style (11.4:1). `build` and `typecheck` passed |
+| S09 | ✅ `03aabd8` added 11 unit and 5 e2e tests. `verify run`: **FAILING**, the 4 new e2e tests, because the spec's row helper was rooted at the task list. Fix attempt 1 of 3 (`3c2a21e`, the test file only): **OK** (Vitest 169, Playwright 94) |
+| S10 | ✅ `verify map`: AC1–AC5 → 16 tests, all passed. The `ac-verifier` subagent: 5 pass, `Suite: pass`. `verdict check`: `OK` |
+| S11, first try | ⏸️ **`pr render` stopped on rule H3:** the S09 commit had widened the existing import on line 2 of `src/app/controller.test.ts` without a `Changed test:` line. The factory asked on #41 (06:48:15Z on 2026-10-28) and labelled it `factory:needs-human`; no PR was opened |
+| Human | Chose option 2 on #41 (06:53:43Z): restore the line and import the new names on a separate, added line; removed the label |
+| S11 → S09 → S10 → S11 | ✅ S11's documented hand-back to S09 ([B-44](backlog.md#b-44)). `fad92c6`; `verify run` OK; a fresh verifier, 5 pass; `pr render` **OK, every gate passed**; [PR #42](https://github.com/Nandan-krishnamurthy/task-tracker-factory-test/pull/42) at 07:06:31Z; traceability for REQ-037..REQ-041 (`88cb913`) |
+| S11 step 7 | ⚠️ `verify run` on `88cb913` (documentation only): **FAILING**, Vitest could not start a worker for `render.test.ts` (131 of 131 that ran passed; Playwright did not run): [B-32](backlog.md#b-32) again. The factory recorded S11 → S09 and stopped instead of retrying |
+| Authorised re-run | ✅ On the human's go-ahead (`858cb907#1969`, 07:13:55Z), S09 re-ran `verify run` on the same `88cb913`: **OK** (Vitest 169, Playwright 94). S10: map OK, a fresh verifier 5 pass, `verdict check` OK. S11: `pr check 42` **OK**, Q7 333 of 400, #41 `status:in-review`, `GATE_B_WAITING_REVIEW` |
+| Merge → S12 (C8) | ✅ The human merged PR #42 at 07:38:05Z (`51c3ae9`). `closeout`: last story of the increment, nothing unblocked. Local branch deleted (it matched the merged head). The summary (07:41:08Z) has a **Knowledge base** paragraph: REQ-037..REQ-041 and PR #42, and `knowledge check` → **`stale`** (Hotspots, Architecture decisions, Known risks). **S12 committed nothing** (K-A). #41 `CLOSED`, `status:done`; state **`INCREMENT_COMPLETE`**; 41 of 41 requirements Done |
+| C9 | ✅ Deactivated on the human's approval (`858cb907#2104`), after checking both files and saving copies |
+
+Every factory commit carries its `Factory-Station:` trailer. The guard blocked commands with an unexpanded variable or a computed command name several times; each was re-run with literal paths and commands, as designed. The factory never merged anything or pushed to `main`: Planning PR #40 and story PR #42 were merged by the human, and both sandbox Planning PRs are still open.
+
+### Findings
+1. **S05 embeds a `plan check` that a fresh run cannot reproduce on a first increment** ([B-43](backlog.md#b-43)). In Phases A and B the embedded output has a `Notes:` line ("No docs/factory/traceability.md…") that a fresh run on the plan branch does not, because step 3 runs before step 4 creates the matrix. The result is the same (`PASS`); only the text differs. It did not happen in 004, where the matrix already exists.
+2. **The real overlap was caught by S02, not by `plan check`.** FR-017 restates REQ-010, and S02 stopped under H6. Option A then kept it out of the requirements, so `plan check` never compared it. What `plan check` flagged were the new "Due today" requirements against 002's "Overdue" ones: related work, not duplicates ([B-37](backlog.md#b-37), [B-40](backlog.md#b-40)).
+3. **H3 caught an undeclared change outside any test** ([B-30](backlog.md#b-30)): a widened import in an existing test file, made by the factory itself in S09. The human chose option 2, which avoided the change rather than declaring it.
+4. **Returning from an S11 stop to S09 is not described** ([B-44](backlog.md#b-44)). After the H3 question was answered, the state engine named S11 again, which would have hit the same problem. The fix needed S09. The assistant used S11's own `--next S09` hand-back, and S09 has no mode for re-verifying an unchanged commit (its step 3 always commits a log line).
+5. **The Vitest cold-start timeout struck the final-commit check** ([B-32](backlog.md#b-32)). The factory reported it and did not retry until the human authorised it.
+6. **The knowledge base is stale at close-out by design.** At S12, `knowledge check` reports Hotspots, Architecture decisions and Known risks stale against `e89fbb2`, because the increment changed the code and its `03-architecture.md` is not linked yet. Under K-A the next S01 updates them; until then the file describes the target as it was before 004 ([B-36](backlog.md#b-36)).
+
+### Not demonstrated in this run
+- **T7.3 AC1, "the second increment's S01 reuses and updates the file":** S01 only created `knowledge.md`. Deferred to the next real increment, without a demo-only increment 005 (decision D4, `1821c3de#1911`). The file is now `stale`, which is the input that run needs.
+- **B-35**, the closed and deleted Planning PR read against live GitHub (above).
+- **The timed traceability walk by a human** ([B-17](backlog.md#b-17)).
+
+### Follow-ups (open)
+All are in the [backlog](backlog.md), under "M7 demo findings" and on the items named.
+1. [B-43](backlog.md#b-43): S05's `plan check` output on a first increment.
+2. [B-44](backlog.md#b-44): returning from an S11 stop to S09, and re-verifying an unchanged commit.
+3. [B-30](backlog.md#b-30): a change outside any test, made by the factory, again needed a stop-and-ask round.
+4. [B-32](backlog.md#b-32): the Vitest cold-start timeout, seen now in the M6 and M7 demos and, before them, in the B-26 integration.
+5. [B-35](backlog.md#b-35), [B-36](backlog.md#b-36) (the update half) and [B-40](backlog.md#b-40) (the measured flags) stay open.
+
+### Observations
+- **Timings:** Phase A, S00 → Gate A in 8 min (10:55–11:04); Phase B, 8 min (08:43–08:52); increment 004, S00 → Planning PR in 1 h 49 min (10:29–12:18, including the S02 question), two Gate A rounds (33 and 5 min from comment to reply), and the story from `pick` to PR #42 across a night (13:44 to 07:06, including the H3 question). The waits for the human are not factory time.
+- **Two Gate A rounds on one PR** each closed with one marked reply, `feedback` `PENDING` with 0 items, and the IDs continued from `increment show` (REQ-039, REQ-040, then REQ-041); nothing was renumbered.
+- **One checkout, three targets:** the factory's tracked files never changed (`e12d7e5` throughout); only the gitignored target pointer and `.claude/settings.local.json` were written and removed for each target. The stray `docs/task-tracker-cr-004.md` was the human's save, not the factory's.
+- **The PDF transcription** used `pdftotext` and `pypdf`, because the Read tool could not render PDFs on this machine (no poppler). S00 names no tool, and none was installed.
+- **Size:** STORY-018 was estimated at 385 lines and landed at 333 (Q7), including `.factory/log.md` and the traceability rows ([B-33](backlog.md#b-33)).
+- **Environment:** several commands needed a second attempt after a transient auto-mode classifier error, and one `gh api` call timed out. Neither changed a result.
+- The remote branches `factory/plan-004-edit-priority-due-today` and `story/41-due-today-label` are still on GitHub, like earlier ones.
+
+### Cleanup and hand-off
+- Every target was deactivated after its phase (rule S3): `.factory-local/target.json` and `.claude/settings.local.json` were checked, copied, then deleted, and `factory.py target show` reports "no active target".
+- **Task Tracker** is at **`INCREMENT_COMPLETE`** (`004-edit-priority-due-today`): `main` at `51c3ae9`, clean; 1 of 1 story done; 41 of 41 requirements Done; next IDs `REQ-042`, `STORY-019`; `knowledge.md` `stale`, for the next S01.
+- **`factory-sandbox-m7-md`** and **`factory-sandbox-m7-pdf`** are at `GATE_A_WAITING` with their Planning PRs (#1 each) open. They are kept until the human decides on cleanup.
+- The factory never merged anything or pushed to `main` in any repo.

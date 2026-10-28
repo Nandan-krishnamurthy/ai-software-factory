@@ -25,13 +25,13 @@ Task Tracker is a TypeScript + Vite web app tested with Vitest and Playwright. N
 | # | Criterion | How it is proven | Status |
 |---|---|---|---|
 | 1 | New project: Planning PR, issues, ≥ 3 stories, tests green on `main` after each merge | Increment `001-initial` | ✅ M2 + M4 and increment 001: Planning PR #1, issues #2–#13, **12 stories** merged (PRs #14–#25) |
-| 2 | Existing project: Codebase Discovery, then ≥ 1 story that follows existing conventions | Increment `002-…` (M5 demo) | ⏳ To run |
+| 2 | Existing project: Codebase Discovery, then ≥ 1 story that follows existing conventions | Increment `002-…` (M5 demo) | ✅ M7 demo, increment `004-edit-priority-due-today`: S01 (baseline green, knowledge base created), then STORY-018 merged as PR #42 following the recorded conventions. Increments 002 and 003 ran S01 too (M5 and M6 records) |
 | 3 | Resume (a) during implementation, (b) at Gate B, (c) approved but not merged | Kill and restart sessions | ✅ (a), (b) in M4. (c): see §3, to run |
-| 4 | Gates respected: never merges, never starts a story without `continue` | Every run, plus the checks in §4 | ✅ M4, re-checked in §4 |
+| 4 | Gates respected: never merges, never starts a story without `continue` | Every run, plus the checks in §4 | ✅ M4, re-checked in §4; held again in the M7 demo (PRs #40 and #42 merged by the human; S06 ran only under `/factory-continue`) |
 | 5 | Rework: `/changes` → every comment addressed on the same PR | Task Tracker PR #22 | ✅ M4 step 3 |
 | 6 | Traceability: a merged line → PR → issue → REQ → PRD section, in under a minute | Timed walk | 🟡 Chain verified, not yet timed |
-| 7 | Reviewability: a PR reviewable in ~15 min; AC evidence accurate; no false "tests passed" | Review log over the story PRs | 🟡 Evidence on every PR; review times not recorded |
-| 8 | Reusability: nothing Task Tracker-specific in the factory; one checkout, two targets | `tests/test_reusability.py` plus §8 | ✅ T5.4 (this runbook's PR) |
+| 7 | Reviewability: a PR reviewable in ~15 min; AC evidence accurate; no false "tests passed" | Review log over the story PRs | 🟡 Evidence on every PR; review times not recorded (M7: PR #42, 333 of 400 lines, `pr check` OK) |
+| 8 | Reusability: nothing Task Tracker-specific in the factory; one checkout, two targets | `tests/test_reusability.py` plus §8 | ✅ T5.4 (this runbook's PR); M7 demo: one checkout (`e12d7e5`), three targets, no factory file changed |
 
 ---
 
