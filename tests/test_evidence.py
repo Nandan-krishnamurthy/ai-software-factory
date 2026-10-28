@@ -1,5 +1,6 @@
 """T6.1: the evidence ledger (`verify run` / `verify check`)."""
 
+import base64
 import contextlib
 import io
 import json
@@ -43,32 +44,48 @@ class FakeRunner:
         return ProcessResult(["sh", "-c", command], code, output, "")
 
 
-def config_json(commands):
-    return json.dumps({"schema": 1, "project": "app", "repo": REPO, "default_branch": "main",
+def config_json(commands, repo=REPO):
+    return json.dumps({"schema": 1, "project": "app", "repo": repo, "default_branch": "main",
                        "reviewers": ["me"], "commands": commands})
+
+
+REMOTE_URL = f"https://github.com/{REPO}.git"
 
 
 class FakeGitRepo:
     """A git transport for ``Git``: a branch, a HEAD, a working tree and an origin whose
-    default branch (``origin/main`` @ ``MAIN``) holds the approved config."""
+    default branch (``MAIN`` on GitHub, see ``ApprovedOnGitHub``) holds the approved
+    config. ``commits``: the commits the clone has (``fetch`` adds ``fetchable`` ones)."""
 
     def __init__(self, *, branch="story/27-x", heads=(SHA,), dirty=(), status_after=(),
-                 remote=None, approved=COMMANDS, origin_head="origin/main"):
+                 remote=None, approved=COMMANDS, name=REPO, origin_url=None,
+                 commits=(SHA, OTHER, MAIN), fetchable=()):
         self.branch, self.heads = branch, list(heads)
         self.statuses = [list(dirty), list(status_after)]
         self.remote = remote or {}
-        self.approved, self.origin_head = approved, origin_head
+        self.approved, self.name = approved, name
+        self.origin_url = f"https://github.com/{name}.git" if origin_url is None else origin_url
+        self.commits, self.fetchable = set(commits) | set(heads), set(fetchable)
+        self.fetches: list[str] = []
 
     def __call__(self, argv, *, timeout, cwd=None, env=None, input=None):
         args = argv[3:]  # git -C <dir> …
         if args[:2] == ["symbolic-ref", "--quiet"]:
             return self._out(self.branch + "\n") if self.branch else self._fail()
-        if args == ["rev-parse", "--abbrev-ref", "origin/HEAD"]:
-            return self._out(self.origin_head + "\n") if self.origin_head else self._fail()
-        if args[0] == "rev-parse" and "origin/main^{commit}" in args:
-            return self._out(MAIN + "\n")
+        if args == ["remote", "get-url", "origin"]:
+            return self._out(self.origin_url + "\n") if self.origin_url else self._fail()
+        if args[:2] == ["cat-file", "-e"]:
+            return self._out("") if args[2].removesuffix("^{commit}") in self.commits \
+                else self._fail()
+        if args[0] == "fetch":
+            self.fetches.append(args[-1])
+            if args[-1] in self.fetchable:
+                self.commits.add(args[-1])
+                return self._out("")
+            return self._fail()
         if args == ["show", f"{MAIN}:.factory/config.json"]:
-            return self._out(config_json(self.approved)) if self.approved else self._fail()
+            return self._out(config_json(self.approved, self.name)) if self.approved \
+                else self._fail()
         if args[0] == "rev-parse":
             return self._out((self.heads.pop(0) if len(self.heads) > 1 else self.heads[0])
                              + "\n")
@@ -86,6 +103,92 @@ class FakeGitRepo:
     @staticmethod
     def _fail():
         return ProcessResult([], 1, "", "")
+
+
+NOT_FOUND = ProcessResult([], 1, "", "gh: Not Found (HTTP 404)")
+
+
+class ApprovedOnGitHub:
+    """GitHub's answers about the target's default branch (B-28): its name, its head
+    commit, the approved config at that commit, and whether an older commit is on it.
+
+    The config is the one ``repo`` (a ``FakeGitRepo``) holds at ``MAIN``, so a test that
+    changes the approved commands changes what GitHub serves; ``config`` (text) overrides
+    it. ``on_branch``: older commits of the default branch. ``fail``: kind (``repo``,
+    ``head``, ``config``, ``compare``) to a ``ProcessResult`` or an exception. Any other
+    call goes to ``inner``."""
+
+    def __init__(self, repo=None, *, inner=None, name=None, branch="main", head=MAIN,
+                 config=None, on_branch=(), fail=None):
+        self.repo, self.inner, self.branch, self.head = repo, inner, branch, head
+        self.name = name or (repo.name if repo is not None else REPO)
+        self.config, self.on_branch, self.fail = config, set(on_branch), fail or {}
+        self.calls: list[str] = []
+
+    def __call__(self, argv, *, timeout, cwd=None, env=None, input=None):
+        args = list(argv[1:])
+        kind = self._kind(args)
+        if kind is None:
+            if self.inner is None:
+                raise AssertionError(f"unexpected gh call: {args}")
+            return self.inner(argv, timeout=timeout, cwd=cwd, env=env, input=input)
+        self.calls.append(kind)
+        if kind in self.fail:
+            outcome = self.fail[kind]
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+        return self._answer(kind, args[1])
+
+    def _kind(self, args):
+        if args[:1] != ["api"]:
+            return None
+        endpoint = args[1]
+        if endpoint == f"repos/{self.name}":
+            return "repo"
+        for kind, prefix in (("head", "git/ref/heads/"),
+                             ("config", "contents/.factory/config.json?ref="),
+                             ("compare", "compare/")):
+            if endpoint.startswith(f"repos/{self.name}/{prefix}"):
+                return kind
+        return None
+
+    def config_text(self):
+        if self.config is not None:
+            return self.config
+        if self.repo is None:
+            return config_json(COMMANDS, self.name)
+        result = self.repo(["git", "-C", "/t", "show", f"{MAIN}:.factory/config.json"],
+                           timeout=60)
+        return result.stdout if result.returncode == 0 else None
+
+    def _answer(self, kind, endpoint):
+        tail = endpoint.removeprefix(f"repos/{self.name}/")
+        if kind == "repo":
+            return self._ok({"full_name": self.name, "default_branch": self.branch})
+        if kind == "head":
+            if tail != f"git/ref/heads/{self.branch}":
+                return NOT_FOUND
+            return self._ok({"ref": f"refs/heads/{self.branch}",
+                             "object": {"type": "commit", "sha": self.head}})
+        if kind == "config":
+            sha = tail.rsplit("=", 1)[1]
+            text = self.config_text() if sha in {self.head} | self.on_branch else None
+            if text is None:
+                return NOT_FOUND
+            return self._ok({"type": "file", "encoding": "base64", "path":
+                             ".factory/config.json",
+                             "content": base64.encodebytes(text.encode()).decode()})
+        old, _, new = tail.removeprefix("compare/").partition("...")
+        if new != self.head:
+            return NOT_FOUND
+        if old == new:
+            return self._ok({"status": "identical"})
+        return self._ok({"status": "ahead" if old in self.on_branch else "diverged"})
+
+    @staticmethod
+    def _ok(data):
+        return ProcessResult([], 0, json.dumps(data), "")
 
 
 class Clock:
@@ -109,14 +212,16 @@ def working_tree(commands) -> Path:
     return path
 
 
-def run(approved=COMMANDS, branch="same", runner=None, repo=None, **kwargs):
-    """``verify run`` with ``approved`` commands on origin/main and ``branch`` commands in
-    the working tree (``"same"``: unchanged; ``None``: no config on the branch)."""
+def run(approved=COMMANDS, branch="same", runner=None, repo=None, github=None, **kwargs):
+    """``verify run`` with ``approved`` commands on the default branch (on GitHub, at
+    ``MAIN``) and ``branch`` commands in the working tree (``"same"``: unchanged;
+    ``None``: no config on the branch)."""
     runner = runner or FakeRunner()
     repo = repo or FakeGitRepo(approved=approved)
     path = working_tree(repo.approved if branch == "same" else branch)
     result = evidence.run_verification(
-        path, issue=27, repo=REPO, git=Git(path, transport=repo), runner=runner,
+        path, issue=27, repo=REPO, git=Git(path, transport=repo),
+        gh=Gh(transport=github or ApprovedOnGitHub(repo)), runner=runner,
         clock=Clock(), now=lambda: datetime(2026, 10, 8, 9, 0, tzinfo=UTC), **kwargs)
     return result, runner
 
@@ -134,7 +239,7 @@ class RunVerificationTest(unittest.TestCase):
         cwds = {call[1] for call in runner.calls}
         self.assertEqual(len(cwds), 1)  # all in the target's working tree
         self.assertTrue((cwds.pop() / ".factory" / "config.json").is_file())
-        self.assertEqual(result.config_source, "origin/main@3333333")
+        self.assertEqual(result.config_source, f"main@{MAIN}")
 
     def test_pass_records_command_exit_duration_sha_tail_and_summary(self):
         runner = FakeRunner({"npm test": (0, " Test Files  7 passed (7)\n"
@@ -470,7 +575,8 @@ class CliTest(unittest.TestCase):
         out = io.StringIO()
         with mock.patch.object(target, "get_target",
                                return_value=target.Target(self.path, REPO)), \
-                mock.patch.object(cli, "Gh", lambda: Gh(transport=self.github)), \
+                mock.patch.object(cli, "Gh", lambda: Gh(
+                    transport=ApprovedOnGitHub(self.repo, inner=self.github))), \
                 mock.patch.object(cli, "Git", lambda p: Git(p, transport=self.repo)), \
                 mock.patch.object(evidence, "run_command_line", runner or FakeRunner()), \
                 mock.patch.object(evidence, "guard_vetter", lambda p: lambda c: None), \
@@ -631,8 +737,9 @@ class ApprovedConfigTest(unittest.TestCase):
 
     def test_unknown_default_branch_runs_nothing(self):
         runner = FakeRunner()
-        with self.assertRaisesRegex(evidence.EvidenceError, "origin/HEAD is not set"):
-            run(repo=FakeGitRepo(origin_head=None), runner=runner)
+        github = ApprovedOnGitHub(fail={"repo": NOT_FOUND})
+        with self.assertRaisesRegex(evidence.EvidenceError, "nothing was run"):
+            run(runner=runner, github=github)
         self.assertEqual(runner.calls, [])
 
     def test_unchanged_config_is_accepted(self):

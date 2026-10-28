@@ -88,6 +88,11 @@ class Config:
     test_reports: tuple[str, ...] = ()
 
 
+def is_branch_name(value: Any) -> bool:
+    """A branch name ``default_branch`` accepts (its characters are also safe in a URL)."""
+    return isinstance(value, str) and bool(_BRANCH.match(value))
+
+
 def config_path(target: str | Path) -> Path:
     return Path(target) / CONFIG_RELPATH
 

@@ -117,6 +117,7 @@ class ParseTest(unittest.TestCase):
 
 
 HEAD = "a" * 40
+MAIN = "3" * 40  # the default branch's head on GitHub (test_evidence.MAIN)
 
 
 def recorded_blocks():
@@ -124,11 +125,11 @@ def recorded_blocks():
     HEAD: AC1 and AC2 have a passing test, AC3 has none (GOOD gives it manual steps)."""
     ran = evidence.Evidence(
         issue=12, repo=REPO, branch="story/12-x", sha=HEAD, started_at="2026-09-25T09:00:00",
-        finished_at="2026-09-25T09:01:00", sha_after=HEAD, config_source="origin/main@0000000",
+        finished_at="2026-09-25T09:01:00", sha_after=HEAD, config_source=f"main@{MAIN}",
         commands=[evidence.CommandEvidence(name, f"run {name}", "pass", 0, 1.0)
                   for name in evidence.VERIFY_COMMANDS])
     mapped = acmap.AcMap(
-        issue=12, repo=REPO, branch="story/12-x", sha=HEAD, base="origin/main@0000000",
+        issue=12, repo=REPO, branch="story/12-x", sha=HEAD, base="main@3333333",
         sources=["the test command's full output"], acs=[
             acmap.AcMapping(n, "passed", [acmap.MappedTest(
                 "tests/a.test.ts", n, f"#12 AC{n}: x", "passed", "output")]) for n in (1, 2)]
@@ -146,7 +147,9 @@ def checkpoint_comment(note, recorded=True):
 
 
 def origin(argv, *, timeout, env=None, input=None):
-    """The target's origin: story/12-x is at HEAD."""
+    """The target's origin: GitHub's owner/app, where story/12-x is at HEAD."""
+    if argv[3:] == ["remote", "get-url", "origin"]:
+        return ProcessResult([], 0, f"https://github.com/{REPO}.git\n", "")
     assert argv[3] == "ls-remote", argv
     return ProcessResult([], 0, f"{HEAD}\trefs/heads/story/12-x\n", "")
 
@@ -168,11 +171,15 @@ ISSUE = "## Acceptance criteria\n- [ ] AC1: Given a.\n- [ ] AC2: Given b.\n- [ ]
 
 
 class CliTest(unittest.TestCase):
-    def run_cli(self, fake, *argv):
+    def run_cli(self, fake, *argv, github=None):
+        from tests.test_evidence import ApprovedOnGitHub  # not at import: it imports this
+
+        github = github or ApprovedOnGitHub(inner=fake)
+        github.inner = fake
         out, err = io.StringIO(), io.StringIO()
         with mock.patch.object(target, "get_target",
                                lambda: target.Target(Path("/t"), REPO)), \
-                mock.patch.object(cli, "Gh", lambda: Gh(transport=fake)), \
+                mock.patch.object(cli, "Gh", lambda: Gh(transport=github)), \
                 mock.patch.object(cli, "Git", lambda p: Git(p, transport=origin)), \
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = cli.main(["verdict", "check", "--issue", "12", *argv])

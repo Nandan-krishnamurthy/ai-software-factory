@@ -779,13 +779,17 @@ def _verdict_check(args: argparse.Namespace) -> int:
     # beside its evidence and for the branch head on origin.
     mapping = acmap.from_body(body) if body is not None else None
     recorded = evidence.from_body(body) if body is not None else None
-    head = (evidence.remote_head(Git(args.target.path), mapping.branch)
-            if mapping is not None else None)
+    git = Git(args.target.path)
+    # The evidence's commands must have come from GitHub's default branch (B-28).
+    approved = evidence.approved_config(git, gh, args.target.repo)
+    head = evidence.remote_head(git, mapping.branch) if mapping is not None else None
     result.problems += verdict.cross_check(
         result, mapping, issue=args.issue,
         evidence_sha=recorded.sha if recorded is not None else None,
         checkpoint_branch=found[1].branch if found is not None else None, branch_head=head,
         test_pending=recorded is not None and "test" in recorded.pending)
+    if recorded is not None:
+        result.problems += evidence.source_problems(gh, args.target.repo, recorded, approved)
     _print_safe(verdict.render(result, mapping))
     return 0 if result.ok else 1
 
@@ -799,7 +803,7 @@ def _verify_run(args: argparse.Namespace) -> int:
         raise evidence.EvidenceError(f"issue #{args.issue} has no checkpoint comment yet "
                                      "(S07 writes the first one); nothing was run")
     result = evidence.run_verification(
-        path, issue=args.issue, repo=repo, git=Git(path),
+        path, issue=args.issue, repo=repo, git=Git(path), gh=gh,
         vet=evidence.guard_vetter(path), timeout=args.timeout, reports=args.report)
     out = evidence.write(result, Path(args.out) if args.out else
                          evidence.default_path(args.issue))
@@ -826,11 +830,12 @@ def _recorded_evidence(gh: Gh, repo: str, issue: int, file: str | None
 
 
 def _verify_check(args: argparse.Namespace) -> int:
-    repo, git = args.target.repo, Git(args.target.path)
-    result, expected_branch = _recorded_evidence(Gh(), repo, args.issue, args.file)
-    problems = evidence.check(result, issue=args.issue,
-                              branch_head=evidence.remote_head(git, result.branch),
-                              expected_branch=expected_branch)
+    repo, git, gh = args.target.repo, Git(args.target.path), Gh()
+    result, expected_branch = _recorded_evidence(gh, repo, args.issue, args.file)
+    approved = evidence.approved_config(git, gh, repo)
+    problems = evidence.check_trusted(gh, repo, result, approved, issue=args.issue,
+                                      branch_head=evidence.remote_head(git, result.branch),
+                                      expected_branch=expected_branch)
     _print_safe(evidence.render_check(result, problems))
     return 1 if problems else 0
 
@@ -846,20 +851,22 @@ def _verify_map(args: argparse.Namespace) -> int:
     # A failed command or a missing configured report still maps: without results, a test
     # can only be missing, never passed.
     failures = set(recorded.failures()) | set(recorded.report_problems())
-    unusable = [p for p in evidence.check(recorded, issue=args.issue,
-                                          branch_head=evidence.remote_head(git, recorded.branch),
-                                          expected_branch=expected_branch)
+    # The diff is taken against GitHub's head of the default branch, never a local ref.
+    approved = evidence.approved_config(git, gh, repo)
+    unusable = [p for p in evidence.check_trusted(
+                    gh, repo, recorded, approved, issue=args.issue,
+                    branch_head=evidence.remote_head(git, recorded.branch),
+                    expected_branch=expected_branch)
                 if p not in failures]
     if unusable:
         raise acmap.AcMapError("the evidence cannot be mapped: " + "; ".join(unusable))
     evidence_path = evidence.default_path(args.issue)
     output, output_note = evidence.recorded_output(recorded, evidence_path)
     reports, notes = evidence.recorded_reports(recorded, evidence_path)
-    base = evidence.default_ref(git)
+    base = evidence.local_commit(git, approved.sha)
     result = acmap.build(
         issue=args.issue, acs=verdict.issue_acs(issue.get("body") or ""), evidence=recorded,
-        base=f"{base}@{git.rev_parse(base)[:7]}",
-        diff=acmap.branch_diff(git, base, recorded.sha), output=output,
+        base=approved.label, diff=acmap.branch_diff(git, base, recorded.sha), output=output,
         output_note=output_note, reports=reports, notes=notes)
     out = acmap.write(result, Path(args.out) if args.out else acmap.default_path(args.issue))
     comments.set_checkpoint_map(gh, repo, args.issue, acmap.to_block(result))
