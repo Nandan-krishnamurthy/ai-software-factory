@@ -278,7 +278,7 @@ class RequiredMapTest(unittest.TestCase):
         self.assertIn("the AC-to-test map is for commit 1111111, but the head of story/27-x "
                       "is 2222222: the map is stale; run `verify run`, then `verify map`, "
                       "again", problems)
-        self.assertIn("is not on origin", check(self.text, self.result,
+        self.assertIn("is not on GitHub", check(self.text, self.result,
                                                 branch_head=None).problems[0])
 
     def test_a_map_for_another_issue_is_refused(self):

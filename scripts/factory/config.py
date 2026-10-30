@@ -93,6 +93,24 @@ def is_branch_name(value: Any) -> bool:
     return isinstance(value, str) and bool(_BRANCH.match(value))
 
 
+_REF_FORBIDDEN = re.compile(r"[\x00-\x20\x7f~^:?*\[\\]")
+
+
+def is_git_branch_name(value: Any) -> bool:
+    """A name git accepts for a branch (``git check-ref-format --branch``, without its
+    ``@{-N}`` shorthand): no ``..``, ``@{``, ``//``, control character, space or any of
+    ``~ ^ : ? * [ \\``; no part that starts with ``.`` or ends with ``.lock``; not empty,
+    ``@`` or ``HEAD``; no leading ``-`` or ``/``; no trailing ``/`` or ``.``. Such a name
+    has no ``.`` or ``..`` path segment, so it cannot climb out of an API path."""
+    if not isinstance(value, str) or value in ("", "@", "HEAD"):
+        return False
+    if (value.startswith(("-", "/")) or value.endswith(("/", ".")) or ".." in value
+            or "@{" in value or "//" in value or _REF_FORBIDDEN.search(value)):
+        return False
+    return all(part and not part.startswith(".") and not part.endswith(".lock")
+               for part in value.split("/"))
+
+
 def config_path(target: str | Path) -> Path:
     return Path(target) / CONFIG_RELPATH
 

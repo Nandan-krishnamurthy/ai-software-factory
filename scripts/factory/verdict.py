@@ -191,7 +191,8 @@ def cross_check(verdict: Verdict, acmap: AcMap | None, *, issue: int,
         problems.append(f"the AC-to-test map is for branch {acmap.branch}, but the "
                         f"checkpoint names {checkpoint_branch}")
     if branch_head is None:
-        problems.append(f"branch {acmap.branch} is not on origin, so the AC-to-test map "
+        problems.append(f"branch {acmap.branch} is not on GitHub (the repository is "
+                        "reachable, but has no branch of that name), so the AC-to-test map "
                         "cannot be shown to be current")
     elif branch_head != acmap.sha:
         problems.append(f"the AC-to-test map is for commit {acmap.sha[:7]}, but the head of "

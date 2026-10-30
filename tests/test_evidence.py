@@ -118,15 +118,18 @@ class ApprovedOnGitHub:
     it, and ``configs`` (SHA to text) gives an older commit its own. ``on_branch``: older
     commits of the default branch. ``heads``: a story branch's head, by name (a dict, or a
     function); by default ``repo.remote``. ``fail``: kind (``repo``, ``head``, ``config``,
-    ``compare``) to a ``ProcessResult`` or an exception. Any other call goes to
+    ``compare``) to a ``ProcessResult`` or an exception. ``fail_on_call``: kind to
+    ``(n, outcome)``, failing that kind from its n-th call on. Any other call goes to
     ``inner``."""
 
     def __init__(self, repo=None, *, inner=None, name=None, branch="main", head=MAIN,
-                 config=None, configs=None, on_branch=(), heads=None, fail=None):
+                 config=None, configs=None, on_branch=(), heads=None, fail=None,
+                 fail_on_call=None):
         self.repo, self.inner, self.branch, self.head = repo, inner, branch, head
         self.name = name or (repo.name if repo is not None else REPO)
         self.config, self.configs = config, dict(configs or {})
         self.on_branch, self.heads, self.fail = set(on_branch), heads, fail or {}
+        self.fail_on_call = dict(fail_on_call or {})
         self.calls: list[str] = []
 
     def __call__(self, argv, *, timeout, cwd=None, env=None, input=None):
@@ -137,8 +140,9 @@ class ApprovedOnGitHub:
                 raise AssertionError(f"unexpected gh call: {args}")
             return self.inner(argv, timeout=timeout, cwd=cwd, env=env, input=input)
         self.calls.append(kind)
-        if kind in self.fail:
-            outcome = self.fail[kind]
+        nth, late = self.fail_on_call.get(kind, (0, None))
+        if kind in self.fail or (late is not None and self.calls.count(kind) >= nth):
+            outcome = self.fail.get(kind, late)
             if isinstance(outcome, Exception):
                 raise outcome
             return outcome
@@ -498,7 +502,7 @@ class CheckTest(unittest.TestCase):
         self.assertIn("2222222", problems[0])
 
     def test_branch_not_on_origin_is_rejected(self):
-        self.assertIn("not on origin", self.check(branch_head=None)[0])
+        self.assertIn("not on GitHub", self.check(branch_head=None)[0])
 
     def test_wrong_issue_or_branch_is_rejected(self):
         self.assertIn("issue #27, not #28", self.check(issue=28)[0])

@@ -19,14 +19,18 @@ import contextlib
 import io
 import json
 import os
+import posixpath
+import re
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
+from urllib.parse import unquote
 
 from factory import acmap, cli, comments, evidence, prbody, target
-from factory.errors import CommandNotFound, CommandTimeout, GhAuthError
+from factory import config as config_mod
+from factory.errors import CommandNotFound, CommandTimeout, GhAuthError, GitError
 from factory.gh import Gh, ProcessResult
 from factory.git import Git
 from tests import REPO_ROOT
@@ -272,6 +276,11 @@ class SupersededConfigTest(unittest.TestCase):
         self.github.config = config_json({**COMMANDS, "lint": "npm run lint"})
         self.assertIn("commands.lint changed on main", self.problems(ev)[0])
 
+    def test_a_changed_install_command_is_rejected(self):
+        # verify run never runs install, but it sets up what the other commands run with.
+        self.github.config = config_json({**COMMANDS, "install": "npm install --no-audit"})
+        self.assertIn("commands.install changed on main", self.problems()[0])
+
     def test_an_unchanged_config_at_an_older_commit_is_accepted(self):
         self.assertEqual(self.problems(), [])
         self.assertEqual(self.github.calls.count("config"), 2)  # the head's, then MAIN's
@@ -279,6 +288,123 @@ class SupersededConfigTest(unittest.TestCase):
     def test_an_older_config_that_cannot_be_read_is_rejected(self):
         self.github.configs = {MAIN: None}  # 404 at MAIN
         self.assertIn("could not be read", self.problems()[0])
+
+
+class NormalizingGitHub:
+    """A gh transport that resolves a request's path the way GitHub does. On 2026-10-30,
+    ``git/ref/heads/x/../../../../pulls/42`` returned pull request #42 from the live API.
+    This fake also decodes ``%2e`` to ``.`` first, as a worst case. It records each path
+    it was sent, and answers branch refs from ``refs`` (name to response), the repository
+    from ``repo``, and pull requests with a PR body."""
+
+    def __init__(self, refs=None, repo=None):
+        self.refs, self.repo, self.sent = dict(refs or {}), repo, []
+
+    def __call__(self, argv, *, timeout, cwd=None, env=None, input=None):
+        endpoint = argv[2]
+        self.sent.append(endpoint)
+        path = posixpath.normpath(re.sub(r"%2[eE]", ".", endpoint))
+        if path == f"repos/{REPO}":
+            return self.repo or ok({"full_name": REPO})
+        if re.fullmatch(rf"repos/{REPO}/pulls/\d+", path):
+            return ok({"number": int(path.rsplit("/", 1)[1]), "head": {"sha": SHA}})
+        prefix = f"repos/{REPO}/git/ref/heads/"
+        if path.startswith(prefix):
+            answer = self.refs.get(unquote(path[len(prefix):]))
+            return answer if answer is not None else NOT_FOUND
+        return NOT_FOUND
+
+    @staticmethod
+    def branch(name, sha=SHA, kind="commit"):
+        return ok({"ref": f"refs/heads/{name}", "object": {"type": kind, "sha": sha}})
+
+
+class RemoteHeadTest(unittest.TestCase):
+    """Second review: branch names checked before any request (F2), the exact ref and a
+    commit required (F3), and a 404 that is a missing branch only in a reachable
+    repository (F4)."""
+
+    def head(self, github, name):
+        return evidence.remote_head(Gh(transport=github), REPO, name)
+
+    def test_a_name_git_rejects_is_never_sent(self):
+        github = NormalizingGitHub()
+        for name in ("x/../../../../pulls/42", "story/27-fake/../27-x", "../x", "a//b",
+                     ".hidden/x", "a/.b", "a.lock", "a.lock/b", "-x", "HEAD", "@", "a@{1}",
+                     "a b", "a~1", "a^", "a:b", "a?b", "a*b", "a[b", "a\\b", "a\x01b", "a/",
+                     "/a", "a.", ""):
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(evidence.EvidenceError,
+                                            "not a valid git branch name"):
+                    self.head(github, name)
+        self.assertEqual(github.sent, [])  # nothing reached GitHub
+
+    def test_a_legitimate_name_is_encoded_segment_by_segment(self):
+        expected = {"story/41-due-today-label": "story/41-due-today-label",
+                    "feature/x+y": "feature/x%2By", "release/1.2.3": "release/1.2.3",
+                    "café": "caf%C3%A9", "a#b": "a%23b", "user@host": "user%40host",
+                    "a{b}": "a%7Bb%7D", "%2e%2e/x": "%252e%252e/x"}
+        for name, path in expected.items():
+            with self.subTest(name=name):
+                github = NormalizingGitHub(refs={name: NormalizingGitHub.branch(name)})
+                self.assertEqual(self.head(github, name), SHA)
+                self.assertEqual(github.sent, [f"repos/{REPO}/git/ref/heads/{path}"])
+
+    def test_a_percent_encoded_dot_stays_literal(self):
+        # `%2e%2e` is a legal branch name. Sent as `%252e%252e`, even a server that
+        # decodes %2e before resolving the path sees no `..`.
+        github = NormalizingGitHub()
+        self.assertIsNone(self.head(github, "%2e%2e/%2e%2e/pulls/42"))
+        self.assertEqual(github.sent, [
+            f"repos/{REPO}/git/ref/heads/%252e%252e/%252e%252e/pulls/42", f"repos/{REPO}"])
+
+    def test_only_the_exact_ref_counts(self):
+        # Whatever GitHub resolved the request to, an answer for another ref is not it.
+        github = NormalizingGitHub(refs={"story/27-y": NormalizingGitHub.branch("story/27-x")})
+        self.assertIsNone(self.head(github, "story/27-y"))
+
+    def test_a_ref_that_is_not_a_commit_is_refused(self):
+        github = NormalizingGitHub(refs={"story/27-x": NormalizingGitHub.branch(
+            "story/27-x", kind="tag")})
+        with self.assertRaisesRegex(evidence.EvidenceError, "names no commit"):
+            self.head(github, "story/27-x")
+
+    def test_a_missing_branch_in_a_reachable_repository_is_none(self):
+        github = NormalizingGitHub()
+        self.assertIsNone(self.head(github, "story/9-z"))
+        self.assertEqual(github.sent[-1], f"repos/{REPO}")  # the repository was confirmed
+
+    def test_a_404_from_an_unreachable_repository_is_not_a_missing_branch(self):
+        for why, answer in {"hidden (404)": NOT_FOUND,
+                            "forbidden (403)": ProcessResult([], 1, "", "gh: Forbidden (HTTP 403)"),
+                            "unavailable (502)": GH_502}.items():
+            with self.subTest(why=why):
+                with self.assertRaises(evidence.EvidenceError) as caught:
+                    self.head(NormalizingGitHub(repo=answer), "story/27-x")
+                message = str(caught.exception)
+                self.assertIn("not shown to be a missing branch", message)
+                self.assertIn("gh auth status", message)
+                self.assertNotIn("push it", message)
+
+    @unittest.skipUnless(shutil.which("git"), "needs git")
+    def test_the_rules_are_gits(self):
+        # Parity with `git check-ref-format --branch`. One deliberate difference: git
+        # accepts `@` there as shorthand for the current branch, which is no branch name.
+        names = ["story/41-due-today-label", "feature/x+y", "release/1.2.3", "café", "a#b",
+                 "user@host", "a{b}", "%2e%2e", "a@b", "a.b/c_d-e", "HEAD", "-x", "a@{b",
+                 "a/../b", "../x", "a//b", "/a", "a/", "a.", "a.lock", "a/b.lock",
+                 "a.lock/b", ".a", "a/.b", "a b", "a~1", "a^", "a:b", "a?b", "a*b", "a[b",
+                 "a\\b", "a..b", "a\x7fb"]
+        git = Git(tempfile.gettempdir())
+        for name in names:
+            with self.subTest(name=name):
+                try:
+                    git.run(["check-ref-format", "--branch", name])
+                    by_git = True
+                except GitError:
+                    by_git = False
+                self.assertEqual(config_mod.is_git_branch_name(name), by_git)
+        self.assertFalse(config_mod.is_git_branch_name("@"))
 
 
 class LocalCommitTest(unittest.TestCase):
@@ -415,6 +541,26 @@ class ConsumersTest(unittest.TestCase):
                 code, out, err = self.cli(*argv, "--issue", "27")
                 self.assertEqual(code, 1)
                 self.assertIn("commands.lint, commands.test changed on main", out + err)
+
+    def test_a_missing_branch_is_reported_as_missing(self):
+        self.repo.remote = {}  # GitHub has no story/27-x; the repository is reachable
+        code, out, _ = self.cli("verify", "check", "--issue", "27")
+        self.assertEqual(code, 1)
+        self.assertIn("story/27-x is not on GitHub (the repository is reachable", out)
+        self.assertIn("push it", out)
+
+    def test_an_unreachable_repository_is_not_reported_as_a_missing_branch(self):
+        # approved_config reads the repository first; the second read, after the branch's
+        # 404, fails: the credentials no longer see it.
+        self.repo.remote = {}
+        self.github.fail_on_call = {"repo": (2, NOT_FOUND)}
+        for argv in (["verify", "check"], ["verify", "map"], ["verdict", "check"]):
+            with self.subTest(argv=argv):
+                self.github.calls.clear()
+                code, out, err = self.cli(*argv, "--issue", "27")
+                self.assertEqual(code, 1)
+                self.assertIn("not shown to be a missing branch", err)
+                self.assertNotIn("push it", out + err)
 
     def test_the_branch_head_is_githubs_not_gits(self):
         # Review finding B2: whatever `git ls-remote` would answer is never asked.

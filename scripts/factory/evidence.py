@@ -101,6 +101,7 @@ from factory.config import (
     CONFIG_RELPATH,
     Config,
     is_branch_name,
+    is_git_branch_name,
     load_config,
     parse_config,
 )
@@ -919,11 +920,23 @@ def remote_head(gh: Gh, repo: str, branch: str) -> str | None:
     ``None`` when GitHub has no such branch. Read from GitHub's API, never through
     ``git ls-remote``, whose transport the clone's own config decides: a
     ``core.sshCommand`` can make it answer from any repository (B-28). Raises
-    ``EvidenceError`` when GitHub cannot be asked or gives no commit."""
+    ``EvidenceError`` when GitHub cannot be asked or gives no commit.
+
+    The name must be one git accepts (``is_git_branch_name``) before any request: GitHub
+    normalizes ``..`` in a path, so ``x/../../../../pulls/42`` would ask for a pull
+    request instead. Each segment is percent-encoded on its own, ``%`` included, so a
+    legal name such as ``%2e%2e`` stays literal. GitHub answers 404 both for a branch it
+    does not have and for a repository it does not show these credentials, so a 404 is
+    "no such branch" only once the repository itself is confirmed reachable."""
+    if not is_git_branch_name(branch):
+        raise EvidenceError(f"{branch!r} is not a valid git branch name, so GitHub was not "
+                            f"asked for its head; {_REFUSED}")
+    path = "/".join(quote(part, safe="") for part in branch.split("/"))
     try:
-        found = gh.api(f"repos/{repo}/git/ref/heads/{quote(branch, safe='/')}")
+        found = gh.api(f"repos/{repo}/git/ref/heads/{path}")
     except CommandError as err:
         if "HTTP 404" in err.stderr:
+            _confirm_reachable(gh, repo, branch)
             return None
         raise EvidenceError(f"GitHub could not be asked for the head of {branch}: {err}; "
                             f"{_REFUSED}") from None
@@ -939,6 +952,20 @@ def remote_head(gh: Gh, repo: str, branch: str) -> str | None:
         raise EvidenceError(f"GitHub's answer for the head of {branch} names no commit; "
                             f"{_REFUSED}")
     return sha
+
+
+def _confirm_reachable(gh: Gh, repo: str, branch: str) -> None:
+    """After a 404 for ``branch``: raise unless GitHub shows ``repo`` itself to the
+    current credentials, so that an unreachable repository is never reported as a
+    branch to push."""
+    try:
+        gh.api(f"repos/{repo}")
+    except (CommandError, GhAuthError) as err:
+        raise EvidenceError(
+            f"GitHub answered \"not found\" for branch {branch}, and could not confirm that "
+            f"{repo} is reachable with the current credentials ({err}). The repository may "
+            "be private or renamed, or the token may lack access: this is not shown to be a "
+            f"missing branch. Check `gh auth status` and the target; {_REFUSED}") from None
 
 
 def check_trusted(gh: Gh, repo: str, evidence: Evidence, approved: Approved, *, issue: int,
@@ -962,8 +989,10 @@ def check(evidence: Evidence, *, issue: int, branch_head: str | None,
         problems.append(f"the evidence is for branch {evidence.branch}, but the story's "
                         f"checkpoint names {expected_branch}")
     if branch_head is None:
-        problems.append(f"branch {evidence.branch} is not on origin, so its head cannot be "
-                        "compared; push it, then run `verify run` again")
+        problems.append(f"branch {evidence.branch} is not on GitHub (the repository is "
+                        "reachable, but has no branch of that name), so its head cannot be "
+                        "compared; push it, or check the branch name, then run `verify run` "
+                        "again")
     elif branch_head != evidence.sha:
         problems.append(f"the evidence is for commit {evidence.sha[:7]}, but the head of "
                         f"{evidence.branch} is {branch_head[:7]}; run `verify run` again")
