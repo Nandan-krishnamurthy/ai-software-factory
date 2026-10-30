@@ -698,3 +698,62 @@ The human asked for a plan covering all four (`097efb85#1329`, 2026-10-30T05:45:
 - [B-46](backlog.md#b-46), [B-15](backlog.md#b-15) and [B-49](backlog.md#b-49): F1, planned as PR B and PR C, and as a later task for B-49.
 - **Evidence recorded before B-28 is rejected** ("run `verify run` again"). No story was in progress: Task Tracker was at `INCREMENT_COMPLETE`, and both M7 sandboxes were at Gate A ([progress.md](progress.md#m7-plans--target-knowledge)).
 - **Not run live.** The first live run is the next `verify run` on a target, at the latest T8.1's demo.
+
+---
+
+## PR B: E0, E2 and E3 (B-46, B-15, ADR-0006)
+
+| | |
+|---|---|
+| **Specification** | [backlog.md](backlog.md): [B-46](backlog.md#b-46) "Plan, E2 (PR B)", [B-15](backlog.md#b-15) "Plan, E3 (PR B)", and E0 from the approved F1 plan. These are backlog items, not roadmap tasks. |
+| **PR** | PR B, branch `task/B-46-B-15-git-and-verify-env`, not merged |
+| **Status** | In review |
+
+**Approved decisions.**
+- **The F1 plan, decisions D1–D4** (`097efb85#1384`, 2026-10-30T05:53:47Z):
+  - **D1, option (b):** hooks disabled for every git operation the factory controls, among other safeguards (the rest are PR C's);
+  - **D2:** no fetch in `local_commit`;
+  - **D3:** the bot identity is required before unattended runs on real projects, and sandbox demonstrations may follow E0–E3;
+  - **D4:** PR B is E0, E2 and E3.
+- **PR B authorized** (`097efb85#1670`, 2026-10-30T06:58:13Z), with these instructions:
+  - E3 keeps "only the environment variables actually required for verification";
+  - E3 must not be called complete isolation;
+  - `guard.py`, E1, B-49 and T8.1 are out of scope.
+
+**Proposed decisions** (analysis; the human decides them by reviewing and merging the PR):
+1. **P-1: which variables E3 removes.** The listed variables are removed, plus any variable named like a secret (`TOKEN`, `SECRET`, `PASSWORD`, `PASSWD`, `CREDENTIAL`, `API_KEY`, `PRIVATE_KEY`, `ACCESS_KEY`, any case), plus inherited command-line git config, which could name a credential helper again. Everything else is kept.
+   - **Why not a strict allow-list:** a reusable factory cannot know which variables a project's build and test tools need. Examples are `PATH`, `HOME`, `APPDATA`, `LOCALAPPDATA` (Playwright's browsers on Windows), `SystemRoot`, `PATHEXT` and `NODE_OPTIONS`. A strict allow-list would break criterion 3 ("nothing that ran before E3 stops running") on stacks the factory has not seen.
+   - **How the instruction is read:** "only the variables actually required" is taken as "every credential-like variable removed, the rest kept".
+   - **For the human to decide otherwise:** a strict allow-list would be a small change in `verification_env`.
+2. **P-2:** `gh.run_command_line` **requires** `env`, so no caller can run a configured command with the whole environment by accident. Its only production caller is `run_verification`.
+3. **P-3:** `git.with_config` appends after any `GIT_CONFIG_COUNT` entries already present, so they are kept and ours win. A count git would refuse (not a whole number) is treated as none.
+4. **P-4: no hooks folder.** `core.hooksPath` points below the null device (`os.devnull` joined with a name, a path that cannot exist), as the graft file already does (ADR-0005). The probe on 2026-10-30 confirmed that plain git ran `post-checkout`, `reference-transaction` and the fsmonitor script during `status`, `diff`, `switch` and `pull`, and that the two overrides stopped all of them.
+5. **P-5:** [ADR-0006](adr/0006-threat-model-typed-commands-and-executed-code.md) supersedes ADR-0005 decision 5's fetch, and the sentence of its decision 3 about it. Only ADR-0005's Status line changes, as the README's rule for accepted ADRs requires.
+6. **P-6:** S10 step 1 gains one line: on the "does not have the default branch's head" error, run `git -C <T> fetch origin` and repeat the step. This is not a failed attempt. S11 and S12 already fetch.
+
+**Evidence:**
+- **Baseline before the change:** `python -m unittest` OK (5 skipped), `ruff` clean, tree clean, on `main` at `8ef80bc`.
+- **New tests:**
+  - `tests/test_factory_git_env.py` (7), with real git. A control proves the hooks and the fsmonitor script run for plain git. Through `Git`, none of them runs for `status`, `diff`, `switch`, `fetch`, `pull` or `ensure.ensure_branch`. Inherited `GIT_CONFIG_COUNT` entries are kept and still apply.
+  - `tests/test_verification_env.py` (7): the cleaned environment (including lower-case names and inherited overrides); every command of a `verify run` gets it, and its folders are removed after the run; `run_command_line` needs an environment.
+  - **The two live tests** ran (not skipped) on this machine, where `gh` is logged in and git has a credential helper. Inside the cleaned environment:
+    - `gh auth status` reports not logged in;
+    - no credential helper, global config or system config is read;
+    - `git credential fill` produces no credential.
+
+    The tests never print command output, so a regression could not write a credential into the test log.
+- **Changed tests:**
+  - `LocalCommitTest` now expects a refusal with the fetch instruction and no fetch, even when one would work;
+  - a CLI test checks that `verify map` stops with the instruction;
+  - the fake runners accept `env`, and `FakeRunner` records it;
+  - three direct `run_command_line` tests pass an environment.
+- **Mutation run on the committed code** (`3ffbcc2`; the amend to `83700cc` changed one comment, after the reusability audit flagged a stack name in it): from a green baseline, each of 12 mutations was caught.
+  - **E2:** no hooks override; no fsmonitor override; existing entries overwritten; `Git._env` skipping the safe config; `local_commit` fetching again.
+  - **E3:** `SSH_AUTH_SOCK` kept; secret-named variables kept; inherited git config kept; `gh` config not isolated; system git config read; global git config read; the runner given the full environment.
+
+**Handed on (all open):**
+- [B-46](backlog.md#b-46): E1 and T1 in PR C (the guard and `doctor`), not started.
+- [B-15](backlog.md#b-15): stays open. E3 is a speed bump; the remainder is [B-49](backlog.md#b-49), and closing B-15 is the human's decision.
+- [B-49](backlog.md#b-49): the bot identity and a sandbox, required before unattended runs on real projects.
+- **For sandbox demonstrations after E0–E3:** a project whose build or test needs a token now fails under `verify run`, as ADR-0006 states.
+

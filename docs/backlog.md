@@ -156,7 +156,20 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
   3. Nothing that ran before E3 stops running, except what needs those credentials.
 - **Limit, stated plainly:** this is a speed bump, not isolation. Code running as the user can still reach the operating system's credential store directly. The full answer is [B-49](#b-49): a bot identity without merge permission, and a sandbox.
 - **Before T8.1?** Yes: E3 is one of E0–E3, which come before T8.1's sandbox demonstrations, with their limits documented (D3).
-- **Status:** verified (the inherited environment); planned (E3) · **Owner:** PR B, before T8.1 (the human's decision D3/D4, `097efb85#1384`) · **State:** open
+- **E3 implemented in PR B (2026-10-30, not merged):**
+  - **The cleaned environment:** `verify run` gives every approved command `evidence.verification_env`:
+    - the listed variables removed;
+    - any other variable named like a secret removed (`TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`, `API_KEY`, `PRIVATE_KEY`, `ACCESS_KEY`);
+    - inherited command-line git config removed (`GIT_CONFIG_COUNT`/`KEY_n`/`VALUE_n`/`PARAMETERS`, `GIT_CONFIG`);
+    - the overrides above set.
+  - **No silent inheritance:** `gh.run_command_line` now requires an environment.
+  - **Tests** (`tests/test_verification_env.py`):
+    - a fake runner sees the cleaned environment for every command (criterion 1);
+    - live on this machine, where `gh` is logged in and git has a credential helper: `gh auth status` reports not logged in, no helper or global/system config is read, and `git credential fill` gives nothing (criterion 2);
+    - the full suite passes (criterion 3).
+  - **Limit:** see [ADR-0006](adr/0006-threat-model-typed-commands-and-executed-code.md).
+- **Stays open:** E3 is a speed bump, not isolation. Code running as the user can still reach the credential store; that remainder is [B-49](#b-49). Closing this item is the human's decision.
+- **Status:** verified (the inherited environment; E3, by the tests above) · **Owner:** PR B, before T8.1 (the human's decision D3/D4, `097efb85#1384`; PR B authorized in `097efb85#1670`) · **State:** open
 
 ### <a id="b-28"></a>B-28 The approved config's trust root is a local ref that can be repointed
 - **What:** "approved" means `.factory/config.json` on the default branch on `origin` (ADR-0004). `verify run` finds that commit through the clone's **local** refs: `evidence.default_ref` reads the symbolic ref `origin/HEAD`, and `evidence.approved_config` reads the config at the local remote-tracking ref it names (`origin/main`). Both are plain local refs. The guard allows the commands that repoint them (checked with `guard.decide` on 2026-10-22):
@@ -279,7 +292,16 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
     2. A shell redirect into it is blocked, in bash and PowerShell (`>`, `>>`, `tee`, `Out-File`, `Set-Content`).
     3. An attempt to switch the active target by any of those means is blocked, and `target show` still names the original repository.
     4. `factory.py target set` still works.
-- **Status:** verified (the guard allows the setting, and git runs it; the wider set above, by `guard.decide`); analysis (the merge path) · **Owner:** PR B (E2) and PR C (E1), both before T8.1, in that order (D4); the guard-only rest stays a T9.5 scope decision · **State:** open
+- **E2 implemented in PR B (2026-10-30, not merged):**
+  - **No hooks or fsmonitor:** `Git._env` appends `core.hooksPath` (a path that cannot exist) and `core.fsmonitor=false` through `git.with_config`, keeping any `GIT_CONFIG_COUNT` entries already there. Every git call the factory makes runs no repository hook and no fsmonitor command.
+  - **No fetch:** `evidence.local_commit` no longer fetches; a missing commit stops with "run `git -C <T> fetch origin`" (D2), and S10 step 1 says what to do then.
+  - **Tests** (`tests/test_factory_git_env.py`), with real git:
+    - **control:** the hooks (`post-checkout`, `post-merge`, `reference-transaction`) and an fsmonitor script run for plain git during `status`, `diff`, `switch`, `fetch` and `pull`;
+    - **through `Git`:** none of them runs for the same calls, nor for `ensure.ensure_branch`;
+    - **inherited config:** existing entries are kept.
+  - **Still not covered** ([ADR-0006](adr/0006-threat-model-typed-commands-and-executed-code.md)): git that model-written code runs by itself.
+- **Stays open:** E1 and T1 (PR C, the guard and `doctor`) are not done.
+- **Status:** verified (the guard allows the setting, and git runs it; the wider set above, by `guard.decide`; E2, by the tests above); analysis (the merge path) · **Owner:** PR B (E2, implemented) and PR C (E1 and T1, not started), both before T8.1, in that order (D4); the guard-only rest stays a T9.5 scope decision · **State:** open
 
 ### <a id="b-47"></a>B-47 S12's check after the merge does not hold its evidence against the merge commit
 - **What:** `closeout.after_merge` reads the evidence of S12's `verify run` on the default branch and accepts it when the branch is not the story's and nothing failed. It does not check two things:
