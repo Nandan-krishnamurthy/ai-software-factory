@@ -12,6 +12,49 @@ from factory.errors import GitError
 from factory.gh import DEFAULT_TIMEOUT, Transport, run_process
 
 
+def unopenable(name: str) -> str:
+    """An absolute path where no file or folder can ever be kept: below the Win32 NUL
+    device (``\\\\.\\NUL\\…``) on Windows, whose namespace discards everything written
+    there, and below ``/dev/null`` elsewhere, which is not a folder. Never relative:
+    ``os.devnull`` is ``nul`` on Windows, and ``nul\\x`` would be looked up inside the
+    repository (PR #58 review, G4)."""
+    return "\\\\.\\NUL\\" + name if os.name == "nt" else os.path.join(os.devnull, name)
+
+
+# Git settings that would make the factory's own git calls run a program the repository
+# chose (B-46, E2; ADR-0006): hooks (`switch` runs post-checkout, `pull` post-merge, any
+# ref update reference-transaction) and an fsmonitor command (`status`, `diff`). The
+# hooks folder is a path where nothing can be kept (`unopenable`), so no hook is found.
+NO_HOOKS = unopenable("factory-no-hooks")
+SAFE_CONFIG = (("core.hooksPath", NO_HOOKS), ("core.fsmonitor", "false"))
+
+
+def _sq(text: str) -> str:
+    """``text`` single-quoted the way git writes ``GIT_CONFIG_PARAMETERS``."""
+    return "'" + text.replace("'", "'\\''") + "'"
+
+
+def with_config(env: dict[str, str], pairs: Sequence[tuple[str, str]]) -> dict[str, str]:
+    """``env`` with ``pairs`` added as command-line git config, which outranks every config
+    file, including the repository's own. Git reads command-line config from two
+    variables, ``GIT_CONFIG_COUNT`` (with ``GIT_CONFIG_KEY_n``/``VALUE_n``) and then
+    ``GIT_CONFIG_PARAMETERS`` (what ``git -c`` passes on), and the last value of a key
+    wins. So the pairs are appended at the end of both: entries already there are kept,
+    and none of them can override ours (PR #58 review, G1). A count that is not a whole
+    number is treated as none: git would refuse it anyway."""
+    raw = env.get("GIT_CONFIG_COUNT", "0").strip()
+    count = int(raw) if raw.isdigit() else 0
+    out = dict(env)
+    for i, (key, value) in enumerate(pairs, start=count):
+        out[f"GIT_CONFIG_KEY_{i}"] = key
+        out[f"GIT_CONFIG_VALUE_{i}"] = value
+    out["GIT_CONFIG_COUNT"] = str(count + len(pairs))
+    ours = " ".join(_sq(f"{key}={value}") for key, value in pairs)
+    inherited = env.get("GIT_CONFIG_PARAMETERS", "").strip()
+    out["GIT_CONFIG_PARAMETERS"] = f"{inherited} {ours}" if inherited else ours
+    return out
+
+
 class Git:
     def __init__(
         self,
@@ -32,10 +75,11 @@ class Git:
         # The repository's real objects and history (B-28): local replace refs and a graft
         # file can make a commit read as another one, or change its parents, which would
         # change the approved config read and every diff against the default branch. The
-        # graft file is a path that cannot exist (below the null device), so none is read.
+        # graft file is a path where nothing can be kept (`unopenable`), so none is read.
         env["GIT_NO_REPLACE_OBJECTS"] = "1"
-        env["GIT_GRAFT_FILE"] = os.path.join(os.devnull, "factory-no-grafts")
-        return env
+        env["GIT_GRAFT_FILE"] = unopenable("factory-no-grafts")
+        # No hook and no fsmonitor command runs in any git call the factory makes (E2).
+        return with_config(env, SAFE_CONFIG)
 
     def run(
         self, args: Sequence[str], *, input: str | None = None, timeout: float | None = None

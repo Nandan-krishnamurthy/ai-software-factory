@@ -590,7 +590,7 @@ class LedgerTest(unittest.TestCase):
             evidence.from_dict({**recorded.to_dict(), "outputs": {"test": "forged"}})
 
     def test_reports_are_captured_only_if_the_run_wrote_them(self):
-        def writes_reports(command, *, cwd, timeout):
+        def writes_reports(command, *, cwd, timeout, env=None):
             if command == "npm test":
                 (cwd / "out").mkdir(exist_ok=True)
                 (cwd / "out" / "fresh.xml").write_text("<testsuites/>", encoding="utf-8")
@@ -825,7 +825,7 @@ class CliTest(unittest.TestCase):
     def test_a_captured_report_is_used_and_a_forged_copy_is_refused(self):
         report = (FIXTURES / "27-unit.vitest.json").read_bytes()
 
-        def writes_a_report(command, *, cwd, timeout):
+        def writes_a_report(command, *, cwd, timeout, env=None):
             if command == "npm test":
                 (cwd / "reports").mkdir(exist_ok=True)
                 (cwd / "reports" / "unit.json").write_bytes(report)

@@ -65,7 +65,7 @@ class ReportsRepo(FakeGitRepo):
 
 def writes(files: dict[str, bytes], code: int = 0, output: str = "ok\n"):
     """A runner whose test command writes ``files`` into the target and exits ``code``."""
-    def runner(command, *, cwd, timeout):
+    def runner(command, *, cwd, timeout, env=None):
         if command == "npm test":
             for rel, data in files.items():
                 (cwd / rel).parent.mkdir(parents=True, exist_ok=True)
@@ -215,7 +215,7 @@ class TrustBoundaryTest(unittest.TestCase):
         (Path(outside.name) / "unit.json").write_bytes(REPORT)
         linked = []
 
-        def redirects(command, *, cwd, timeout):
+        def redirects(command, *, cwd, timeout, env=None):
             if command == "npm test":
                 linked.append(link_folder(cwd / "test-results", Path(outside.name)))
             return ProcessResult([], 0, "ok\n", "")
@@ -273,7 +273,7 @@ class FailClosedTest(unittest.TestCase):
         (Path(outside.name) / "unit.json").write_bytes(REPORT)
         linked = []
 
-        def links(command, *, cwd, timeout):
+        def links(command, *, cwd, timeout, env=None):
             if command == "npm test":
                 (cwd / "test-results").mkdir(exist_ok=True)
                 try:
