@@ -94,7 +94,7 @@ def run_command_line(
     *,
     timeout: float,
     cwd: str | Path,
-    env: Mapping[str, str] | None = None,
+    env: Mapping[str, str],
 ) -> ProcessResult:
     """Run one of the target's configured commands (``commands.*`` in its config) with
     bash, exactly as written (rule H4), and capture stdout and stderr merged in order, as
@@ -106,6 +106,9 @@ def run_command_line(
     the language that runs them. On a timeout the whole process tree is killed (a test
     runner's child processes would otherwise keep the pipe open) and ``CommandTimeout``
     carries the output captured so far.
+
+    ``env`` is required, so a configured command never inherits the factory's whole
+    environment by accident: ``evidence.verification_env`` builds it (B-15, E3).
     """
     if timeout is None or timeout <= 0:
         raise ValueError("every external command needs a positive timeout")
@@ -117,7 +120,7 @@ def run_command_line(
         process = subprocess.Popen(
             argv,
             cwd=cwd,
-            env=dict(env) if env is not None else None,
+            env=dict(env),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,

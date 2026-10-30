@@ -27,6 +27,7 @@ Have every acceptance criterion checked by someone other than the implementer: t
 1. **Map the recorded run:** `python scripts/factory.py verify map --issue <I>`. It finds the tests named `#<I> AC<n>` in the branch diff and their results in S09's recorded run, and stores the map in the checkpoint beside the evidence. It runs no tests.
    - Exit 0: go to step 2. An AC shown as `missing` is not an error here: the verdict must then be `not-verifiable` with manual steps, or `verdict check` refuses it.
    - Exit 1 (a mapped test failed): this counts as a failed attempt. Save its output to `<SCRATCH>/map-<I>.md` and go to step 5 with that file in place of the verdict.
+   - An `error:` saying that the clone does not have the default branch's head: run `git -C <T> fetch origin`, then run step 1 again. This is not a failed attempt: the factory never fetches by itself (ADR-0006).
    - An `error:`: report it exactly and stop.
 2. Start the `ac-verifier` subagent with **only** the inputs above: the acceptance criteria, the diff, the commands and `<T>`. Do not give it your reasoning, your own verdict, the map or the conversation (architecture §4.5).
 3. Write its answer, **unchanged**, to `<SCRATCH>/verdict-<I>.md`: one line per criterion (`- [x] AC<n> — pass — evidence: …`, `- [ ] AC<n> — fail — evidence: …`, `- [ ] AC<n> — not-verifiable — manual steps: …`), then its `Suite:` line. Never edit, complete or soften it.

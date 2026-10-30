@@ -40,6 +40,14 @@ consistency check only. The evidence records the commit as ``config_source``
 ``test_reports`` are still the head's (``superseded``). The diffs are taken against
 GitHub's head, by its SHA (``local_commit``). Whatever cannot be confirmed fails closed.
 
+**The commands run in a cleaned environment (B-15, E3; ADR-0006).** No GitHub token or
+authentication helper, no variable named like a secret, an empty ``gh`` config folder, an
+empty global git config and no system git config, so neither ``gh`` nor git's credential
+helper is logged in for them (``verification_env``). This is a speed bump, not a sandbox:
+code running as the user can still reach their credential store directly (backlog
+B-49).
+``local_commit`` never fetches: a missing commit stops with "run ``git fetch origin``".
+
 **A command the branch introduces is pending, not rejected (T6.5).** A command that is
 ``null`` in the approved config and set on the branch (the walking-skeleton story sets up
 the project's tooling) is recorded in ``pending`` with its text, and is not run: it is
@@ -268,8 +276,14 @@ def run_verification(
     started = now()
     runner = runner or run_command_line
     outputs: dict[str, str] = {}
-    results = [_run_one(name, commands.get(name), target_path, runner, timeout, clock,
-                        outputs) for name in VERIFY_COMMANDS]
+    # The commands run in a cleaned environment (B-15, E3; ADR-0006): no GitHub or git
+    # credentials, an empty gh config and no global or system git config. A speed bump,
+    # not a sandbox: code running as the user can still reach their credential store.
+    with tempfile.TemporaryDirectory(prefix="factory-verify-",
+                                     ignore_cleanup_errors=True) as home:
+        env = verification_env(os.environ, Path(home))
+        results = [_run_one(name, commands.get(name), target_path, runner, timeout, clock,
+                            outputs, env) for name in VERIFY_COMMANDS]
     captured, report_data = _capture_reports(report_paths, before,
                                              {rel for rel, _ in configured})
     return Evidence(
@@ -462,17 +476,14 @@ def check_origin(git: Git, repo: str) -> None:
 
 
 def local_commit(git: Git, sha: str) -> str:
-    """``sha``, once the clone has it: fetched from ``origin`` by its SHA if missing. Git
-    checks a fetched commit against its name, the hash of its content, so a fetch from
-    anywhere can only give this commit or nothing."""
+    """``sha``, if the clone has it. The factory makes no network git call here (B-46, D2;
+    ADR-0006): a fetch runs whatever transport the clone's own config names. When the
+    commit is missing, the station fetches through the guard and runs the command
+    again."""
     if not _has_commit(git, sha):
-        try:
-            git.run(["fetch", "--no-tags", "--quiet", "origin", sha])
-        except CommandError:
-            pass
-        if not _has_commit(git, sha):
-            raise EvidenceError(f"the clone does not have the default branch's head "
-                                f"{sha[:7]} and could not fetch it from origin; {_REFUSED}")
+        raise EvidenceError(f"the clone does not have the default branch's head {sha[:7]}: "
+                            f"run `git -C {git.repo_dir.as_posix()} fetch origin`, then run "
+                            f"this command again; {_REFUSED}")
     return sha
 
 
@@ -575,13 +586,47 @@ def cmd_syntax(command: str) -> str | None:
     return None
 
 
+CREDENTIAL_VARIABLES = ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN",
+                        "GITHUB_ENTERPRISE_TOKEN", "GIT_ASKPASS", "SSH_ASKPASS", "SSH_AUTH_SOCK")
+# Other variables named like a secret (a package registry, cloud or API token, a password, a key).
+_SECRET_NAME = re.compile(r"TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|API_?KEY|PRIVATE_?KEY|"
+                          r"ACCESS_?KEY", re.IGNORECASE)
+# Inherited command-line git config could name a credential helper again.
+_GIT_CONFIG_VARIABLE = re.compile(r"GIT_CONFIG(?:_COUNT|_PARAMETERS|_KEY_\d+|_VALUE_\d+)?",
+                                  re.IGNORECASE)
+
+
+def verification_env(base: Mapping[str, str], home: Path) -> dict[str, str]:
+    """The environment the approved commands run in (B-15, E3; ADR-0006): ``base``
+    without the GitHub tokens and authentication helpers (``CREDENTIAL_VARIABLES``), any
+    other variable named like a secret, and inherited command-line git config; ``gh``
+    pointed at an empty config folder, and git at an empty global config with no system
+    config (which on Windows names the credential manager), never prompting. Everything
+    else is kept, because a project's build and test tools need it. ``home`` is a fresh
+    folder outside the target for the empty gh config and git config.
+
+    This is a speed bump, not isolation: code running as the user can still read the
+    operating system's credential store or files in the user's home directly."""
+    env = {name: value for name, value in base.items()
+           if name.upper() not in CREDENTIAL_VARIABLES and not _SECRET_NAME.search(name)
+           and not _GIT_CONFIG_VARIABLE.fullmatch(name)}
+    gh_config = home / "gh"
+    gh_config.mkdir(exist_ok=True)
+    git_config = home / "gitconfig"
+    git_config.write_text("", encoding="utf-8")
+    env.update(GH_CONFIG_DIR=str(gh_config), GIT_CONFIG_GLOBAL=str(git_config),
+               GIT_CONFIG_NOSYSTEM="1", GCM_INTERACTIVE="never", GIT_TERMINAL_PROMPT="0")
+    return env
+
+
 def _run_one(name: str, command: str | None, cwd: Path, runner: Runner, timeout: float,
-             clock: Callable[[], float], outputs: dict[str, str]) -> CommandEvidence:
+             clock: Callable[[], float], outputs: dict[str, str],
+             env: Mapping[str, str]) -> CommandEvidence:
     if not command:
         return CommandEvidence(name, None, "skipped", detail=f"commands.{name} is null")
     start = clock()
     try:
-        result = runner(command, cwd=cwd, timeout=timeout)
+        result = runner(command, cwd=cwd, timeout=timeout, env=env)
     except CommandTimeout as err:
         output = outputs[name] = err.stdout + err.stderr
         return CommandEvidence(name, command, "timeout", None, _seconds(clock() - start),

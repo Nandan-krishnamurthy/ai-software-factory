@@ -408,23 +408,22 @@ class RemoteHeadTest(unittest.TestCase):
 
 
 class LocalCommitTest(unittest.TestCase):
-    """The diffs need GitHub's head in the clone: fetched by its SHA, or nothing."""
+    """The diffs need GitHub's head in the clone. The factory never fetches it (B-46, D2;
+    ADR-0006): a missing commit stops with an instruction to fetch."""
 
-    def test_a_commit_the_clone_has_is_not_fetched(self):
+    def test_a_commit_the_clone_has_is_used(self):
         repo = FakeGitRepo()
         self.assertEqual(evidence.local_commit(Git("/t", transport=repo), MAIN), MAIN)
         self.assertEqual(repo.fetches, [])
 
-    def test_a_missing_commit_is_fetched_by_its_sha(self):
+    def test_a_missing_commit_is_refused_with_a_fetch_instruction(self):
+        # Even when a fetch would have worked, the factory does not make it.
         repo = FakeGitRepo(commits=(SHA,), fetchable=(MAIN,))
-        self.assertEqual(evidence.local_commit(Git("/t", transport=repo), MAIN), MAIN)
-        self.assertEqual(repo.fetches, [MAIN])
-
-    def test_a_commit_that_cannot_be_fetched_fails(self):
-        repo = FakeGitRepo(commits=(SHA,))
-        with self.assertRaisesRegex(evidence.EvidenceError, "3333333"):
+        with self.assertRaisesRegex(evidence.EvidenceError,
+                                    r"3333333: run `git -C /t fetch origin`, then run this "
+                                    r"command again; nothing was run or accepted"):
             evidence.local_commit(Git("/t", transport=repo), MAIN)
-        self.assertEqual(repo.fetches, [MAIN])
+        self.assertEqual(repo.fetches, [])
 
 
 # ----------------------------------------------------------------------------- consumers
@@ -541,6 +540,14 @@ class ConsumersTest(unittest.TestCase):
                 code, out, err = self.cli(*argv, "--issue", "27")
                 self.assertEqual(code, 1)
                 self.assertIn("commands.lint, commands.test changed on main", out + err)
+
+    def test_a_missing_default_branch_head_stops_verify_map_with_a_fetch_instruction(self):
+        self.github.head, self.github.on_branch = "5" * 40, {MAIN}  # not in the clone
+        code, _, err = self.cli("verify", "map", "--issue", "27")
+        self.assertEqual(code, 1)
+        self.assertIn("5555555: run `git -C ", err)
+        self.assertIn(" fetch origin`, then run this command again", err)
+        self.assertEqual(self.repo.fetches, [])
 
     def test_a_missing_branch_is_reported_as_missing(self):
         self.repo.remote = {}  # GitHub has no story/27-x; the repository is reachable

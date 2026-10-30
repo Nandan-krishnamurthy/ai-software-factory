@@ -4,6 +4,7 @@ import base64
 import contextlib
 import io
 import json
+import os
 import sys
 import tempfile
 import time
@@ -34,9 +35,11 @@ class FakeRunner:
     def __init__(self, outcomes=None):
         self.outcomes = outcomes or {}
         self.calls = []
+        self.envs = []  # the environment each command was given
 
-    def __call__(self, command, *, cwd, timeout):
+    def __call__(self, command, *, cwd, timeout, env=None):
         self.calls.append((command, cwd, timeout))
+        self.envs.append(env)
         outcome = self.outcomes.get(command, (0, "ok\n"))
         if isinstance(outcome, Exception):
             raise outcome
@@ -693,7 +696,7 @@ class WindowsDialectTest(unittest.TestCase):
                 mock.patch("factory.gh.subprocess.Popen") as popen:
             popen.return_value.communicate.return_value = ("ok\n", None)
             popen.return_value.returncode = 0
-            run_command_line("npm test", timeout=5, cwd=REPO_ROOT)
+            run_command_line("npm test", timeout=5, cwd=REPO_ROOT, env=dict(os.environ))
         self.assertEqual(popen.call_args.args[0], ["/usr/bin/bash", "-c", "npm test"])
 
     def test_windows_uses_git_bash_next_to_git_never_a_bash_on_path(self):
@@ -860,7 +863,8 @@ class RunCommandLineTest(unittest.TestCase):
     def test_exit_code_and_merged_output(self):
         code = ("import sys; print('out', flush=True); "
                 "print('err', file=sys.stderr, flush=True); sys.exit(3)")
-        result = run_command_line(f'{self.PY} -c "{code}"', timeout=30, cwd=REPO_ROOT)
+        result = run_command_line(f'{self.PY} -c "{code}"', timeout=30, cwd=REPO_ROOT,
+                                  env=dict(os.environ))
         self.assertEqual(result.returncode, 3)
         self.assertEqual(result.stdout.split(), ["out", "err"])
 
@@ -868,7 +872,8 @@ class RunCommandLineTest(unittest.TestCase):
         code = "import time; print('started', flush=True); time.sleep(60)"
         start = time.monotonic()
         with self.assertRaises(CommandTimeout) as caught:
-            run_command_line(f'{self.PY} -c "{code}"', timeout=2, cwd=REPO_ROOT)
+            run_command_line(f'{self.PY} -c "{code}"', timeout=2, cwd=REPO_ROOT,
+                             env=dict(os.environ))
         self.assertLess(time.monotonic() - start, 20)
         self.assertIn("started", caught.exception.stdout)
         self.assertEqual(caught.exception.detail, "timed out after 2s")

@@ -11,6 +11,28 @@ from pathlib import Path
 from factory.errors import GitError
 from factory.gh import DEFAULT_TIMEOUT, Transport, run_process
 
+# Git settings that would make the factory's own git calls run a program the repository
+# chose (B-46, E2; ADR-0006): hooks (`switch` runs post-checkout, `pull` post-merge, any
+# ref update reference-transaction) and an fsmonitor command (`status`, `diff`). The
+# hooks folder is a path that cannot exist (below the null device), so no hook is found.
+NO_HOOKS = os.path.join(os.devnull, "factory-no-hooks")
+SAFE_CONFIG = (("core.hooksPath", NO_HOOKS), ("core.fsmonitor", "false"))
+
+
+def with_config(env: dict[str, str], pairs: Sequence[tuple[str, str]]) -> dict[str, str]:
+    """``env`` with ``pairs`` added as command-line git config (``GIT_CONFIG_COUNT``),
+    which outranks every config file, including the repository's own. Entries already in
+    ``env`` are kept and the new ones appended after them, so they win. A count that is
+    not a whole number is treated as none: git would refuse it anyway."""
+    raw = env.get("GIT_CONFIG_COUNT", "0").strip()
+    count = int(raw) if raw.isdigit() else 0
+    out = dict(env)
+    for i, (key, value) in enumerate(pairs, start=count):
+        out[f"GIT_CONFIG_KEY_{i}"] = key
+        out[f"GIT_CONFIG_VALUE_{i}"] = value
+    out["GIT_CONFIG_COUNT"] = str(count + len(pairs))
+    return out
+
 
 class Git:
     def __init__(
@@ -35,7 +57,8 @@ class Git:
         # graft file is a path that cannot exist (below the null device), so none is read.
         env["GIT_NO_REPLACE_OBJECTS"] = "1"
         env["GIT_GRAFT_FILE"] = os.path.join(os.devnull, "factory-no-grafts")
-        return env
+        # No hook and no fsmonitor command runs in any git call the factory makes (E2).
+        return with_config(env, SAFE_CONFIG)
 
     def run(
         self, args: Sequence[str], *, input: str | None = None, timeout: float | None = None
