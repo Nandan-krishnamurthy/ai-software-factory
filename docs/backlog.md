@@ -184,7 +184,7 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
   5. **Met.** Every GitHub failure, malformed answer or mismatch, a missing config and an unfetchable commit: nothing runs or is accepted, and the reason is stated.
   6. **Not done** (optional): the guard is unchanged; see [B-45](#b-45).
   7. **Met.** Unit tests use fakes with no network; the real-git tests use a throwaway local clone and contact no remote.
-- **Adversarial review, 2026-10-28:** two merge blockers, fixed in PR #56 before merge (2026-10-30):
+- **Adversarial review, 2026-10-28:** two merge blockers, fixed in PR #56 before merge (2026-10-30), and complete:
   - **B1:** superseded evidence was still accepted after the approved commands changed;
   - **B2:** the clone's git config could fake the story branch's head through `core.sshCommand`.
 
@@ -194,8 +194,12 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
   - **F3:** the commit-type and `commands.install` checks now have tests.
   - **F4:** a 404 is a missing branch only in a reachable repository.
 
-  F2–F4 are fixed in PR #56. **F1** widens [B-46](#b-46) and [B-15](#b-15), and adds [B-49](#b-49). The human's decisions D1–D4 are in [task-log.md](task-log.md#b-28-approved-config-from-github-not-local-refs).
-- **Status:** verified (the commands are allowed, and the code reads local refs; the fix, by `tests/test_config_source.py`) · **Owner:** standalone hardening task before T8.1 (the human's decisions of 2026-10-23 and 2026-10-28) · **State:** **resolved** by [PR #56](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/56) (on merge); what remains is [B-45](#b-45)
+  F2–F4 are fixed in PR #56 and **complete** (merged as `d666b6f`). **F1** widens [B-46](#b-46) and [B-15](#b-15), and adds [B-49](#b-49). The human's decisions D1–D4 are in [task-log.md](task-log.md#b-28-approved-config-from-github-not-local-refs).
+- **Third adversarial review, 2026-10-30** (of `2ae32c0`): merge recommended.
+  - **T1**, the guard allowing writes to `.factory-local/target.json`, is added to [B-46](#b-46).
+  - **T2, T4, T5 and T6** are added to [B-45](#b-45), and **T3** to [B-48](#b-48).
+  - PR #56 was merged by the human (`d666b6f`).
+- **Status:** verified (the commands are allowed, and the code reads local refs; the fix, by `tests/test_config_source.py`) · **Owner:** standalone hardening task before T8.1 (the human's decisions of 2026-10-23 and 2026-10-28) · **State:** **resolved** by [PR #56](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/56), merged 2026-10-30T06:28:17Z, merge commit `d666b6f`; what remains is [B-45](#b-45), and the follow-ups B-46 to B-49
 
 ### <a id="b-45"></a>B-45 What B-28 left: an optional guard block, and the clone's own object store
 - **What:**
@@ -203,6 +207,11 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
   - **Objects already in the clone are not re-hashed when git reads them.** A rewritten loose object, pack or commit-graph file in the target's `.git` could change what a local diff shows (`verify map`, `pr render`). Replace refs and grafts are ignored since B-28, and the approved config itself is read from GitHub, so neither is affected. Candidates: take the diff from GitHub's compare API, or verify the objects involved.
   - ~~**An older approved config is still accepted.**~~ **Resolved in PR #56 before merge** (review finding B1): evidence from an older commit of the default branch now counts only while its `commands.*` and `test_reports` are still the head's (`evidence.superseded`).
 - **Source:** the B-28 design and its probes (git 2.52, 2026-10-28); [ADR-0005](adr/0005-approved-config-from-github.md), "Not decided here"; [S11](../stations/S11-pr.md) step 1
+- **From the third adversarial review of PR #56 (2026-10-30)** (low or info; none blocks; not fixed):
+  - **T2:** `approved_config` builds the default branch's API path without encoding it, and checks the name only with the narrower `is_branch_name`, which allows a segment such as `./x`. The name comes from GitHub, and a resolved answer fails the exact-ref check, so it already fails closed. Candidate: one shared helper for both lookups (`is_git_branch_name` and encoding by segment).
+  - **T4:** called on its own, `remote_head` would report a branch 404 as "missing branch" for a token that can see the repository but not its contents. Today every consumer calls `approved_config`, which reads contents, first. Candidate: state that precondition, or pass `Approved` in.
+  - **T5:** branch names that differ only in Unicode normalization (NFC or NFD) would look like a missing branch. This still fails closed, and story branches are ASCII (`ensure._STORY_BRANCH`).
+  - **T6:** `tests/test_evidence.ApprovedOnGitHub` does not decode encoded branch names. A future test with special names through it would quietly get a 404; `NormalizingGitHub` does decode.
 - **Status:** analysis · **Owner:** T9.5 for the guard block (a scope decision for that task); unassigned for the rest · **State:** open
 
 ### <a id="b-46"></a>B-46 A repository's own git config can make git run programs, outside the guard
@@ -258,6 +267,18 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
     2. Every `git` and `gh` command line in `stations/*.md` still passes the guard.
     3. One `doctor` fixture per key, and one for an active hook.
 - **Before T8.1?** Yes, as part of E0–E3 (D3). E0 is a threat-model ADR in PR B, which states what T8.1's "can't merge" does and does not guarantee.
+- **T1, from the third adversarial review of PR #56 (2026-10-30):** the factory's trust anchor can be rewritten.
+  - **The anchor:** ADR-0005 trusts the repository `/factory-target` recorded in `.factory-local/target.json`.
+  - **The gap:** with a target active, `guard._check_write_path` allows any write under `.factory-local/` (its own exception). `guard.decide` allows a Write to `target.json` and a shell redirect into it, and it allows `git remote set-url` too. Together they move the factory to another repository: its config, evidence and PRs. The real repository then sees nothing, so this is not a merge path there, but the anchor ADR-0005 relies on is not protected.
+  - **Added to E1 (PR C), at the human's request (2026-10-30):**
+    - block direct Write/Edit operations into `.factory-local/` while a target is active;
+    - block shell redirects and the other write operations the guard tracks (`tee`, `Out-File`, `Set-Content`, `Add-Content`, and the new `cp`/`mv`/`install`/`ln`/`rsync`/`sed -i` checks) into `.factory-local/`;
+    - only the factory's own target management (`factory.py target set`, which `/factory-target` runs) may update `target.json`.
+  - **Regression tests (proposed):**
+    1. A direct Write or Edit to `.factory-local/target.json` is blocked.
+    2. A shell redirect into it is blocked, in bash and PowerShell (`>`, `>>`, `tee`, `Out-File`, `Set-Content`).
+    3. An attempt to switch the active target by any of those means is blocked, and `target show` still names the original repository.
+    4. `factory.py target set` still works.
 - **Status:** verified (the guard allows the setting, and git runs it; the wider set above, by `guard.decide`); analysis (the merge path) · **Owner:** PR B (E2) and PR C (E1), both before T8.1, in that order (D4); the guard-only rest stays a T9.5 scope decision · **State:** open
 
 ### <a id="b-47"></a>B-47 S12's check after the merge does not hold its evidence against the merge commit
@@ -274,6 +295,7 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
 - **What:** `main` in `scripts/factory/cli.py` returns 1 for any `FactoryError`, so a GitHub outage (`EvidenceError` from `approved_config` or `remote_head`) looks the same as rejected evidence or a failed test. S10 counts a `verify map` exit 1 as a failed attempt ([S10](../stations/S10-verify.md) step 1). A transient API failure can therefore spend a fix attempt, and repeated ones can make a story stuck. B-28 adds three or four API calls per command, which makes this more likely. The factory still fails closed: nothing is accepted.
 - **Before T8.1?** Not required for safety. For an unattended runner it is a reliability problem: candidate for T8.1's scope (the runner tells a transient error from a real one) or a small standalone fix (a distinct exit code, such as 2, for "could not confirm", which the stations treat as "stop and retry").
 - **Source:** the adversarial review of PR #56 (finding D3, 2026-10-28)
+- **Third adversarial review, T3 (2026-10-30):** since F4, a temporary failure (a 502, or a 403 rate limit) of the repository check after a branch 404 gives the access message ("may be private … check `gh auth status`"). That misleads during an outage, and it exits 1 like a rejection. Candidate: word the message by status (401/403/404 versus 5xx and timeouts), together with this item's exit code.
 - **Status:** analysis · **Owner:** unassigned · **State:** open
 
 ### <a id="b-49"></a>B-49 A bot identity without merge permission, and running model-written code in a sandbox
