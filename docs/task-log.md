@@ -575,8 +575,8 @@ Before the change, every new D-B case and lint failed, and the AC1 fixtures alre
 | | |
 |---|---|
 | **Specification** | [backlog.md](backlog.md#b-28), B-28: "Expected behaviour" and "Proposed acceptance criteria" 1–7 (marked "not decided"). B-28 is a backlog item, not a roadmap task. |
-| **PR** | [#56](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/56), branch `task/B-28-authoritative-config-source`, not merged |
-| **Status** | In review |
+| **PR** | [#56](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/56), merged 2026-10-30T06:28:17Z, merge commit `d666b6f` |
+| **Status** | Done |
 
 **Approved decisions.**
 - **B-28 is due before T8.1,** the human's decision on 2026-10-23 ([backlog.md](backlog.md#b-28)).
@@ -682,6 +682,15 @@ The human asked for a plan covering all four (`097efb85#1329`, 2026-10-30T05:45:
   - F2d, `..` allowed (caught by the git parity test: a `.`-leading segment is refused anyway, so traversal stays blocked);
   - F4a, no reachability check.
 - **F1** is planned, not done: [B-46](backlog.md#b-46) (E1, E2), [B-15](backlog.md#b-15) (E3) and [B-49](backlog.md#b-49) (bot identity, sandbox). E0 is the threat-model ADR in PR B. None of them is complete.
+
+**Third adversarial review** (of `2ae32c0`, `097efb85`, 2026-10-30): **merge** recommended. No defect in F2–F4 blocked it.
+- **F2–F4 are complete.** Merged with PR #56.
+- **Verified:**
+  - parity with `git check-ref-format --branch` over 400 random names, including Unicode lookalikes, control characters and every special character: 0 mismatches apart from the documented `@`;
+  - every protection caught when removed (8 of 8 mutations).
+- **T1 (medium, older than this PR):** with a target active, the guard allows a Write or a shell redirect into `.factory-local/target.json`. That file records the repository that ADR-0005 trusts, and the guard allows `git remote set-url` too, so the two together can move the factory to another repository. Added to [B-46](backlog.md#b-46) for PR C, at the human's request (`097efb85`, 2026-10-30).
+- **T2, T4, T5 and T6 (low or info)** are recorded in [B-45](backlog.md#b-45). **T3** is recorded in [B-48](backlog.md#b-48).
+- **The merge:** PR #56 was merged by the human at 2026-10-30T06:28:17Z (`d666b6f`). The factory never merges.
 
 **Handed on:**
 - [B-45](backlog.md#b-45): the optional guard block (T9.5); the clone's own object store. Its third point, an older approved config, is closed by R-J.

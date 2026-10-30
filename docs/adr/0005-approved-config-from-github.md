@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Proposed in [PR #56](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/56); accepted when the human merges it |
+| **Status** | Accepted: [PR #56](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/56) merged 2026-10-30T06:28:17Z, merge commit `d666b6f` |
 | **Decided** | 2026-10-23: B-28 is due before T8.1 ([backlog.md](../backlog.md#b-28)). 2026-10-28: B-28 runs as a standalone hardening task before T8.1 (`097efb85#173`, 2026-10-28T10:52:41Z). The design below is proposed in PR #56 and decided by its merge |
 | **Recorded** | 2026-10-28; decisions 3 and 4 corrected on 2026-10-30, before merge, after the adversarial review of PR #56 (findings B1 and B2); decision 3 extended the same day after the second review (findings F2 and F4) |
 | **Scope** | Where `verify run`, `verify check`, `verify map`, `verdict check`, `pr render` and `pr check` find the approved `.factory/config.json`, the default-branch commit their diffs are taken against, and the story branch's head |
