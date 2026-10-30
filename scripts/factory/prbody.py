@@ -142,7 +142,7 @@ def collect(gh: Gh, git: Git, repo: str, issue: int, *, stuck: bool = False) -> 
     # The limits, CI and the diff base are GitHub's default branch's, never a local ref's
     # (B-28), and the evidence's commands must have come from that branch.
     approved = evidence.approved_config(git, gh, repo)
-    head = evidence.remote_head(git, recorded.branch)
+    head = evidence.remote_head(gh, repo, recorded.branch)
     failures = set(recorded.failures())
     stale = [p for p in evidence.check_trusted(gh, repo, recorded, approved, issue=issue,
                                                branch_head=head,

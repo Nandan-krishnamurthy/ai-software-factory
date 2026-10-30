@@ -232,6 +232,55 @@ class SourceProblemsTest(unittest.TestCase):
         self.assertIn("approved config", evidence.check(self.ev, issue=27, branch_head=SHA)[0])
 
 
+TIGHTENED = {**COMMANDS, "test": "npm test && npm run test:e2e", "lint": "npm run lint"}
+
+
+class SupersededConfigTest(unittest.TestCase):
+    """Review finding B1: evidence recorded under an approved config that a later merge
+    changed does not count, although its commit is still on the default branch."""
+
+    def setUp(self):
+        self.ev, runner = run()  # `verify run` while main is at MAIN, where test is npm test
+        self.assertIn("npm test", commands_run(runner))
+        self.github = ApprovedOnGitHub(head=NEW, on_branch={MAIN}, config=config_json(COMMANDS),
+                                       configs={MAIN: config_json(COMMANDS)})
+
+    def problems(self, ev=None):
+        gh = Gh(transport=self.github)
+        git = Git("/t", transport=FakeGitRepo(commits=(SHA, MAIN, NEW)))
+        approved = evidence.approved_config(git, gh, REPO)
+        return evidence.check_trusted(gh, REPO, ev or self.ev, approved, issue=27,
+                                      branch_head=SHA)
+
+    def test_the_review_scenario_is_rejected(self):
+        # A merged PR (MAIN -> NEW) changes commands.test and sets commands.lint after the
+        # evidence was recorded: before B1's fix, check_trusted returned no problem.
+        self.github.config = config_json(TIGHTENED)
+        problems = self.problems()
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("commands.lint, commands.test changed on main after this evidence was "
+                      "recorded (3333333 to 4444444)", problems[0])
+        self.assertIn("run `verify run` again", problems[0])
+
+    def test_a_changed_test_reports_entry_is_rejected(self):
+        self.github.config = config_with(test_reports=["reports/junit.xml"])
+        self.assertIn("test_reports changed on main", self.problems()[0])
+
+    def test_a_command_that_was_pending_and_is_now_approved_is_rejected(self):
+        ev, _ = run(branch={**COMMANDS, "lint": "npm run lint"})  # lint pending, not run
+        self.assertEqual(ev.pending, {"lint": "npm run lint"})
+        self.github.config = config_json({**COMMANDS, "lint": "npm run lint"})
+        self.assertIn("commands.lint changed on main", self.problems(ev)[0])
+
+    def test_an_unchanged_config_at_an_older_commit_is_accepted(self):
+        self.assertEqual(self.problems(), [])
+        self.assertEqual(self.github.calls.count("config"), 2)  # the head's, then MAIN's
+
+    def test_an_older_config_that_cannot_be_read_is_rejected(self):
+        self.github.configs = {MAIN: None}  # 404 at MAIN
+        self.assertIn("could not be read", self.problems()[0])
+
+
 class LocalCommitTest(unittest.TestCase):
     """The diffs need GitHub's head in the clone: fetched by its SHA, or nothing."""
 
@@ -356,6 +405,30 @@ class ConsumersTest(unittest.TestCase):
                 self.assertEqual(code, 1)
                 self.assertIn("HTTP 502", err)
 
+    def test_after_the_approved_commands_change_every_consumer_rejects(self):
+        # Review finding B1, through the CLI: MAIN -> NEW changes the approved commands.
+        self.github.configs = {MAIN: self.github.config_text()}
+        self.github.config = config_json(TIGHTENED)
+        self.github.head, self.github.on_branch = NEW, {MAIN}
+        for argv in (["verify", "check"], ["verify", "map"], ["verdict", "check"]):
+            with self.subTest(argv=argv):
+                code, out, err = self.cli(*argv, "--issue", "27")
+                self.assertEqual(code, 1)
+                self.assertIn("commands.lint, commands.test changed on main", out + err)
+
+    def test_the_branch_head_is_githubs_not_gits(self):
+        # Review finding B2: whatever `git ls-remote` would answer is never asked.
+        self.github.heads = {"story/27-x": SHA}
+        self.repo.remote = {"refs/heads/story/27-x": OTHER}  # git's answer, ignored
+        for argv in (["verify", "check"], ["verify", "map"], ["verdict", "check"]):
+            with self.subTest(argv=argv):
+                self.assertEqual(self.cli(*argv, "--issue", "27")[0], 0)
+        self.github.heads = {"story/27-x": OTHER}  # GitHub moves on; git still says SHA
+        self.repo.remote = {"refs/heads/story/27-x": SHA}
+        code, out, _ = self.cli("verify", "check", "--issue", "27")
+        self.assertEqual(code, 1)
+        self.assertIn("but the head of story/27-x is 2222222", out)
+
 
 class PrBodyTest(unittest.TestCase):
     """``pr render`` and ``pr check`` take the size limit, CI and the diff base from
@@ -395,6 +468,16 @@ class PrBodyTest(unittest.TestCase):
         story = Story(28)
         story.github.fail = {"config": GH_502}
         with self.assertRaisesRegex(evidence.EvidenceError, "HTTP 502"):
+            story.facts()
+
+    def test_after_the_approved_commands_change_pr_render_refuses(self):
+        # Review finding B1: the PR would otherwise show Q4 passing for replaced commands.
+        story = Story(28)
+        data = json.loads(story.github.config_text())
+        story.github.configs = {MAIN: json.dumps(data)}
+        story.github.config = json.dumps({**data, "commands": TIGHTENED})
+        story.github.head, story.github.on_branch = NEW, {MAIN}
+        with self.assertRaisesRegex(prbody.PrBodyError, "changed on main after this evidence"):
             story.facts()
 
 
@@ -529,6 +612,36 @@ class RealCloneTest(unittest.TestCase):
                     self.git("config", "--unset", rewrite)
         self.assert_approved_commands_ran()  # and back again
 
+    @unittest.skipIf(os.environ.get("GIT_SSH_COMMAND") or os.environ.get("GIT_SSH"),
+                     "GIT_SSH_COMMAND would override the clone's core.sshCommand")
+    def test_a_fake_ssh_transport_cannot_fake_the_story_head(self):
+        # Review finding B2. The clone's own config points git's ssh at a local repository
+        # whose story/27-x is S2; the URL is still GitHub's owner/app, so check_origin
+        # passes. GitHub says story/27-x is elsewhere: evidence for S2 must be rejected.
+        fake = Path(self.tmp.name) / "fake.git"
+        Git(self.tmp.name).run(["init", "-q", "--bare", str(fake)])
+        self.git("push", "-q", str(fake), f"{self.s2}:refs/heads/story/27-x")
+        script = Path(self.tmp.name) / "fake-ssh.sh"
+        script.write_text(f'#!/bin/sh\nexec git upload-pack "{fake.as_posix()}"\n',
+                          encoding="utf-8", newline="\n")
+        self.git("remote", "set-url", "origin", f"git@github.com:{REPO}.git")
+        self.git("config", "core.sshCommand", f'sh "{script.as_posix()}"')
+        # The attack is live: git's own answer comes from the fake repository.
+        self.assertIn(self.s2, self.git("ls-remote", "--heads", "origin",
+                                        "refs/heads/story/27-x"))
+        evidence.check_origin(Git(self.path), REPO)  # the URL alone looks right
+        real = "5" * 40
+        self.github.heads = {"story/27-x": real}
+        recorded, _ = self.verify()  # evidence for S2, the fake head
+        gh = Gh(transport=self.github)
+        head = evidence.remote_head(gh, REPO, "story/27-x")
+        self.assertEqual(head, real)
+        approved = evidence.approved_config(Git(self.path), gh, REPO)
+        problems = evidence.check_trusted(gh, REPO, recorded, approved, issue=27,
+                                          branch_head=head)
+        self.assertIn(f"the evidence is for commit {self.s2[:7]}, but the head of "
+                      "story/27-x is 5555555", " ".join(problems))
+
 
 # ----------------------------------------------------------------------------- the code
 
@@ -561,6 +674,15 @@ class NoLocalTrustRootTest(unittest.TestCase):
                 for needle in ("origin/HEAD", "refs/remotes", "origin/main"):
                     self.assertNotIn(needle, strings)
                 self.assertNotIn("default_ref", names)
+
+    def test_no_evidence_consumer_asks_git_for_a_remote_head(self):
+        # B2: `ls-remote` follows the clone's own transport config.
+        for name in ("evidence.py", "cli.py", "prbody.py", "acmap.py", "verdict.py",
+                     "closeout.py"):
+            tree = ast.parse((REPO_ROOT / "scripts" / "factory" / name).read_text(
+                encoding="utf-8"))
+            with self.subTest(module=name):
+                self.assertNotIn("ls-remote", " ".join(self.code_strings(tree)))
 
     def test_only_the_evidence_module_calls_the_unchecked_check(self):
         for path in self.MODULES:

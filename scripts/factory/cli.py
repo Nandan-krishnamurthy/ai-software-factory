@@ -782,7 +782,8 @@ def _verdict_check(args: argparse.Namespace) -> int:
     git = Git(args.target.path)
     # The evidence's commands must have come from GitHub's default branch (B-28).
     approved = evidence.approved_config(git, gh, args.target.repo)
-    head = evidence.remote_head(git, mapping.branch) if mapping is not None else None
+    head = (evidence.remote_head(gh, args.target.repo, mapping.branch)
+            if mapping is not None else None)
     result.problems += verdict.cross_check(
         result, mapping, issue=args.issue,
         evidence_sha=recorded.sha if recorded is not None else None,
@@ -834,7 +835,7 @@ def _verify_check(args: argparse.Namespace) -> int:
     result, expected_branch = _recorded_evidence(gh, repo, args.issue, args.file)
     approved = evidence.approved_config(git, gh, repo)
     problems = evidence.check_trusted(gh, repo, result, approved, issue=args.issue,
-                                      branch_head=evidence.remote_head(git, result.branch),
+                                      branch_head=evidence.remote_head(gh, repo, result.branch),
                                       expected_branch=expected_branch)
     _print_safe(evidence.render_check(result, problems))
     return 1 if problems else 0
@@ -855,7 +856,7 @@ def _verify_map(args: argparse.Namespace) -> int:
     approved = evidence.approved_config(git, gh, repo)
     unusable = [p for p in evidence.check_trusted(
                     gh, repo, recorded, approved, issue=args.issue,
-                    branch_head=evidence.remote_head(git, recorded.branch),
+                    branch_head=evidence.remote_head(gh, repo, recorded.branch),
                     expected_branch=expected_branch)
                 if p not in failures]
     if unusable:

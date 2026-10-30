@@ -174,7 +174,7 @@ class CliTest(unittest.TestCase):
     def run_cli(self, fake, *argv, github=None):
         from tests.test_evidence import ApprovedOnGitHub  # not at import: it imports this
 
-        github = github or ApprovedOnGitHub(inner=fake)
+        github = github or ApprovedOnGitHub(inner=fake, heads={"story/12-x": HEAD})
         github.inner = fake
         out, err = io.StringIO(), io.StringIO()
         with mock.patch.object(target, "get_target",

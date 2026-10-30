@@ -109,20 +109,24 @@ NOT_FOUND = ProcessResult([], 1, "", "gh: Not Found (HTTP 404)")
 
 
 class ApprovedOnGitHub:
-    """GitHub's answers about the target's default branch (B-28): its name, its head
-    commit, the approved config at that commit, and whether an older commit is on it.
+    """GitHub's answers about the target's branches (B-28): the default branch's name, its
+    head commit, the approved config at a commit, whether an older commit is on it, and
+    the head of any other branch (a story branch).
 
     The config is the one ``repo`` (a ``FakeGitRepo``) holds at ``MAIN``, so a test that
     changes the approved commands changes what GitHub serves; ``config`` (text) overrides
-    it. ``on_branch``: older commits of the default branch. ``fail``: kind (``repo``,
-    ``head``, ``config``, ``compare``) to a ``ProcessResult`` or an exception. Any other
-    call goes to ``inner``."""
+    it, and ``configs`` (SHA to text) gives an older commit its own. ``on_branch``: older
+    commits of the default branch. ``heads``: a story branch's head, by name (a dict, or a
+    function); by default ``repo.remote``. ``fail``: kind (``repo``, ``head``, ``config``,
+    ``compare``) to a ``ProcessResult`` or an exception. Any other call goes to
+    ``inner``."""
 
     def __init__(self, repo=None, *, inner=None, name=None, branch="main", head=MAIN,
-                 config=None, on_branch=(), fail=None):
+                 config=None, configs=None, on_branch=(), heads=None, fail=None):
         self.repo, self.inner, self.branch, self.head = repo, inner, branch, head
         self.name = name or (repo.name if repo is not None else REPO)
-        self.config, self.on_branch, self.fail = config, set(on_branch), fail or {}
+        self.config, self.configs = config, dict(configs or {})
+        self.on_branch, self.heads, self.fail = set(on_branch), heads, fail or {}
         self.calls: list[str] = []
 
     def __call__(self, argv, *, timeout, cwd=None, env=None, input=None):
@@ -167,13 +171,16 @@ class ApprovedOnGitHub:
         if kind == "repo":
             return self._ok({"full_name": self.name, "default_branch": self.branch})
         if kind == "head":
-            if tail != f"git/ref/heads/{self.branch}":
+            name = tail.removeprefix("git/ref/heads/")
+            sha = self.head if name == self.branch else self.story_head(name)
+            if sha is None:
                 return NOT_FOUND
-            return self._ok({"ref": f"refs/heads/{self.branch}",
-                             "object": {"type": "commit", "sha": self.head}})
+            return self._ok({"ref": f"refs/heads/{name}",
+                             "object": {"type": "commit", "sha": sha}})
         if kind == "config":
             sha = tail.rsplit("=", 1)[1]
-            text = self.config_text() if sha in {self.head} | self.on_branch else None
+            text = (self.configs.get(sha, self.config_text())
+                    if sha in {self.head} | self.on_branch else None)
             if text is None:
                 return NOT_FOUND
             return self._ok({"type": "file", "encoding": "base64", "path":
@@ -185,6 +192,15 @@ class ApprovedOnGitHub:
         if old == new:
             return self._ok({"status": "identical"})
         return self._ok({"status": "ahead" if old in self.on_branch else "diverged"})
+
+    def story_head(self, name):
+        if callable(self.heads):
+            return self.heads(name)
+        if self.heads is not None:
+            return self.heads.get(name)
+        if self.repo is not None:
+            return self.repo.remote.get(f"refs/heads/{name}")
+        return None
 
     @staticmethod
     def _ok(data):
@@ -503,10 +519,14 @@ class CheckTest(unittest.TestCase):
         self.assertIn("a.js", problems)
 
     def test_remote_head(self):
-        git = Git("/t", transport=FakeGitRepo(remote={"refs/heads/story/27-x": OTHER,
-                                                      "refs/heads/story/27-x-old": SHA}))
-        self.assertEqual(evidence.remote_head(git, "story/27-x"), OTHER)
-        self.assertIsNone(evidence.remote_head(git, "story/9-z"))
+        # GitHub's API, exact match only: a branch that merely starts with the name is not it.
+        github = ApprovedOnGitHub(heads={"story/27-x": OTHER, "story/27-x-old": SHA})
+        gh = Gh(transport=github)
+        self.assertEqual(evidence.remote_head(gh, REPO, "story/27-x"), OTHER)
+        self.assertIsNone(evidence.remote_head(gh, REPO, "story/9-z"))
+        github.fail = {"head": ProcessResult([], 1, "", "gh: Server Error (HTTP 502)")}
+        with self.assertRaisesRegex(evidence.EvidenceError, "HTTP 502"):
+            evidence.remote_head(gh, REPO, "story/27-x")
 
 
 class CheckpointEvidenceTest(unittest.TestCase):

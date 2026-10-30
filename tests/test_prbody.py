@@ -83,7 +83,9 @@ class Story:
         self.pr_state, self.pr_head, self.pr_draft = "open", self.head, False
         self.pr_body: str | None = None
         # GitHub: the default branch, its head and the approved config (B-28), then the rest.
-        self.github = ApprovedOnGitHub(self.repo, inner=self._github)
+        self.github = ApprovedOnGitHub(
+            self.repo, inner=self._github,
+            heads=lambda name: self.remote_head if name == self.branch else None)
 
     def _evidence(self, output: str, test_exit: int, pending_test: bool) -> evidence.Evidence:
         outputs = {"npm run build": (0, text(FIXTURES / f"{self.issue}.build.txt")),

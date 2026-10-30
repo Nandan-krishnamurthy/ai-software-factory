@@ -30,11 +30,14 @@ not what ran.
 commit and the config at that commit are what GitHub reports for the repository
 ``/factory-target`` recorded (``approved_config``). The clone's ``origin/HEAD`` and
 ``origin/main`` are local refs that anything able to run git in the target can repoint,
-so nothing reads them. The clone's ``origin`` must still name that repository, because
-``ls-remote`` and ``fetch`` use it. The evidence records the commit as ``config_source``
+so nothing reads them. The story branch's head comes from GitHub's API too
+(``remote_head``), never from ``git ls-remote``, whose transport the clone's own config
+decides. The clone's ``origin`` must still name that repository (``check_origin``), a
+consistency check only. The evidence records the commit as ``config_source``
 (``main@<full SHA>``), and every consumer (``verify check``, ``verify map``,
 ``verdict check``, ``pr render``/``pr check``) holds it against GitHub through
-``check_trusted``: it must be a commit of the default branch. The diffs are taken against
+``check_trusted``: it must be a commit of the default branch whose approved commands and
+``test_reports`` are still the head's (``superseded``). The diffs are taken against
 GitHub's head, by its SHA (``local_commit``). Whatever cannot be confirmed fails closed.
 
 **A command the branch introduces is pending, not rejected (T6.5).** A command that is
@@ -90,6 +93,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from factory.comments import EVIDENCE_END, EVIDENCE_START, evidence_block
 from factory.config import (
@@ -390,6 +394,12 @@ def approved_config(git: Git, gh: Gh, repo: str) -> Approved:
             and _SHA.fullmatch(sha)):
         raise EvidenceError(f"GitHub's answer for the head of {repo}'s {branch} names no "
                             f"commit; {_REFUSED}")
+    return Approved(branch, sha, _config_at(gh, repo, branch, sha))
+
+
+def _config_at(gh: Gh, repo: str, branch: str, sha: str) -> Config:
+    """``.factory/config.json`` at commit ``sha`` of ``repo``'s default branch ``branch``,
+    through GitHub's contents API. It must name the same repository and default branch."""
     where = f"{CONFIG_RELPATH.as_posix()} at {branch}@{sha[:7]} on GitHub"
     try:
         found = gh.api(f"repos/{repo}/contents/{CONFIG_RELPATH.as_posix()}?ref={sha}")
@@ -409,7 +419,7 @@ def approved_config(git: Git, gh: Gh, repo: str) -> Approved:
     if config.default_branch != branch:
         raise EvidenceError(f"{where} has default_branch {config.default_branch!r}, but "
                             f"GitHub's default branch for {repo} is {branch!r}; {_REFUSED}")
-    return Approved(branch, sha, config)
+    return config
 
 
 def _github(gh: Gh, endpoint: str, what: str) -> Any:
@@ -439,7 +449,10 @@ def _parse_contents(found: Any, where: str) -> Config:
 
 def check_origin(git: Git, repo: str) -> None:
     """The clone's ``origin`` (with any ``insteadOf`` rewrite, as git would use it) must be
-    ``repo`` on GitHub: ``ls-remote`` (``remote_head``) and ``fetch`` go there."""
+    ``repo`` on GitHub. A consistency check, not a source of trust: the URL does not decide
+    where git actually connects (``core.sshCommand`` can redirect it), so no fact the
+    factory trusts is read through ``origin``. Only ``local_commit`` fetches through it,
+    by SHA."""
     url = git.remote_url("origin")
     named = parse_github_remote(url) if url else None
     if named is None or named.lower() != repo.lower():
@@ -472,9 +485,11 @@ def _has_commit(git: Git, sha: str) -> bool:
 
 def source_problems(gh: Gh, repo: str, evidence: Evidence, approved: Approved
                     ) -> list[str]:
-    """Why the evidence's ``config_source`` is not a commit of GitHub's default branch,
-    which the commands must have come from; empty if it is. Evidence that names no source
-    is left to ``check``."""
+    """Why the evidence's ``config_source`` is not a commit of GitHub's default branch
+    whose approved commands and ``test_reports`` are still the head's; empty if it is.
+    An older commit counts only while nothing the evidence depends on has changed since,
+    so evidence never stands for commands the human has since replaced. Evidence that
+    names no source is left to ``check``."""
     if not evidence.config_source:
         return []
     m = _SOURCE.fullmatch(evidence.config_source)
@@ -492,10 +507,31 @@ def source_problems(gh: Gh, repo: str, evidence: Evidence, approved: Approved
     except (CommandError, GhAuthError, AttributeError) as err:
         return [f"GitHub could not confirm that {m['sha'][:7]} is a commit of "
                 f"{approved.branch}: {err}; run `verify run` again"]
-    if status in ("ahead", "identical"):  # the default branch's head descends from it
-        return []
-    return [f"the evidence's commands came from {m['sha'][:7]}, which is not a commit of "
-            f"{approved.branch} on GitHub ({status}); run `verify run` again"]
+    if status not in ("ahead", "identical"):  # the default branch's head descends from it
+        return [f"the evidence's commands came from {m['sha'][:7]}, which is not a commit "
+                f"of {approved.branch} on GitHub ({status}); run `verify run` again"]
+    try:
+        recorded = _config_at(gh, repo, approved.branch, m["sha"])
+    except EvidenceError as err:
+        return [f"the approved config the evidence's commands came from could not be read: "
+                f"{err}; run `verify run` again"]
+    changed = superseded(recorded, approved.config)
+    if changed:
+        return [f"the approved {', '.join(changed)} changed on {approved.branch} after this "
+                f"evidence was recorded ({m['sha'][:7]} to {approved.sha[:7]}), so it does not "
+                "show the commands approved now; run `verify run` again"]
+    return []
+
+
+def superseded(recorded: Config, current: Config) -> list[str]:
+    """What the evidence depends on that differs between the approved config it was
+    recorded with and the current one: each ``commands.*`` entry (they decide what ran,
+    what is unapproved and what is pending), and ``test_reports``."""
+    changed = [f"commands.{name}" for name in COMMAND_NAMES
+               if recorded.commands.get(name) != current.commands.get(name)]
+    if tuple(recorded.test_reports) != tuple(current.test_reports):
+        changed.append("test_reports")
+    return changed
 
 
 def unapproved_changes(target_path: Path, approved: Mapping[str, str | None]) -> list[str]:
@@ -878,14 +914,31 @@ def _escape(payload: str) -> str:
 # ----------------------------------------------------------------------------- checking
 
 
-def remote_head(git: Git, branch: str) -> str | None:
-    """The commit ``branch`` points at on ``origin`` (what its PR shows), or ``None``."""
-    out = git.run(["ls-remote", "--heads", "origin", f"refs/heads/{branch}"])
-    for line in out.splitlines():
-        sha, _, ref = line.partition("\t")
-        if ref.strip() == f"refs/heads/{branch}":
-            return sha.strip()
-    return None
+def remote_head(gh: Gh, repo: str, branch: str) -> str | None:
+    """The commit ``branch`` points at in ``repo`` on GitHub (what its PR shows), or
+    ``None`` when GitHub has no such branch. Read from GitHub's API, never through
+    ``git ls-remote``, whose transport the clone's own config decides: a
+    ``core.sshCommand`` can make it answer from any repository (B-28). Raises
+    ``EvidenceError`` when GitHub cannot be asked or gives no commit."""
+    try:
+        found = gh.api(f"repos/{repo}/git/ref/heads/{quote(branch, safe='/')}")
+    except CommandError as err:
+        if "HTTP 404" in err.stderr:
+            return None
+        raise EvidenceError(f"GitHub could not be asked for the head of {branch}: {err}; "
+                            f"{_REFUSED}") from None
+    except GhAuthError as err:
+        raise EvidenceError(f"GitHub could not be asked for the head of {branch}: {err}; "
+                            f"{_REFUSED}") from None
+    if not isinstance(found, dict) or found.get("ref") != f"refs/heads/{branch}":
+        return None  # no exact match (GitHub may list refs that only start with it)
+    target = found.get("object")
+    sha = target.get("sha") if isinstance(target, dict) else None
+    if not (isinstance(target, dict) and target.get("type") == "commit"
+            and isinstance(sha, str) and _SHA.fullmatch(sha)):
+        raise EvidenceError(f"GitHub's answer for the head of {branch} names no commit; "
+                            f"{_REFUSED}")
+    return sha
 
 
 def check_trusted(gh: Gh, repo: str, evidence: Evidence, approved: Approved, *, issue: int,
