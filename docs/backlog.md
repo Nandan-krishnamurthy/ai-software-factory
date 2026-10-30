@@ -168,6 +168,23 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
     - live on this machine, where `gh` is logged in and git has a credential helper: `gh auth status` reports not logged in, no helper or global/system config is read, and `git credential fill` gives nothing (criterion 2);
     - the full suite passes (criterion 3).
   - **Limit:** see [ADR-0006](adr/0006-threat-model-typed-commands-and-executed-code.md).
+- **Review of PR #58 (2026-10-30), fixed before merge:**
+  - **G2:** the commands run inside the target, whose own `.git/config` could still name a credential helper or an askpass program. `verification_env` now resets `credential.helper` and `core.askPass` as command-line git config, which outranks it. Test: a planted fake of each answers when only global and system config are isolated, and stays silent in the cleaned environment.
+  - **G3:** names such as `GITHUB_PAT`, `GH_PAT`, `MYSQL_PWD`, `SMTP_PASS`, `NPM_AUTH`, `SONAR_LOGIN` and `STRIPE_KEY` passed the filter. Now removed:
+    - whole-word `PAT`, `PWD`, `PASS`, `AUTH`, `LOGIN` and `KEY` names, and `NETRC` and `PASSPHRASE`;
+    - any value in a GitHub token format, whatever the name;
+    - any URL with a password in it.
+
+    `GIT_AUTHOR_*`, `PATH` and the shell's `PWD` are kept. Each category has a test that compares names only. The strategy is unchanged: **no strict allow-list** (the human's decision, 2026-10-30).
+- **Still exposed, documented in [ADR-0006](adr/0006-threat-model-typed-commands-and-executed-code.md) (G5, G6), not fixed:**
+  - **S01's baseline** (`install`, `build`, `lint`, `typecheck`, `test`) runs through commands the station types, with the user's **full** environment: [B-50](#b-50).
+  - **Model-written code can still:**
+    - use the user's SSH keys to push (to `main` too, while it has no branch protection, [B-24](#b-24));
+    - read credentials in `~/.netrc` or `~/.git-credentials`;
+    - reach the operating system's credential store, or start git with a helper of its own;
+    - read a secret in a variable whose name and value match no rule.
+
+  **E3 is not complete credential isolation.**
 - **Stays open:** E3 is a speed bump, not isolation. Code running as the user can still reach the credential store; that remainder is [B-49](#b-49). Closing this item is the human's decision.
 - **Status:** verified (the inherited environment; E3, by the tests above) · **Owner:** PR B, before T8.1 (the human's decision D3/D4, `097efb85#1384`; PR B authorized in `097efb85#1670`) · **State:** open
 
@@ -300,6 +317,10 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
     - **through `Git`:** none of them runs for the same calls, nor for `ensure.ensure_branch`;
     - **inherited config:** existing entries are kept.
   - **Still not covered** ([ADR-0006](adr/0006-threat-model-typed-commands-and-executed-code.md)): git that model-written code runs by itself.
+- **Review of PR #58 (2026-10-30), fixed before merge:**
+  - **G1:** an inherited `GIT_CONFIG_PARAMETERS` (what `git -c` passes on, which a typed command could set before `python scripts/factory.py …`) overrode `GIT_CONFIG_COUNT`, and a planted hook ran through `Git`. `git.with_config` now appends the settings at the end of both variables.
+  - **G4:** `os.devnull` is `nul` on Windows, so `nul\factory-no-hooks` was a relative path, looked up inside the repository. `git.unopenable` gives an absolute path in the NUL device's namespace (`\\.\NUL\…`), where nothing written is kept, for the hooks folder and the graft file.
+  - **Tests:** real git, each with a control showing the planted program runs for plain git.
 - **Stays open:** E1 and T1 (PR C, the guard and `doctor`) are not done.
 - **Status:** verified (the guard allows the setting, and git runs it; the wider set above, by `guard.decide`; E2, by the tests above); analysis (the merge path) · **Owner:** PR B (E2, implemented) and PR C (E1 and T1, not started), both before T8.1, in that order (D4); the guard-only rest stays a T9.5 scope decision · **State:** open
 
@@ -338,6 +359,13 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
   5. For the sandbox: `verify run` cannot read the bot's token.
 - **Source:** the second adversarial review of PR #56 (F1, 2026-10-30); architecture §9.4; `config.IDENTITY_MODES_PLANNED`
 - **Status:** analysis · **Owner:** unassigned: not a roadmap task, so the human sequences it, as with B-28 · **State:** open
+
+### <a id="b-50"></a>B-50 S01's baseline runs the project's commands with the user's full environment
+- **What:** S01 step 4 runs the baseline (`install`, `build`, `lint`, `typecheck`, `test`) through commands the station types in Claude Code's shell. That shell has the user's whole environment, GitHub credentials included. E3's cleaned environment applies only to `verify run` ([B-15](#b-15)). For a project the factory did not write (a half-built repository), this is third-party code, including `install` scripts, running with those credentials. For any project, it is code the factory did not check.
+- **Candidate:** a factory command for the baseline (for example `factory.py baseline run`) that runs the discovered commands with `evidence.verification_env`, the way `verify run` does. S01 would call it instead of running the commands itself. Its results would be recorded like evidence.
+- **Before T8.1?** Not required for the controlled sandbox demonstrations that may follow E0–E3, as long as the limit is documented (D3). Required before the factory works unattended on a project it did not write (with [B-49](#b-49)).
+- **Source:** the adversarial review of PR #58 (G5, 2026-10-30); [S01](../stations/S01-discovery.md) step 4; [ADR-0006](adr/0006-threat-model-typed-commands-and-executed-code.md)
+- **Status:** verified (the station text; the environment is Claude Code's) · **Owner:** unassigned: a separately tracked follow-up, sequenced by the human · **State:** open
 
 ## Verification not yet done
 

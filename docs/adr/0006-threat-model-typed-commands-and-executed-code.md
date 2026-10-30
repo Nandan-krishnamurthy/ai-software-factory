@@ -31,19 +31,26 @@ T8.1's acceptance criterion "the runner can't merge (the guard is still active)"
 2. **What "the runner can't merge" guarantees.**
    - **Covered:**
      - **every command the model types**, through the guard, once E1 is done;
-     - **every git call the factory makes itself** (`Git`): no hook and no fsmonitor command runs there, because `core.hooksPath` points at a path that cannot exist and `core.fsmonitor` is off, as command-line config that outranks the repository's (E2). And the factory makes no network git call in the evidence path: `local_commit` no longer fetches, and a missing commit stops with "run `git fetch origin`" (D2).
-   - **Not covered** until [B-49](../backlog.md#b-49): **model-written code that deliberately tries to merge.** Such code runs as the user and can reach the user's credential store.
+     - **every git call the factory makes itself** (`Git`): no hook and no fsmonitor command runs there (E2).
+       - **How:** `core.hooksPath` points at an absolute path in the NUL device's namespace, where nothing written is kept (`git.unopenable`), and `core.fsmonitor` is off.
+       - **Precedence:** both are set as command-line config at the end of **both** `GIT_CONFIG_COUNT` and `GIT_CONFIG_PARAMETERS`. Git reads the second after the first, and the last value wins, so neither the repository's config nor anything inherited overrides them (review findings G1 and G4).
+       - **No fetch:** the factory makes no network git call in the evidence path. `local_commit` no longer fetches, and a missing commit stops with "run `git fetch origin`" (D2).
+   - **Not covered** until [B-49](../backlog.md#b-49): **model-written code that deliberately tries to merge, or to push to the default branch.** Such code runs as the user. It can reach the user's credential store, use the user's SSH keys to push (`main` has no branch protection yet, [B-24](../backlog.md#b-24)), or read credentials in files such as `~/.netrc`.
+   - **Not covered** until [B-50](../backlog.md#b-50): **the baseline that S01 runs** (`install`, `build`, `lint`, `typecheck`, `test`) through commands the station types, **with the user's full environment**, credentials included. For a project the factory did not write, that is third-party code, `install` scripts included.
 3. **E3 is a speed bump, not isolation.** `verify run` gives every approved command `evidence.verification_env`:
    - no GitHub token or authentication helper;
-   - no variable named like a secret;
+   - **removed by name:** variables named like a secret, as a word anywhere (`TOKEN`, `SECRET`, `PASSWORD`, `PASSPHRASE`, `CREDENTIAL`, `NETRC`, `API_KEY`, ...) or as a whole word between underscores (`PAT`, `PWD`, `PASS`, `AUTH`, `LOGIN`, `KEY`). `GIT_AUTHOR_*`, `PATH` and the shell's `PWD` are kept;
+   - **removed by value:** any variable holding a GitHub token (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`) or a URL with a password, whatever it is called (G3);
    - no inherited command-line git config;
    - an empty `gh` config folder, an empty global git config, and no system git config;
+   - `credential.helper` and `core.askPass` reset to empty as command-line config, which outranks the target repository's own `.git/config`, where the commands run (G2);
    - no prompts.
 
-   Neither `gh` nor git's credential helper is logged in for the commands. But code running as the user can still:
-   - read the operating system's credential store (such as Windows Credential Manager);
-   - read files in the user's home, such as `~/.ssh` and `~/.git-credentials`;
-   - start `gh` or git with its own settings.
+   So neither `gh` nor git's credential helper is logged in for the commands, through any config git reads. **E3 is still not complete credential isolation.** Code running as the user can still:
+   - read the operating system's credential store (such as Windows Credential Manager), or start git with a helper of its own (`git -c credential.helper=… credential fill`);
+   - read files in the user's home, such as `~/.ssh`, `~/.netrc` and `~/.git-credentials`, and use SSH keys directly;
+   - read a secret in a variable whose name and value match none of the rules above;
+   - start `gh` or git with settings of its own.
 
    E3 stops accidental or casual use of the credentials, not a deliberate attempt.
 4. **When unattended running is allowed** (D3).
@@ -76,9 +83,16 @@ T8.1's acceptance criterion "the runner can't merge (the guard is still active)"
   - every command of a `verify run` gets it;
   - live on a machine where `gh` is logged in and git has a credential helper: inside the cleaned environment, `gh auth status` reports not logged in, no helper is configured, no global or system config is read, and `git credential fill` produces no credential.
 - **`tests/test_config_source.py`:** a missing commit stops with the fetch instruction, and no fetch is attempted even when one would work.
+- **Review fixes G1–G4** (the adversarial review of PR #58), with real git and controls:
+  - an inherited `GIT_CONFIG_PARAMETERS` naming a planted hooks folder and fsmonitor runs them for plain git, and runs neither through `Git`;
+  - on Windows, a folder planted at the old relative path `nulactory-no-hooks` is never used;
+  - a repository whose own `.git/config` names a fake credential helper and askpass program: they answer when only global and system config are isolated, and stay silent in the cleaned environment;
+  - one test per filtering category (names and values), comparing names only, never values.
 - The mutation results are in [task-log.md](../task-log.md).
 
 ## Not decided here
+
+- The S01 baseline's environment: [B-50](../backlog.md#b-50).
 
 - The bot identity, the GitHub rule that keeps it from merging, and the sandbox: [B-49](../backlog.md#b-49). These need the human to sequence them, and possibly a paid GitHub plan for branch protection on private repositories.
 - The guard work for risk A: E1 and T1 ([B-46](../backlog.md#b-46), PR C).

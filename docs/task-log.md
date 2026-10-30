@@ -751,6 +751,70 @@ The human asked for a plan covering all four (`097efb85#1329`, 2026-10-30T05:45:
   - **E2:** no hooks override; no fsmonitor override; existing entries overwritten; `Git._env` skipping the safe config; `local_commit` fetching again.
   - **E3:** `SSH_AUTH_SOCK` kept; secret-named variables kept; inherited git config kept; `gh` config not isolated; system git config read; global git config read; the runner given the full environment.
 
+**Adversarial review of PR #58 and fixes before merge.**
+- **The review:** of `dfc9e1f` (`097efb85#1996`, 2026-10-30T08:15:58Z). It recommended *fix before merge*, with four blockers (G1–G4) and three non-blocking findings (G5–G7).
+- **The approval:** the human approved fixing G1–G4 in PR #58 and documenting G5 and G6 (`097efb85#2044`, 2026-10-30T08:23:04Z). Instructions:
+  - keep the current environment strategy, with no strict allow-list;
+  - do not claim G5 or G6 are fixed;
+  - no push without approval.
+- **G1, an inherited `GIT_CONFIG_PARAMETERS`:**
+  - **Found:** a probe showed it overrides `GIT_CONFIG_COUNT`. With `'core.hooksPath'=<folder>` inherited, a planted hook ran through `Git`. `guard.decide` allows that variable as a prefix of `python scripts/factory.py …`, in bash and as `$env:`.
+  - **Fix:** `git.with_config` appends the settings at the end of both variables. Git reads `GIT_CONFIG_PARAMETERS` after `GIT_CONFIG_COUNT`, and the last value of a key wins. Inherited entries are kept, quoted as git quotes them.
+- **G4, a relative hooks path on Windows:**
+  - **Found:** `os.devnull` is `nul` on Windows, so `nul\factory-no-hooks` was relative. A folder planted there (through the `\\?\` prefix) held a hook git tried to run, and the factory's `git switch` failed with "cannot spawn".
+  - **Fix:** `git.unopenable` gives an absolute path in the NUL device's namespace (`\\.\NUL\…`) for the hooks folder and the graft file. Python reports that path as existing, but it is neither a folder nor a file, and nothing written there is kept. The probe confirmed that git found no hook there and read no grafts, and printed no hint.
+- **G2, the target's own credential helper:**
+  - **Found:** the commands run inside the target, and a fake `credential.helper` in its `.git/config` still answered inside the cleaned environment.
+  - **Fix:** `verification_env` resets `credential.helper` and `core.askPass` as command-line config (`NO_CREDENTIALS_CONFIG`).
+  - **The control:** it isolates global and system config, so only the planted fakes can answer. A first probe without that isolation reached the system credential manager before the planted helper. That could have read a real credential into memory (nothing was printed), so the test never does it.
+- **G3, secret filtering:**
+  - **Found:** `GITHUB_PAT`, `GH_PAT`, `CR_PAT`, `MYSQL_PWD`, `SMTP_PASS`, `NPM_AUTH`, `DOCKER_AUTH_CONFIG`, `DATABASE_URL`, `SONAR_LOGIN`, `STRIPE_KEY` and `NETRC` passed the filter.
+  - **Fix:** `evidence.is_secret` removes:
+    - whole-word `PAT`, `PWD`, `PASS`, `AUTH`, `LOGIN` and `KEY` names, and `NETRC` and `PASSPHRASE`;
+    - any value in a GitHub token format (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`), whatever the name;
+    - any URL with a password in it.
+
+    `GIT_AUTHOR_*`, `GIT_COMMITTER_*`, `PATH`, `PATHEXT` and the shell's `PWD` and `OLDPWD` are kept.
+  - **On this machine:** two variables are removed (names only checked: an API key and a session token), and none of the legitimate names tested.
+- **G5 and G6, documented, not fixed:**
+  - S01's baseline runs with the full environment: new [B-50](backlog.md#b-50).
+  - Model-written code can still use SSH keys, `~/.netrc` and the credential store, and push to `main`: [ADR-0006](adr/0006-threat-model-typed-commands-and-executed-code.md), [B-15](backlog.md#b-15) and [B-49](backlog.md#b-49).
+  - ADR-0006 now says that E3 is not complete credential isolation.
+- **G7:** covered by the new tests.
+- **Tests added:**
+  - `test_factory_git_env`: inherited `GIT_CONFIG_PARAMETERS`, with a control and `ensure.ensure_branch`; the old relative path planted, on Windows; absolute paths that keep nothing; `GIT_CONFIG_PARAMETERS` order and quoting.
+  - `test_verification_env`: a repository with a planted helper and askpass, with a control; one test per filtering category (review names, identity and near-misses, GitHub token values, URLs with a password), comparing names only. Fake token values are built in the test, so no token-shaped text is in the source.
+  - **Updated:** the live helper test now reads `credential.helper` as the empty reset, and accepts only command-line origins. The graft-path assertion is now absolute.
+- **Mutation run, after the fixes** (`706b8ce`, from a green baseline): **20 of 21 caught**, covering G1–G4 and the earlier E2 and E3 protections.
+  - **E3a survived, and is equivalent:** with `SSH_AUTH_SOCK` taken off the explicit list, G3's whole-word `AUTH` rule still removes it. The variable is still removed, by two rules instead of one.
+  - **G3d's first run hung** (the 15-minute limit) while a full suite ran at the same time. In a second run without that load, its own test (`test_identity_paths_and_near_misses_are_kept`) caught it.
+  - **The full suite under load:** run at the same time as the mutation run, the PowerShell suite took 1,617 s. Two git calls hit the factory's 60-second timeout there (a `git commit` in a B-28 real-clone test, and a `git ls-tree` in `test_trace`). Timed afterwards, a commit through `Git`, with the new hooks path, took 0.13 s, the same as plain git. A later PowerShell run, made by mistake in parallel with the Git Bash suite, had one `git push` to a local remote time out. A push through `Git` was then timed at about 0.5 s, the same as plain git.
+- **Validation, run one shell at a time:** `python -m unittest`, **1116 tests, OK (5 skipped)**, in **both Git Bash and PowerShell**; `python -m ruff check`, **clean**.
+
+  ```
+G1a GIT_CONFIG_PARAMETERS left alone: KILLED ['test_a_quote_in_a_value_is_quoted_as_git_does', 'test_credentials_and_secrets_are_removed_and_the_rest_kept']
+G1b ours put before the inherited: KILLED ['test_inherited_git_config_parameters_cannot_turn_hooks_back_on', 'test_inherited_parameters_are_kept_and_ours_come_last']
+G4 relative path again: KILLED ['test_a_folder_planted_at_the_old_relative_path_is_never_used', 'test_git_ignores_replace_refs_and_grafts']
+G2a no credential reset: KILLED ['test_credentials_and_secrets_are_removed_and_the_rest_kept', 'test_neither_helper_nor_askpass_answers_in_the_cleaned_environment']
+G2b askPass not reset: KILLED ['test_credentials_and_secrets_are_removed_and_the_rest_kept', 'test_neither_helper_nor_askpass_answers_in_the_cleaned_environment']
+G3a whole-word names dropped: KILLED ['test_names_from_the_review_are_removed']
+G3b GitHub token values kept: KILLED ['test_a_github_token_value_is_removed_whatever_the_name']
+G3c URLs with a password kept: KILLED ['test_a_url_with_a_password_is_removed']
+G3d the shell's PWD removed: KILLED ['test_identity_paths_and_near_misses_are_kept']
+E2a hooks not disabled: KILLED ['test_a_count_git_would_refuse_is_replaced', 'test_a_folder_planted_at_the_old_relative_path_is_never_used']
+E2b fsmonitor not disabled: KILLED ['test_a_count_git_would_refuse_is_replaced', 'test_a_folder_planted_at_the_old_relative_path_is_never_used']
+E2c existing COUNT entries overwritten: KILLED ['test_config_already_in_the_environment_still_applies', 'test_entries_already_there_are_kept_and_ours_appended']
+E2d Git._env skips the safe config: KILLED ['test_a_folder_planted_at_the_old_relative_path_is_never_used', 'test_config_already_in_the_environment_still_applies']
+E2e local_commit fetches again: KILLED ['test_a_missing_commit_is_refused_with_a_fetch_instruction', 'test_a_missing_default_branch_head_stops_verify_map_with_a_fetch_instruction']
+E3a SSH_AUTH_SOCK kept: SURVIVED []
+E3b secret-word names kept: KILLED ['test_credentials_and_secrets_are_removed_and_the_rest_kept', 'test_every_command_gets_the_cleaned_environment']
+E3c inherited git config kept: KILLED ['test_credentials_and_secrets_are_removed_and_the_rest_kept']
+E3d gh config not isolated: KILLED ['test_an_inherited_override_cannot_point_elsewhere', 'test_credentials_and_secrets_are_removed_and_the_rest_kept']
+E3e system git config read: KILLED ['test_an_inherited_override_cannot_point_elsewhere', 'test_control_the_planted_helper_answers_without_the_reset']
+E3f global git config read: KILLED ['test_an_inherited_override_cannot_point_elsewhere', 'test_credentials_and_secrets_are_removed_and_the_rest_kept']
+E3g runner gets the full environment: KILLED ['test_every_command_gets_the_cleaned_environment']
+  ```
+
 **Handed on (all open):**
 - [B-46](backlog.md#b-46): E1 and T1 in PR C (the guard and `doctor`), not started.
 - [B-15](backlog.md#b-15): stays open. E3 is a speed bump; the remainder is [B-49](backlog.md#b-49), and closing B-15 is the human's decision.
