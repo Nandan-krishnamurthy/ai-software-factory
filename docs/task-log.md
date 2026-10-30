@@ -608,7 +608,7 @@ Before the change, every new D-B case and lint failed, and the AC1 fixtures alre
   - `test_ci_runs_are_read_when_required` sets GitHub's config instead of the clone's copy of the base (`test_prbody`).
 
 
-**Adversarial review and fixes before merge.** The session review of PR #56 at `3b3c0d4` (`097efb85`, 2026-10-28) recommended *fix before merge*. It reported two blockers and three further findings. The human asked for both blockers to be fixed in PR #56, and for the other findings to be recorded in the backlog (`097efb85`, 2026-10-30).
+**Adversarial review and fixes before merge.** The session review of PR #56 at `3b3c0d4` (`097efb85`, 2026-10-28) recommended *fix before merge*. It reported two blockers and three further findings. The human asked for both blockers to be fixed in PR #56, and for the other findings to be recorded in the backlog (`097efb85#1060`, 2026-10-30T04:56:23Z).
 - **R-J, B1: superseded evidence.**
   - **The finding:** evidence recorded at an older commit of the default branch was accepted after a merge had changed the approved commands. The proof of concept: `commands.test` and `commands.lint` change from `main@3333333` to `main@4444444`, and `check_trusted` returned nothing.
   - **The fix:** `source_problems` also reads the config at the evidence's commit through GitHub, `superseded` compares it with the head's, and any change rejects the evidence with "run `verify run` again". The comparison covers every `commands.*` entry (they decide what ran, what is unapproved and what is pending) and `test_reports`. Nothing else in the config affects the evidence.
@@ -626,8 +626,66 @@ Before the change, every new D-B case and lint failed, and the AC1 fixtures alre
   Run against `3b3c0d4`, they gave 11 failures and 4 errors. Three of the errors come from the new helpers and signatures; the CLI-level B2 test fails on behaviour.
 - **Changed existing tests:** `test_evidence.test_remote_head` now asks the fake GitHub. The shared fake `ApprovedOnGitHub` also serves story-branch heads and per-commit configs, and `test_prbody` and `test_verdict` give it their story branch's head.
 
+**Second adversarial review and fixes before merge.** The second review, of `d7b4233` (`097efb85`, 2026-10-30), recommended merge, with four findings:
+- **F1:** B-46 understated the problem of programs outside the guard.
+- **F2:** the exact-ref check was essential but untested.
+- **F3:** two checks were untested.
+- **F4:** a 404 read as "not on origin, push it".
+
+The human asked for a plan covering all four (`097efb85#1329`, 2026-10-30T05:45:36Z). They then approved it with decisions D1–D4, and authorized F2–F4 in PR #56 (`097efb85#1384`, 2026-10-30T05:53:47Z).
+- **Approved decisions:**
+  - **D1, git hooks:** option (b), with safeguards:
+    - hooks are disabled for every git operation the factory controls;
+    - changing the hook configuration is blocked;
+    - `doctor` detects and reports active hooks;
+    - real-git tests prove that hooks cannot run in the factory's own operations;
+    - the documentation states that this does not fully protect against model-written code running git by itself during verification.
+  - **D2:** `local_commit`'s fetch is removed; the factory stops with "run `git fetch origin`" (PR B).
+  - **D3:** a separate bot identity without merge permission is **required before unattended execution on real projects** ([B-49](backlog.md#b-49)). Controlled sandbox demonstrations may proceed after E0–E3, with their limitations documented. E0–E3 are not complete isolation against malicious model-written code.
+  - **D4, structure:**
+    - F2–F4 in PR #56;
+    - PR B for E0 (the threat-model ADR), E2 (the factory's own git calls) and E3 (`verify run`'s environment);
+    - PR C for E1 (the guard and `doctor`);
+    - B-49 for the bot identity and sandboxing.
+
+    PR B and PR C start only after the human approves the next phase.
+- **R-L, F2: branch names.**
+  - **What GitHub does:** it resolves `..` in a request path. On the live API, `git/ref/heads/x/../../../../pulls/42` returned pull request #42, and `story/41-…/../41-…` returned that branch.
+  - **The fix:** `config.is_git_branch_name` implements git's `check-ref-format --branch` rules, without its `@{-N}` shorthand, and rejects `@`, which git expands there as shorthand. `remote_head` refuses any other name before a request, then percent-encodes each segment, `%` included, so a legal name such as `%2e%2e` is sent as `%252e%252e`. The exact-ref check stays.
+  - **The default branch** keeps the stricter `is_branch_name`, which the config file also enforces.
+  - **Live check (read-only):** encoded names (`%2B`, `%C3%A9`, `%23`, `%40`, `%7B…%7D`, `%252e%252e`) get a 404 from the ref endpoint, not a 400. Not checked: a positive match for a real branch with such characters, since none exists and creating one would be a write.
+- **R-M, F3:** tests pin the commit-type check in `remote_head` and the `commands.install` comparison in `superseded`.
+- **R-N, F4: a 404.** GitHub answers 404 both for a missing branch and for a repository the credentials cannot see. After a branch 404, `remote_head` reads `repos/<R>` (`_confirm_reachable`):
+  - if that works, the branch is missing, and `check` and `verdict.cross_check` say "not on GitHub (the repository is reachable …): push it, or check the branch name";
+  - if it fails, `remote_head` fails closed with an access message that suggests `gh auth status` and never says "push it".
+- **Tests:** 11 new tests in `tests/test_config_source.py` (61 in all):
+  - `NormalizingGitHub`, a fake that resolves paths as GitHub does, and decodes `%2e` first as a worst case;
+  - names git rejects are never sent;
+  - legitimate names are encoded segment by segment;
+  - `%2e%2e` stays literal;
+  - only the exact ref counts;
+  - a ref that is not a commit is refused;
+  - a missing branch in a reachable repository;
+  - an unreachable repository (404, 403, 502);
+  - parity with real git over 34 names;
+  - `commands.install`;
+  - two CLI tests for F4.
+
+  `test_evidence` and `test_acmap` now pin "not on GitHub". The shared fake gains `fail_on_call`.
+- **Mutation run on the commit:** from a green baseline, each of 8 mutations was caught by its own test:
+  - N3, the exact-ref check;
+  - N6, the commit type;
+  - N9, `install`;
+  - F2a, no validation;
+  - F2b, no encoding;
+  - F2c, `%` left unencoded;
+  - F2d, `..` allowed (caught by the git parity test: a `.`-leading segment is refused anyway, so traversal stays blocked);
+  - F4a, no reachability check.
+- **F1** is planned, not done: [B-46](backlog.md#b-46) (E1, E2), [B-15](backlog.md#b-15) (E3) and [B-49](backlog.md#b-49) (bot identity, sandbox). E0 is the threat-model ADR in PR B. None of them is complete.
+
 **Handed on:**
 - [B-45](backlog.md#b-45): the optional guard block (T9.5); the clone's own object store. Its third point, an older approved config, is closed by R-J.
 - [B-46](backlog.md#b-46), [B-47](backlog.md#b-47) and [B-48](backlog.md#b-48): from the review.
+- [B-46](backlog.md#b-46), [B-15](backlog.md#b-15) and [B-49](backlog.md#b-49): F1, planned as PR B and PR C, and as a later task for B-49.
 - **Evidence recorded before B-28 is rejected** ("run `verify run` again"). No story was in progress: Task Tracker was at `INCREMENT_COMPLETE`, and both M7 sandboxes were at Gate A ([progress.md](progress.md#m7-plans--target-knowledge)).
 - **Not run live.** The first live run is the next `verify run` on a target, at the latest T8.1's demo.
