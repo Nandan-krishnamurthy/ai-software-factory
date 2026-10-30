@@ -33,6 +33,7 @@ Each entry is taken from its PR description and from the session in which the hu
 | `c161a4ca` | `c161a4ca-39de-4e3c-bad1-4ee8caeeadcb` | Documentation migration PRs C and D, T6.5 |
 | `34ce5c38` | `34ce5c38-2316-4d05-b39a-d5a5cf9b33bc` | T7.1, T7.2, T7.3 |
 | `1821c3de` | `1821c3de-0747-4e19-a8a9-4e9b532df1bb` | T7.4, the T7 audit and its follow-up documentation PR |
+| `097efb85` | `097efb85-defc-4f51-af7e-29b021ce53d0` | The pre-T8 assessment, B-28 |
 
 ---
 
@@ -566,3 +567,125 @@ Before the change, every new D-B case and lint failed, and the AC1 fixtures alre
 - **Q6 Scope stays "Not checked"** ([B-08](backlog.md#b-08)). The `Files` bullet is now there to use for it, but wiring it into `pr render` and the issue body was out of P-A's scope.
 - **The review's follow-ups:** [B-38](backlog.md#b-38), [B-39](backlog.md#b-39) and [B-40](backlog.md#b-40).
 - **After merge:** the second review's non-blocking findings (`1821c3de#1385`) are recorded as [B-42](backlog.md#b-42). The M7 milestone is not complete: its demo ([B-37](backlog.md#b-37)) has not been run or recorded in [progress.md](progress.md).
+
+---
+
+## B-28 Approved config from GitHub, not local refs
+
+| | |
+|---|---|
+| **Specification** | [backlog.md](backlog.md#b-28), B-28: "Expected behaviour" and "Proposed acceptance criteria" 1–7 (marked "not decided"). B-28 is a backlog item, not a roadmap task. |
+| **PR** | [#56](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/56), branch `task/B-28-authoritative-config-source`, not merged |
+| **Status** | In review |
+
+**Approved decisions.**
+- **B-28 is due before T8.1,** the human's decision on 2026-10-23 ([backlog.md](backlog.md#b-28)).
+- **B-28 runs as a standalone hardening task before T8.1,** not in T9.5. Its roadmap position is unchanged ([ADR-0001](adr/0001-strict-sequential-roadmap.md)). The human approved this in `097efb85#173` (2026-10-28T10:52:41Z). The same message asked the task to choose the source of truth, to decide on the ADR, and to report any decision that still needs the human.
+
+**Proposed decisions** (analysis; the human decides them by reviewing and merging the PR):
+1. **R-A: GitHub's API is the source of truth.** The default branch's name, its head and the config come from `repos/<R>`, `git/ref/heads/<D>` and `contents/.factory/config.json?ref=<SHA>`, for the repository `/factory-target` recorded. B-28's criterion 1 also allowed `git ls-remote --symref origin HEAD`. That was not chosen, because `ls-remote` follows the `origin` URL, which `remote set-url`, `remote.origin.url` and an `insteadOf` rewrite can all change (B-28's own `set-url` finding).
+2. **R-B: the config is read through GitHub, not from the clone.** `verify run` therefore needs no fetch. `verify map` and `pr render` still need the head commit in the clone for their diffs: they fetch it by its SHA if it is missing (`local_commit`), and otherwise nothing runs.
+3. **R-C: the config must agree.** Its `default_branch` must be the branch GitHub names (B-28 criterion 1), and its `repo` must be the recorded repository (an addition).
+4. **R-D: `origin` must still be the recorded repository** (`check_origin`, an addition). It is compared through `git remote get-url`, which applies `insteadOf`. **Superseded by R-K after the review:** `remote_head` no longer uses `ls-remote`, and `check_origin` is a consistency check only.
+5. **R-E: `config_source` is `<branch>@<full SHA>`.** A source counts as approved when it is GitHub's head, or an ancestor of it according to GitHub's compare API (B-28 criterion 4, "a commit of the remote default branch"). The stricter rule, head only, was not chosen: it would also reject evidence after unrelated merges, and S11 step 1 already sends a story back to S09 when the default branch moves. The residual case was recorded in [B-45](backlog.md#b-45). **Narrowed by R-J after the review:** an ancestor counts only while its approved commands and `test_reports` are still the head's.
+6. **R-F: replace refs and grafts are ignored** by every git call the factory makes (`Git._env`). This is an addition. The probes found that `git replace` changes what a commit reads as, contents and parents both, and that a graft file changes its parents. Either could make the approved commit show the story's config, or move a merge base so that a diff hides a change. `GIT_NO_REPLACE_OBJECTS=1` ignores replace refs. `GIT_GRAFT_FILE` points below the null device (`os.devnull`), a path that cannot exist. Pointing it at the null device itself also ignores grafts, but git then prints a deprecation hint on every call.
+7. **R-G: one checked path for consumers.** `check_trusted` is `check` plus `source_problems`. A static test fails if any module other than `evidence.py` calls `evidence.check(` directly, or if any factory code reads `origin/HEAD`, `origin/main` or `refs/remotes`.
+8. **R-H: a new ADR, not an amendment.** An accepted ADR is not rewritten ([README](README.md), "Writing an ADR"), and the decision spans tasks: T8.1's runner and T9's target-root invocation both rely on it. So the decision is recorded as [ADR-0005](adr/0005-approved-config-from-github.md), and ADR-0004's Status names the part it supersedes. The rest of ADR-0004 stands.
+9. **R-I: criterion 6, the optional guard block, is not done.** The fix reads no local ref, the project's test code bypasses the guard anyway, and guard hardening belongs to T9.5 ([B-45](backlog.md#b-45)).
+
+**Deviations from B-28's proposed criteria:**
+- **Criterion 1:** GitHub's API rather than `ls-remote` (R-A). Criterion 1 allowed either.
+- **Criterion 3:** the replace-ref and graft cases are added (R-F).
+- **Criterion 2:** the config is read from GitHub, not from the commit in the clone. The commit is fetched only for the diffs (R-B).
+
+**Evidence:**
+- **Tests:** `tests/test_config_source.py` (40 tests). The suite went from 1030 tests to 1070 (5 skipped, as before), and `ruff` is clean.
+- **Tests first:** before the change, the new tests failed or errored (`run_verification` took no GitHub source). The replace-ref and graft tests failed on their assertions: the old code read the forged config and the shortened diff.
+- **Changed existing tests:** the fakes now serve the approved config from GitHub (`ApprovedOnGitHub` in `tests/test_evidence.py`), and the expectations changed:
+  - `config_source` is `main@<full SHA>`;
+  - `verify map`'s diff base is GitHub's head SHA (`test_acmap`);
+  - `test_unknown_default_branch_runs_nothing` now fails on GitHub, not on `origin/HEAD`;
+  - `test_ci_runs_are_read_when_required` sets GitHub's config instead of the clone's copy of the base (`test_prbody`).
+
+
+**Adversarial review and fixes before merge.** The session review of PR #56 at `3b3c0d4` (`097efb85`, 2026-10-28) recommended *fix before merge*. It reported two blockers and three further findings. The human asked for both blockers to be fixed in PR #56, and for the other findings to be recorded in the backlog (`097efb85#1060`, 2026-10-30T04:56:23Z).
+- **R-J, B1: superseded evidence.**
+  - **The finding:** evidence recorded at an older commit of the default branch was accepted after a merge had changed the approved commands. The proof of concept: `commands.test` and `commands.lint` change from `main@3333333` to `main@4444444`, and `check_trusted` returned nothing.
+  - **The fix:** `source_problems` also reads the config at the evidence's commit through GitHub, `superseded` compares it with the head's, and any change rejects the evidence with "run `verify run` again". The comparison covers every `commands.*` entry (they decide what ran, what is unapproved and what is pending) and `test_reports`. Nothing else in the config affects the evidence.
+  - **The cost:** one more API call, only when the default branch has moved on.
+- **R-K, B2: the story branch's head.**
+  - **The finding:** `remote_head` used `git ls-remote origin`, whose transport the clone's own config decides. In the proof of concept, a `core.sshCommand` made it answer from a local fake repository, while `check_origin` passed.
+  - **The fix:** `remote_head(gh, repo, branch)` reads `repos/<R>/git/ref/heads/<B>` from GitHub's API, exact match only. A 404 means "not on GitHub"; any other failure fails closed. It is used by `verify check`, `verify map`, `verdict check` and `pr render`/`pr check`.
+  - **What stays:** `check_origin`, as a consistency check. ADR-0005 decision 3 is corrected to say so.
+- **D1–D3** are recorded as [B-46](backlog.md#b-46) (a repository's git config can make git run programs; recommended before T8.1, the human's decision), [B-47](backlog.md#b-47) (S12's check after the merge) and [B-48](backlog.md#b-48) (exit codes).
+- **Review-fix tests:** 10 new tests in `tests/test_config_source.py`, which now has 50:
+  - **B1:** the review's scenario; `test_reports`; a pending command later approved; an unchanged older config; an unreadable older config; every CLI consumer; `pr render`.
+  - **B2:** a real clone with a fake ssh transport; a CLI test where git and GitHub disagree.
+  - **Static:** no evidence consumer runs `ls-remote`.
+
+  Run against `3b3c0d4`, they gave 11 failures and 4 errors. Three of the errors come from the new helpers and signatures; the CLI-level B2 test fails on behaviour.
+- **Changed existing tests:** `test_evidence.test_remote_head` now asks the fake GitHub. The shared fake `ApprovedOnGitHub` also serves story-branch heads and per-commit configs, and `test_prbody` and `test_verdict` give it their story branch's head.
+
+**Second adversarial review and fixes before merge.** The second review, of `d7b4233` (`097efb85`, 2026-10-30), recommended merge, with four findings:
+- **F1:** B-46 understated the problem of programs outside the guard.
+- **F2:** the exact-ref check was essential but untested.
+- **F3:** two checks were untested.
+- **F4:** a 404 read as "not on origin, push it".
+
+The human asked for a plan covering all four (`097efb85#1329`, 2026-10-30T05:45:36Z). They then approved it with decisions D1–D4, and authorized F2–F4 in PR #56 (`097efb85#1384`, 2026-10-30T05:53:47Z).
+- **Approved decisions:**
+  - **D1, git hooks:** option (b), with safeguards:
+    - hooks are disabled for every git operation the factory controls;
+    - changing the hook configuration is blocked;
+    - `doctor` detects and reports active hooks;
+    - real-git tests prove that hooks cannot run in the factory's own operations;
+    - the documentation states that this does not fully protect against model-written code running git by itself during verification.
+  - **D2:** `local_commit`'s fetch is removed; the factory stops with "run `git fetch origin`" (PR B).
+  - **D3:** a separate bot identity without merge permission is **required before unattended execution on real projects** ([B-49](backlog.md#b-49)). Controlled sandbox demonstrations may proceed after E0–E3, with their limitations documented. E0–E3 are not complete isolation against malicious model-written code.
+  - **D4, structure:**
+    - F2–F4 in PR #56;
+    - PR B for E0 (the threat-model ADR), E2 (the factory's own git calls) and E3 (`verify run`'s environment);
+    - PR C for E1 (the guard and `doctor`);
+    - B-49 for the bot identity and sandboxing.
+
+    PR B and PR C start only after the human approves the next phase.
+- **R-L, F2: branch names.**
+  - **What GitHub does:** it resolves `..` in a request path. On the live API, `git/ref/heads/x/../../../../pulls/42` returned pull request #42, and `story/41-…/../41-…` returned that branch.
+  - **The fix:** `config.is_git_branch_name` implements git's `check-ref-format --branch` rules, without its `@{-N}` shorthand, and rejects `@`, which git expands there as shorthand. `remote_head` refuses any other name before a request, then percent-encodes each segment, `%` included, so a legal name such as `%2e%2e` is sent as `%252e%252e`. The exact-ref check stays.
+  - **The default branch** keeps the stricter `is_branch_name`, which the config file also enforces.
+  - **Live check (read-only):** encoded names (`%2B`, `%C3%A9`, `%23`, `%40`, `%7B…%7D`, `%252e%252e`) get a 404 from the ref endpoint, not a 400. Not checked: a positive match for a real branch with such characters, since none exists and creating one would be a write.
+- **R-M, F3:** tests pin the commit-type check in `remote_head` and the `commands.install` comparison in `superseded`.
+- **R-N, F4: a 404.** GitHub answers 404 both for a missing branch and for a repository the credentials cannot see. After a branch 404, `remote_head` reads `repos/<R>` (`_confirm_reachable`):
+  - if that works, the branch is missing, and `check` and `verdict.cross_check` say "not on GitHub (the repository is reachable …): push it, or check the branch name";
+  - if it fails, `remote_head` fails closed with an access message that suggests `gh auth status` and never says "push it".
+- **Tests:** 11 new tests in `tests/test_config_source.py` (61 in all):
+  - `NormalizingGitHub`, a fake that resolves paths as GitHub does, and decodes `%2e` first as a worst case;
+  - names git rejects are never sent;
+  - legitimate names are encoded segment by segment;
+  - `%2e%2e` stays literal;
+  - only the exact ref counts;
+  - a ref that is not a commit is refused;
+  - a missing branch in a reachable repository;
+  - an unreachable repository (404, 403, 502);
+  - parity with real git over 34 names;
+  - `commands.install`;
+  - two CLI tests for F4.
+
+  `test_evidence` and `test_acmap` now pin "not on GitHub". The shared fake gains `fail_on_call`.
+- **Mutation run on the commit:** from a green baseline, each of 8 mutations was caught by its own test:
+  - N3, the exact-ref check;
+  - N6, the commit type;
+  - N9, `install`;
+  - F2a, no validation;
+  - F2b, no encoding;
+  - F2c, `%` left unencoded;
+  - F2d, `..` allowed (caught by the git parity test: a `.`-leading segment is refused anyway, so traversal stays blocked);
+  - F4a, no reachability check.
+- **F1** is planned, not done: [B-46](backlog.md#b-46) (E1, E2), [B-15](backlog.md#b-15) (E3) and [B-49](backlog.md#b-49) (bot identity, sandbox). E0 is the threat-model ADR in PR B. None of them is complete.
+
+**Handed on:**
+- [B-45](backlog.md#b-45): the optional guard block (T9.5); the clone's own object store. Its third point, an older approved config, is closed by R-J.
+- [B-46](backlog.md#b-46), [B-47](backlog.md#b-47) and [B-48](backlog.md#b-48): from the review.
+- [B-46](backlog.md#b-46), [B-15](backlog.md#b-15) and [B-49](backlog.md#b-49): F1, planned as PR B and PR C, and as a later task for B-49.
+- **Evidence recorded before B-28 is rejected** ("run `verify run` again"). No story was in progress: Task Tracker was at `INCREMENT_COMPLETE`, and both M7 sandboxes were at Gate A ([progress.md](progress.md#m7-plans--target-knowledge)).
+- **Not run live.** The first live run is the next `verify run` on a target, at the latest T8.1's demo.

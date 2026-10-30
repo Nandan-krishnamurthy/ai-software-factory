@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Accepted, implemented in T6.1 |
+| **Status** | Accepted, implemented in T6.1. Where decision 2 reads the default branch from (`origin/HEAD`) is superseded by [ADR-0005](0005-approved-config-from-github.md) |
 | **Decided** | 2026-10-08 (`1bcf8818#1503`, 2026-10-08T08:42:57Z) |
 | **Recorded** | 2026-10-22 |
 | **Scope** | The `build`, `lint`, `typecheck` and `test` commands from the target's `.factory/config.json` that the factory runs itself (`factory.py verify run`) |

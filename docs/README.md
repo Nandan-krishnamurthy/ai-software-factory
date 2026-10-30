@@ -51,6 +51,7 @@ The latest milestone is the last entry in [progress.md](progress.md). The latest
 | [0001](adr/0001-strict-sequential-roadmap.md) | Strictly sequential roadmap execution | Accepted |
 | [0002](adr/0002-m6-m9-roadmap-provenance.md) | The M6–M9 roadmap: rationale and provenance | Accepted |
 | [0003](adr/0003-plugin-packaging-in-t9.md) | Plugin packaging and target-root invocation belong to T9 | Accepted, work planned |
-| [0004](adr/0004-configured-commands-bash-approved-only.md) | Configured commands run with Bash, and only approved commands run | Accepted, implemented in T6.1 |
+| [0004](adr/0004-configured-commands-bash-approved-only.md) | Configured commands run with Bash, and only approved commands run | Accepted, implemented in T6.1; where it reads the default branch from is superseded by 0005 |
+| [0005](adr/0005-approved-config-from-github.md) | The approved config is read from GitHub, never from the clone's local refs | Proposed in PR #56; accepted on its merge |
 
 **Writing an ADR.** Use the next free four-digit number and the sections of the existing ADRs: a header table (Status, Decided, Recorded), Context, Decision, Consequences, Evidence, and gaps where there are any. An accepted ADR is not rewritten. A later decision that replaces it is a new ADR, and the old one's Status becomes "Superseded by ADR-NNNN". Decisions that concern one task only belong in the task log instead.

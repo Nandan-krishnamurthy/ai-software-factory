@@ -25,7 +25,9 @@ from tests import REPO_ROOT
 from tests.test_comments import REPO, FakeGitHub, checkpoint
 from tests.test_evidence import (
     COMMANDS,
+    MAIN,
     SHA,
+    ApprovedOnGitHub,
     FakeGitRepo,
     FakeRunner,
     config_json,
@@ -276,7 +278,7 @@ class RequiredMapTest(unittest.TestCase):
         self.assertIn("the AC-to-test map is for commit 1111111, but the head of story/27-x "
                       "is 2222222: the map is stale; run `verify run`, then `verify map`, "
                       "again", problems)
-        self.assertIn("is not on origin", check(self.text, self.result,
+        self.assertIn("is not on GitHub", check(self.text, self.result,
                                                 branch_head=None).problems[0])
 
     def test_a_map_for_another_issue_is_refused(self):
@@ -603,7 +605,8 @@ class LedgerTest(unittest.TestCase):
         (path / "out" / "same.xml").write_text("<testsuites/>", encoding="utf-8")
         (path / "out" / "planted.xml").write_text("<testsuites/>", encoding="utf-8")
         recorded = evidence.run_verification(
-            path, issue=27, repo=REPO, git=Git(path, transport=repo), runner=writes_reports,
+            path, issue=27, repo=REPO, git=Git(path, transport=repo),
+            gh=Gh(transport=ApprovedOnGitHub(repo)), runner=writes_reports,
             reports=["out/fresh.xml", "out/same.xml", "out/planted.xml", "out/none.xml"])
         self.assertEqual([(r["path"], r["status"]) for r in recorded.reports], [
             ("out/fresh.xml", "captured"), ("out/same.xml", "unchanged"),
@@ -644,7 +647,7 @@ class IssueGitHub(FakeGitHub):
 
 
 class DiffingGitRepo(FakeGitRepo):
-    """A target whose story branch adds ``diff`` to ``origin/main``."""
+    """A target whose story branch adds ``diff`` to the default branch."""
 
     def __init__(self, diff, **kwargs):
         super().__init__(**kwargs)
@@ -678,7 +681,8 @@ class CliTest(unittest.TestCase):
         out, err = io.StringIO(), io.StringIO()
         with mock.patch.object(target, "get_target",
                                return_value=target.Target(self.path, REPO)), \
-                mock.patch.object(cli, "Gh", lambda: Gh(transport=self.github)), \
+                mock.patch.object(cli, "Gh", lambda: Gh(
+                    transport=ApprovedOnGitHub(self.repo, inner=self.github))), \
                 mock.patch.object(cli, "Git", lambda p: Git(p, transport=self.repo)), \
                 mock.patch.object(evidence, "run_command_line", runner), \
                 mock.patch.object(evidence, "guard_vetter", lambda p: lambda c: None), \
@@ -706,7 +710,7 @@ class CliTest(unittest.TestCase):
         self.assertEqual(self.cli("verify", "run", "--issue", "27")[0], 0)
         code, out, err = self.cli("verify", "map", "--issue", "27")
         self.assertEqual(code, 0, err)
-        self.assertEqual(self.repo.diffs, [f"origin/main...{SHA}"])
+        self.assertEqual(self.repo.diffs, [f"{MAIN}...{SHA}"])
         self.assertIn("results from: the test command's full output (101 lines)", out)
         self.assertIn("OK: every AC has a mapped test that passed.", out)
         stored = acmap.from_body(self.body())

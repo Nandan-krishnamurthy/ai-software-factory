@@ -21,10 +21,24 @@ tree, so that commit is exactly what was tested, and records whether HEAD moved 
 tracked files changed during the run.
 
 **Only approved commands run.** The commands come from ``.factory/config.json`` on the
-default branch on ``origin`` (``origin/HEAD``), which only a PR the human merged can
-change, never from the story branch's working tree, which the model can edit. A
-``commands.*`` value that differs on the branch is recorded, and ``verify check`` rejects
-the evidence: the branch's change was not what ran.
+default branch, which only a PR the human merged can change, never from the story
+branch's working tree, which the model can edit. A ``commands.*`` value that differs on
+the branch is recorded, and ``verify check`` rejects the evidence: the branch's change was
+not what ran.
+
+**The approved config is GitHub's (B-28, ADR-0005).** The default branch's name, its head
+commit and the config at that commit are what GitHub reports for the repository
+``/factory-target`` recorded (``approved_config``). The clone's ``origin/HEAD`` and
+``origin/main`` are local refs that anything able to run git in the target can repoint,
+so nothing reads them. The story branch's head comes from GitHub's API too
+(``remote_head``), never from ``git ls-remote``, whose transport the clone's own config
+decides. The clone's ``origin`` must still name that repository (``check_origin``), a
+consistency check only. The evidence records the commit as ``config_source``
+(``main@<full SHA>``), and every consumer (``verify check``, ``verify map``,
+``verdict check``, ``pr render``/``pr check``) holds it against GitHub through
+``check_trusted``: it must be a commit of the default branch whose approved commands and
+``test_reports`` are still the head's (``superseded``). The diffs are taken against
+GitHub's head, by its SHA (``local_commit``). Whatever cannot be confirmed fails closed.
 
 **A command the branch introduces is pending, not rejected (T6.5).** A command that is
 ``null`` in the approved config and set on the branch (the walking-skeleton story sets up
@@ -66,6 +80,8 @@ while the story goes on. When the test command failed, or is pending, nothing mo
 reported.
 """
 
+import base64
+import binascii
 import hashlib
 import json
 import os
@@ -77,12 +93,29 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from factory.comments import EVIDENCE_END, EVIDENCE_START, evidence_block
-from factory.config import COMMAND_NAMES, CONFIG_RELPATH, Config, load_config, parse_config
-from factory.errors import CommandNotFound, CommandTimeout, FactoryError, GitError
-from factory.gh import ProcessResult, run_command_line
+from factory.config import (
+    COMMAND_NAMES,
+    CONFIG_RELPATH,
+    Config,
+    is_branch_name,
+    is_git_branch_name,
+    load_config,
+    parse_config,
+)
+from factory.errors import (
+    CommandError,
+    CommandNotFound,
+    CommandTimeout,
+    FactoryError,
+    GhAuthError,
+    GitError,
+)
+from factory.gh import Gh, ProcessResult, run_command_line
 from factory.git import Git
+from factory.target import parse_github_remote
 
 SCHEMA = 1
 VERIFY_COMMANDS = ("build", "lint", "typecheck", "test")
@@ -128,7 +161,9 @@ class Evidence:
     commands: list[CommandEvidence]
     sha_after: str
     changed_files: list[str] = field(default_factory=list)
-    config_source: str = ""  # the approved config the commands came from: origin/main@abc1234
+    # The approved config the commands came from, as GitHub reported it (B-28):
+    # main@<full SHA of the default branch's head>.
+    config_source: str = ""
     unapproved: list[str] = field(default_factory=list)  # commands.* changed on the branch
     # Commands null in the approved config that the branch sets: name -> the branch's text.
     # Not run; approved by the merge (T6.5).
@@ -180,6 +215,7 @@ def run_verification(
     issue: int,
     repo: str,
     git: Git,
+    gh: Gh,
     runner: Runner | None = None,
     vet: Vetter | None = None,
     timeout: float = DEFAULT_TIMEOUT,
@@ -188,7 +224,8 @@ def run_verification(
     reports: Sequence[str] = (),
 ) -> Evidence:
     """Run the approved quality commands on the target's current commit and record the
-    results. Nothing runs if any check before the run fails. ``reports``: paths, relative
+    results. The approved config is GitHub's, for ``repo`` (``approved_config``). Nothing
+    runs if any check before the run fails. ``reports``: paths, relative
     to the target, of test reports the commands write, besides the approved config's
     ``test_reports``; each is captured only if the run created or changed it."""
     extra_paths = [_report_path(target_path, r) for r in reports]
@@ -204,7 +241,8 @@ def run_verification(
         sha = git.rev_parse("HEAD")
     except GitError:
         raise EvidenceError("the target has no commits") from None
-    config, source = approved_config(git)
+    approved = approved_config(git, gh, repo)
+    config, source = approved.config, approved.source
     commands = {name: config.commands.get(name) for name in COMMAND_NAMES}
     # Only the approved config names the reports to trust (B-26); the branch's are not read.
     configured = [_report_path(target_path, r, "test_reports entry")
@@ -309,45 +347,192 @@ def _capture_reports(paths: list[tuple[str, Path]], before: dict[str, str | None
     return captured, data
 
 
-def approved_commands(git: Git) -> tuple[dict[str, str | None], str]:
-    """The ``commands`` of ``.factory/config.json`` on the default branch on ``origin``,
-    and where they came from (``origin/main@abc1234``). Raises ``EvidenceError`` when
-    there is no such config: nothing may run without approved commands."""
-    config, source = approved_config(git)
-    return {name: config.commands.get(name) for name in COMMAND_NAMES}, source
+# ----------------------------------------------------------------------------- the approved config
 
 
-def approved_config(git: Git) -> tuple[Config, str]:
-    """``.factory/config.json`` on the default branch on ``origin`` (only a merged PR
-    changes it), and where it came from (``origin/main@abc1234``)."""
-    ref = default_ref(git)
-    path = f"{ref}:{CONFIG_RELPATH.as_posix()}"
+_SHA = re.compile(r"[0-9a-f]{40}")
+_SOURCE = re.compile(r"(?P<branch>[^@\s]+)@(?P<sha>[0-9a-f]{40})")
+_REFUSED = "nothing was run or accepted"
+
+
+@dataclass(frozen=True)
+class Approved:
+    """The approved config and the commit it is in, as GitHub reports them (B-28)."""
+
+    branch: str  # the default branch's name
+    sha: str  # its head commit
+    config: Config
+
+    @property
+    def source(self) -> str:
+        """``config_source`` in the evidence: ``main@<full SHA>``."""
+        return f"{self.branch}@{self.sha}"
+
+    @property
+    def label(self) -> str:
+        return f"{self.branch}@{self.sha[:7]}"
+
+
+def approved_config(git: Git, gh: Gh, repo: str) -> Approved:
+    """``.factory/config.json`` at the head of ``repo``'s default branch, which only a PR
+    the human merged changes, all three as GitHub reports them: the branch's name, its
+    head commit, and the file at that commit. ``repo`` is the repository
+    ``/factory-target`` recorded; the clone's ``origin`` must still name it. The config
+    must name the same repository and default branch. Raises ``EvidenceError`` when any
+    of this cannot be confirmed: nothing may run, and no evidence may be accepted,
+    without it."""
+    check_origin(git, repo)
+    info = _github(gh, f"repos/{repo}", f"{repo}'s default branch")
+    branch = info.get("default_branch") if isinstance(info, dict) else None
+    if not is_branch_name(branch):
+        raise EvidenceError(f"GitHub named no valid default branch for {repo} "
+                            f"({branch!r}); {_REFUSED}")
+    head = _github(gh, f"repos/{repo}/git/ref/heads/{branch}", f"the head of {branch}")
+    target = head.get("object") if isinstance(head, dict) else None
+    sha = target.get("sha") if isinstance(target, dict) else None
+    if not (isinstance(target, dict) and head.get("ref") == f"refs/heads/{branch}"
+            and target.get("type") == "commit" and isinstance(sha, str)
+            and _SHA.fullmatch(sha)):
+        raise EvidenceError(f"GitHub's answer for the head of {repo}'s {branch} names no "
+                            f"commit; {_REFUSED}")
+    return Approved(branch, sha, _config_at(gh, repo, branch, sha))
+
+
+def _config_at(gh: Gh, repo: str, branch: str, sha: str) -> Config:
+    """``.factory/config.json`` at commit ``sha`` of ``repo``'s default branch ``branch``,
+    through GitHub's contents API. It must name the same repository and default branch."""
+    where = f"{CONFIG_RELPATH.as_posix()} at {branch}@{sha[:7]} on GitHub"
     try:
-        sha = git.rev_parse(ref)
-        text = git.run(["show", f"{sha}:{CONFIG_RELPATH.as_posix()}"])
-        config = parse_config(json.loads(text), path)
-    except GitError:
-        raise EvidenceError(f"{path} does not exist: there are no approved commands to "
-                            "run (they reach the default branch only through a merged "
-                            "PR)") from None
-    except ValueError as err:
-        raise EvidenceError(f"{path} is not valid JSON: {err}") from None
+        found = gh.api(f"repos/{repo}/contents/{CONFIG_RELPATH.as_posix()}?ref={sha}")
+    except CommandError as err:
+        if "HTTP 404" in err.stderr:
+            raise EvidenceError(f"{where} does not exist: there are no approved commands to "
+                                "run (they reach the default branch only through a merged "
+                                "PR)") from None
+        raise EvidenceError(f"GitHub could not be asked for {where}: {err}; {_REFUSED}"
+                            ) from None
+    except GhAuthError as err:
+        raise EvidenceError(f"GitHub could not be asked for {where}: {err}; {_REFUSED}"
+                            ) from None
+    config = _parse_contents(found, where)
+    if config.repo.lower() != repo.lower():
+        raise EvidenceError(f"{where} is for {config.repo}, not {repo}; {_REFUSED}")
+    if config.default_branch != branch:
+        raise EvidenceError(f"{where} has default_branch {config.default_branch!r}, but "
+                            f"GitHub's default branch for {repo} is {branch!r}; {_REFUSED}")
+    return config
+
+
+def _github(gh: Gh, endpoint: str, what: str) -> Any:
+    try:
+        return gh.api(endpoint)
+    except (CommandError, GhAuthError) as err:
+        raise EvidenceError(f"GitHub could not be asked for {what}: {err}; {_REFUSED}"
+                            ) from None
+
+
+def _parse_contents(found: Any, where: str) -> Config:
+    """The config in GitHub's contents-API answer for one file."""
+    if not (isinstance(found, dict) and found.get("type") == "file"
+            and found.get("encoding") == "base64" and isinstance(found.get("content"), str)):
+        raise EvidenceError(f"GitHub's answer for {where} is not the file's contents; "
+                            f"{_REFUSED}")
+    try:
+        text = base64.b64decode("".join(found["content"].split()), validate=True)
+        data = json.loads(text.decode("utf-8"))
+    except (binascii.Error, ValueError) as err:
+        raise EvidenceError(f"{where} is not valid JSON: {err}; {_REFUSED}") from None
+    try:
+        return parse_config(data, where)
     except FactoryError as err:
-        raise EvidenceError(f"{path} is not a valid config: {err}") from None
-    return config, f"{ref}@{sha[:7]}"
+        raise EvidenceError(f"{where} is not a valid config: {err}; {_REFUSED}") from None
 
 
-def default_ref(git: Git) -> str:
-    """The default branch on ``origin`` as a ref (``origin/main``), from ``origin/HEAD``."""
+def check_origin(git: Git, repo: str) -> None:
+    """The clone's ``origin`` (with any ``insteadOf`` rewrite, as git would use it) must be
+    ``repo`` on GitHub. A consistency check, not a source of trust: the URL does not decide
+    where git actually connects (``core.sshCommand`` can redirect it), so no fact the
+    factory trusts is read through ``origin``. Only ``local_commit`` fetches through it,
+    by SHA."""
+    url = git.remote_url("origin")
+    named = parse_github_remote(url) if url else None
+    if named is None or named.lower() != repo.lower():
+        raise EvidenceError(f"the target's origin is {url!r}, not the GitHub repository "
+                            f"/factory-target recorded ({repo}); {_REFUSED}")
+
+
+def local_commit(git: Git, sha: str) -> str:
+    """``sha``, once the clone has it: fetched from ``origin`` by its SHA if missing. Git
+    checks a fetched commit against its name, the hash of its content, so a fetch from
+    anywhere can only give this commit or nothing."""
+    if not _has_commit(git, sha):
+        try:
+            git.run(["fetch", "--no-tags", "--quiet", "origin", sha])
+        except CommandError:
+            pass
+        if not _has_commit(git, sha):
+            raise EvidenceError(f"the clone does not have the default branch's head "
+                                f"{sha[:7]} and could not fetch it from origin; {_REFUSED}")
+    return sha
+
+
+def _has_commit(git: Git, sha: str) -> bool:
     try:
-        ref = git.run(["rev-parse", "--abbrev-ref", "origin/HEAD"]).strip()
+        git.run(["cat-file", "-e", f"{sha}^{{commit}}"])
     except GitError:
-        raise EvidenceError("origin/HEAD is not set, so the default branch's approved "
-                            "config cannot be found; run `git remote set-head origin "
-                            "--auto` in the target") from None
-    if not ref.startswith("origin/") or ref == "origin/HEAD":
-        raise EvidenceError(f"origin/HEAD does not name a branch on origin ({ref!r})")
-    return ref
+        return False
+    return True
+
+
+def source_problems(gh: Gh, repo: str, evidence: Evidence, approved: Approved
+                    ) -> list[str]:
+    """Why the evidence's ``config_source`` is not a commit of GitHub's default branch
+    whose approved commands and ``test_reports`` are still the head's; empty if it is.
+    An older commit counts only while nothing the evidence depends on has changed since,
+    so evidence never stands for commands the human has since replaced. Evidence that
+    names no source is left to ``check``."""
+    if not evidence.config_source:
+        return []
+    m = _SOURCE.fullmatch(evidence.config_source)
+    if m is None:
+        return [f"the evidence's approved config source {evidence.config_source!r} names no "
+                "commit of the default branch (evidence recorded before B-28 names a local "
+                "ref); run `verify run` again"]
+    if m["branch"] != approved.branch:
+        return [f"the evidence's commands came from {m['branch']}, which is not the default "
+                f"branch on GitHub ({approved.branch}); run `verify run` again"]
+    if m["sha"] == approved.sha:
+        return []
+    try:
+        status = gh.api(f"repos/{repo}/compare/{m['sha']}...{approved.sha}").get("status")
+    except (CommandError, GhAuthError, AttributeError) as err:
+        return [f"GitHub could not confirm that {m['sha'][:7]} is a commit of "
+                f"{approved.branch}: {err}; run `verify run` again"]
+    if status not in ("ahead", "identical"):  # the default branch's head descends from it
+        return [f"the evidence's commands came from {m['sha'][:7]}, which is not a commit "
+                f"of {approved.branch} on GitHub ({status}); run `verify run` again"]
+    try:
+        recorded = _config_at(gh, repo, approved.branch, m["sha"])
+    except EvidenceError as err:
+        return [f"the approved config the evidence's commands came from could not be read: "
+                f"{err}; run `verify run` again"]
+    changed = superseded(recorded, approved.config)
+    if changed:
+        return [f"the approved {', '.join(changed)} changed on {approved.branch} after this "
+                f"evidence was recorded ({m['sha'][:7]} to {approved.sha[:7]}), so it does not "
+                "show the commands approved now; run `verify run` again"]
+    return []
+
+
+def superseded(recorded: Config, current: Config) -> list[str]:
+    """What the evidence depends on that differs between the approved config it was
+    recorded with and the current one: each ``commands.*`` entry (they decide what ran,
+    what is unapproved and what is pending), and ``test_reports``."""
+    changed = [f"commands.{name}" for name in COMMAND_NAMES
+               if recorded.commands.get(name) != current.commands.get(name)]
+    if tuple(recorded.test_reports) != tuple(current.test_reports):
+        changed.append("test_reports")
+    return changed
 
 
 def unapproved_changes(target_path: Path, approved: Mapping[str, str | None]) -> list[str]:
@@ -730,19 +915,73 @@ def _escape(payload: str) -> str:
 # ----------------------------------------------------------------------------- checking
 
 
-def remote_head(git: Git, branch: str) -> str | None:
-    """The commit ``branch`` points at on ``origin`` (what its PR shows), or ``None``."""
-    out = git.run(["ls-remote", "--heads", "origin", f"refs/heads/{branch}"])
-    for line in out.splitlines():
-        sha, _, ref = line.partition("\t")
-        if ref.strip() == f"refs/heads/{branch}":
-            return sha.strip()
-    return None
+def remote_head(gh: Gh, repo: str, branch: str) -> str | None:
+    """The commit ``branch`` points at in ``repo`` on GitHub (what its PR shows), or
+    ``None`` when GitHub has no such branch. Read from GitHub's API, never through
+    ``git ls-remote``, whose transport the clone's own config decides: a
+    ``core.sshCommand`` can make it answer from any repository (B-28). Raises
+    ``EvidenceError`` when GitHub cannot be asked or gives no commit.
+
+    The name must be one git accepts (``is_git_branch_name``) before any request: GitHub
+    normalizes ``..`` in a path, so ``x/../../../../pulls/42`` would ask for a pull
+    request instead. Each segment is percent-encoded on its own, ``%`` included, so a
+    legal name such as ``%2e%2e`` stays literal. GitHub answers 404 both for a branch it
+    does not have and for a repository it does not show these credentials, so a 404 is
+    "no such branch" only once the repository itself is confirmed reachable."""
+    if not is_git_branch_name(branch):
+        raise EvidenceError(f"{branch!r} is not a valid git branch name, so GitHub was not "
+                            f"asked for its head; {_REFUSED}")
+    path = "/".join(quote(part, safe="") for part in branch.split("/"))
+    try:
+        found = gh.api(f"repos/{repo}/git/ref/heads/{path}")
+    except CommandError as err:
+        if "HTTP 404" in err.stderr:
+            _confirm_reachable(gh, repo, branch)
+            return None
+        raise EvidenceError(f"GitHub could not be asked for the head of {branch}: {err}; "
+                            f"{_REFUSED}") from None
+    except GhAuthError as err:
+        raise EvidenceError(f"GitHub could not be asked for the head of {branch}: {err}; "
+                            f"{_REFUSED}") from None
+    if not isinstance(found, dict) or found.get("ref") != f"refs/heads/{branch}":
+        return None  # no exact match (GitHub may list refs that only start with it)
+    target = found.get("object")
+    sha = target.get("sha") if isinstance(target, dict) else None
+    if not (isinstance(target, dict) and target.get("type") == "commit"
+            and isinstance(sha, str) and _SHA.fullmatch(sha)):
+        raise EvidenceError(f"GitHub's answer for the head of {branch} names no commit; "
+                            f"{_REFUSED}")
+    return sha
+
+
+def _confirm_reachable(gh: Gh, repo: str, branch: str) -> None:
+    """After a 404 for ``branch``: raise unless GitHub shows ``repo`` itself to the
+    current credentials, so that an unreachable repository is never reported as a
+    branch to push."""
+    try:
+        gh.api(f"repos/{repo}")
+    except (CommandError, GhAuthError) as err:
+        raise EvidenceError(
+            f"GitHub answered \"not found\" for branch {branch}, and could not confirm that "
+            f"{repo} is reachable with the current credentials ({err}). The repository may "
+            "be private or renamed, or the token may lack access: this is not shown to be a "
+            f"missing branch. Check `gh auth status` and the target; {_REFUSED}") from None
+
+
+def check_trusted(gh: Gh, repo: str, evidence: Evidence, approved: Approved, *, issue: int,
+                  branch_head: str | None, expected_branch: str | None = None) -> list[str]:
+    """Why ``evidence`` cannot be trusted for the story as it is now on GitHub; empty if it
+    can. Every consumer of recorded evidence checks it here (B-28): ``check``, plus its
+    approved config source held against ``approved`` (``approved_config``)."""
+    return (check(evidence, issue=issue, branch_head=branch_head,
+                  expected_branch=expected_branch)
+            + source_problems(gh, repo, evidence, approved))
 
 
 def check(evidence: Evidence, *, issue: int, branch_head: str | None,
           expected_branch: str | None = None) -> list[str]:
-    """Why ``evidence`` cannot be trusted for the story as it is now; empty if it can."""
+    """Why ``evidence`` cannot be trusted for the story as it is now; empty if it can. Its
+    approved config source is not checked here: consumers use ``check_trusted``."""
     problems = []
     if evidence.issue != issue:
         problems.append(f"the evidence is for issue #{evidence.issue}, not #{issue}")
@@ -750,8 +989,10 @@ def check(evidence: Evidence, *, issue: int, branch_head: str | None,
         problems.append(f"the evidence is for branch {evidence.branch}, but the story's "
                         f"checkpoint names {expected_branch}")
     if branch_head is None:
-        problems.append(f"branch {evidence.branch} is not on origin, so its head cannot be "
-                        "compared; push it, then run `verify run` again")
+        problems.append(f"branch {evidence.branch} is not on GitHub (the repository is "
+                        "reachable, but has no branch of that name), so its head cannot be "
+                        "compared; push it, or check the branch name, then run `verify run` "
+                        "again")
     elif branch_head != evidence.sha:
         problems.append(f"the evidence is for commit {evidence.sha[:7]}, but the head of "
                         f"{evidence.branch} is {branch_head[:7]}; run `verify run` again")
@@ -765,8 +1006,8 @@ def check(evidence: Evidence, *, issue: int, branch_head: str | None,
         problems.append("the evidence does not name the approved config its commands came "
                         "from")
     problems += [f"{name} differs on the branch from the approved config "
-                 f"({evidence.config_source}); the approved command ran, so the branch's "
-                 "change is not verified" for name in evidence.unapproved]
+                 f"({source_label(evidence.config_source)}); the approved command ran, so "
+                 "the branch's change is not verified" for name in evidence.unapproved]
     problems += evidence.failures()
     problems += evidence.report_problems()
     return problems
@@ -786,6 +1027,12 @@ def _describe(c: CommandEvidence) -> str:
     return f"{text}: {c.detail}" if c.detail else text
 
 
+def source_label(source: str) -> str:
+    """``main@<full SHA>`` as ``main@abc1234``; anything else as it is."""
+    m = _SOURCE.fullmatch(source)
+    return f"{m['branch']}@{m['sha'][:7]}" if m else source
+
+
 def headline(evidence: Evidence) -> str:
     return ", ".join(
         f"{c.name} {c.status}" + (f" (exit {c.exit_code})" if c.status == "fail" else "")
@@ -795,7 +1042,7 @@ def headline(evidence: Evidence) -> str:
 def render(evidence: Evidence, path: Path | None = None) -> str:
     lines = [f"Evidence for #{evidence.issue} on {evidence.branch} @ {evidence.sha[:7]} "
              f"({evidence.started_at} to {evidence.finished_at})",
-             f"  commands from the approved config: {evidence.config_source}"]
+             f"  commands from the approved config: {source_label(evidence.config_source)}"]
     for c in evidence.commands:
         if c.status == "skipped":
             lines.append(f"  {c.name:<10} skipped   {c.detail}")

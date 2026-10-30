@@ -29,6 +29,12 @@ class Git:
     def _env(self) -> dict[str, str]:
         env = dict(os.environ)
         env["GIT_TERMINAL_PROMPT"] = "0"  # fail instead of prompting for credentials
+        # The repository's real objects and history (B-28): local replace refs and a graft
+        # file can make a commit read as another one, or change its parents, which would
+        # change the approved config read and every diff against the default branch. The
+        # graft file is a path that cannot exist (below the null device), so none is read.
+        env["GIT_NO_REPLACE_OBJECTS"] = "1"
+        env["GIT_GRAFT_FILE"] = os.path.join(os.devnull, "factory-no-grafts")
         return env
 
     def run(

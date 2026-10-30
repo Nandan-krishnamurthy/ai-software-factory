@@ -85,7 +85,7 @@ class AcMap:
     repo: str
     branch: str
     sha: str  # the commit the evidence ran on
-    base: str  # what the diff was taken against: origin/main@abc1234
+    base: str  # what the diff was taken against: GitHub's default branch head, main@abc1234
     sources: list[str]
     acs: list[AcMapping]
     notes: list[str] = field(default_factory=list)

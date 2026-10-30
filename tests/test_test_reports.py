@@ -32,6 +32,7 @@ from tests.test_evidence import (
     COMMANDS,
     MAIN,
     SHA,
+    ApprovedOnGitHub,
     Clock,
     FakeGitRepo,
     FakeRunner,
@@ -50,7 +51,7 @@ def config_with(commands, reports=None) -> str:
 
 
 class ReportsRepo(FakeGitRepo):
-    """``FakeGitRepo`` whose approved config (``origin/main``) lists ``reports``."""
+    """``FakeGitRepo`` whose approved config (at ``MAIN``) lists ``reports``."""
 
     def __init__(self, reports=(UNIT,), **kwargs):
         super().__init__(**kwargs)
@@ -106,7 +107,8 @@ class Target:
     def run(self, runner, **kwargs) -> evidence.Evidence:
         return evidence.run_verification(
             self.path, issue=27, repo=REPO, git=Git(self.path, transport=self.repo),
-            runner=runner, clock=Clock(), **kwargs)
+            gh=Gh(transport=ApprovedOnGitHub(self.repo)), runner=runner, clock=Clock(),
+            **kwargs)
 
 
 def by_path(recorded):

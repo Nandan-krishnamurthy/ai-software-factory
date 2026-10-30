@@ -139,10 +139,14 @@ def collect(gh: Gh, git: Git, repo: str, issue: int, *, stuck: bool = False) -> 
     recorded = evidence.from_body(note_body)
     if recorded is None:
         raise PrBodyError(f"issue #{issue}'s checkpoint has no evidence; run `verify run`")
-    head = evidence.remote_head(git, recorded.branch)
+    # The limits, CI and the diff base are GitHub's default branch's, never a local ref's
+    # (B-28), and the evidence's commands must have come from that branch.
+    approved = evidence.approved_config(git, gh, repo)
+    head = evidence.remote_head(gh, repo, recorded.branch)
     failures = set(recorded.failures())
-    stale = [p for p in evidence.check(recorded, issue=issue, branch_head=head,
-                                       expected_branch=found[1].branch)
+    stale = [p for p in evidence.check_trusted(gh, repo, recorded, approved, issue=issue,
+                                               branch_head=head,
+                                               expected_branch=found[1].branch)
              if p not in failures]
     if stale:
         raise PrBodyError("the evidence cannot be used: " + "; ".join(stale))
@@ -161,8 +165,8 @@ def collect(gh: Gh, git: Git, repo: str, issue: int, *, stuck: bool = False) -> 
             parsed, mapped, issue=issue, evidence_sha=recorded.sha,
             checkpoint_branch=found[1].branch, branch_head=head,
             test_pending="test" in recorded.pending)
-    config, _ = evidence.approved_config(git)
-    facts = git_facts(git, evidence.default_ref(git), recorded.sha)
+    config = approved.config
+    facts = git_facts(git, evidence.local_commit(git, approved.sha), recorded.sha)
     return Facts(
         issue=issue, story_id=story.id, increment=story.increment,
         requirements=_REQ.findall(_section(body, "Traces to")), evidence=recorded,
@@ -580,8 +584,8 @@ def _status(c: evidence.CommandEvidence | None, pending: bool = False) -> str:
 
 
 def _default_branch(ev: evidence.Evidence) -> str:
-    """The default branch the approved config came from (``origin/main@abc`` -> ``main``)."""
-    return ev.config_source.split("@", 1)[0].removeprefix("origin/") or "the default branch"
+    """The default branch the approved config came from (``main@<SHA>`` -> ``main``)."""
+    return ev.config_source.split("@", 1)[0] or "the default branch"
 
 
 def _pending_outcome(ev: evidence.Evidence, name: str) -> str:

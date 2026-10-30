@@ -2,8 +2,9 @@
 
 Everything here is the real Task Tracker evidence of stories #27 and #28 (PRs #29 and
 #30). ``tests/fixtures/prbody/<I>.git.json`` holds the answer to every git call
-``pr render`` makes, recorded read-only from the real clone with ``origin/main`` pinned
-to the base each story branched from; ``<I>.issue.json`` is the real issue;
+``pr render`` makes, recorded read-only from the real clone with the default branch
+pinned to the base each story branched from (GitHub's head of ``main``, ``MAIN`` here,
+stands for that base); ``<I>.issue.json`` is the real issue;
 ``<P>.notes.md`` holds the real PR's Summary, Risks and Follow-ups; ``<I>.build.txt`` and
 ``<I>.typecheck.txt`` are the real command outputs. The test output, the AC-to-test map
 inputs and the verifier lines are the T6.2 fixtures of the same runs. The snapshots
@@ -27,7 +28,15 @@ from factory.gh import Gh, ProcessResult
 from factory.git import Git
 from factory.markers import CheckpointMarker
 from tests import REPO_ROOT
-from tests.test_evidence import COMMANDS, Clock, FakeGitRepo, FakeRunner, working_tree
+from tests.test_evidence import (
+    COMMANDS,
+    MAIN,
+    ApprovedOnGitHub,
+    Clock,
+    FakeGitRepo,
+    FakeRunner,
+    working_tree,
+)
 
 FIXTURES = REPO_ROOT / "tests" / "fixtures" / "prbody"
 ACMAP = REPO_ROOT / "tests" / "fixtures" / "acmap"
@@ -73,24 +82,32 @@ class Story:
             reports=[])
         self.pr_state, self.pr_head, self.pr_draft = "open", self.head, False
         self.pr_body: str | None = None
+        # GitHub: the default branch, its head and the approved config (B-28), then the rest.
+        self.github = ApprovedOnGitHub(
+            self.repo, inner=self._github,
+            heads=lambda name: self.remote_head if name == self.branch else None)
 
     def _evidence(self, output: str, test_exit: int, pending_test: bool) -> evidence.Evidence:
         outputs = {"npm run build": (0, text(FIXTURES / f"{self.issue}.build.txt")),
                    "npm run typecheck": (0, text(FIXTURES / f"{self.issue}.typecheck.txt")),
                    "npm test": (test_exit, output)}
-        repo = FakeGitRepo(branch=self.branch, heads=(self.head,),
-                           approved={**COMMANDS, "test": None} if pending_test else COMMANDS)
+        self.repo = FakeGitRepo(branch=self.branch, heads=(self.head,), name=REPO,
+                                approved={**COMMANDS, "test": None} if pending_test
+                                else COMMANDS)
         path = working_tree(COMMANDS)
         return evidence.run_verification(
-            path, issue=self.issue, repo=REPO, git=Git(path, transport=repo),
-            runner=FakeRunner(outputs), clock=Clock(),
+            path, issue=self.issue, repo=REPO, git=Git(path, transport=self.repo),
+            gh=Gh(transport=ApprovedOnGitHub(self.repo)), runner=FakeRunner(outputs),
+            clock=Clock(),
             now=lambda: datetime(2026, 10, 7, 10, 0, tzinfo=UTC))
 
-    # -- git: the recorded answers, origin/main pinned to the story's base -------------
+    # -- git: the recorded answers, the default branch's head pinned to the story's base --
     def git(self, argv, *, timeout, cwd=None, env=None, input=None):
-        args = [a.replace("origin/main", self.base) for a in argv[3:]]
-        if args == ["rev-parse", "--abbrev-ref", "origin/HEAD"]:
-            return ProcessResult(argv, 0, "origin/main\n", "")
+        args = [a.replace(MAIN, self.base) for a in argv[3:]]
+        if args == ["remote", "get-url", "origin"]:
+            return ProcessResult(argv, 0, f"https://github.com/{REPO}.git\n", "")
+        if args == ["cat-file", "-e", f"{self.base}^{{commit}}"]:
+            return ProcessResult(argv, 0, "", "")
         if args[:2] == ["ls-remote", "--heads"]:
             return ProcessResult(argv, 0, f"{self.remote_head}\trefs/heads/{self.branch}\n", "")
         if args[:1] == ["check-attr"]:
@@ -124,7 +141,7 @@ class Story:
                                             evidence.to_block(self.evidence),
                                             acmap.to_block(self.acmap)]))
 
-    def github(self, argv, *, timeout, cwd=None, env=None, input=None):
+    def _github(self, argv, *, timeout, cwd=None, env=None, input=None):
         endpoint = argv[2]
         if endpoint == f"repos/{REPO}/issues/{self.issue}":
             return self._ok(self.issue_json)
@@ -645,9 +662,9 @@ class OtherGateTest(unittest.TestCase):
 
     def test_ci_runs_are_read_when_required(self):
         story = Story(28)
-        key = next(k for k in story.git_answers if ".factory/config.json" in k)
-        story.git_answers[key]["out"] = story.git_answers[key]["out"].replace(
-            '"required": false', '"required": true')
+        # The approved config is GitHub's (B-28), not the clone's copy of the base.
+        story.github.config = json.dumps({**json.loads(story.github.config_text()),
+                                          "ci": {"required": True}})
         story.ci_runs = [{"name": "build", "status": "completed", "conclusion": "success"}]
         facts = story.facts()
         self.assertTrue(facts.ci_required)
