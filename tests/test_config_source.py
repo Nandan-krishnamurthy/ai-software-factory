@@ -32,7 +32,7 @@ from factory import acmap, cli, comments, evidence, prbody, target
 from factory import config as config_mod
 from factory.errors import CommandNotFound, CommandTimeout, GhAuthError, GitError
 from factory.gh import Gh, ProcessResult
-from factory.git import Git
+from factory.git import Git, unopenable
 from tests import REPO_ROOT
 from tests.test_acmap import DiffingGitRepo, IssueGitHub, fixture, issue_body
 from tests.test_comments import REPO, checkpoint
@@ -846,8 +846,9 @@ class NoLocalTrustRootTest(unittest.TestCase):
     def test_git_ignores_replace_refs_and_grafts(self):
         env = Git("/t")._env()
         self.assertEqual(env["GIT_NO_REPLACE_OBJECTS"], "1")
-        self.assertEqual(Path(env["GIT_GRAFT_FILE"]).parent, Path(os.devnull))
-        self.assertFalse(os.path.exists(env["GIT_GRAFT_FILE"]))
+        self.assertEqual(env["GIT_GRAFT_FILE"], unopenable("factory-no-grafts"))
+        self.assertTrue(os.path.isabs(env["GIT_GRAFT_FILE"]))  # never inside a repository
+        self.assertFalse(os.path.isfile(env["GIT_GRAFT_FILE"]))
 
 
 if __name__ == "__main__":

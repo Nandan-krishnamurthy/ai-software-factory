@@ -37,6 +37,9 @@ KEPT = {"PATH": "/usr/bin", "HOME": "/home/u", "GIT_AUTHOR_NAME": "a", "CI": "1"
         "NODE_OPTIONS": "--max-old-space-size=4096", "LANG": "C.UTF-8"}
 OVERRIDES = ("GH_CONFIG_DIR", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM", "GCM_INTERACTIVE",
              "GIT_TERMINAL_PROMPT")
+# The command-line git config verification_env sets itself (G2).
+OURS = ("GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0", "GIT_CONFIG_KEY_1",
+        "GIT_CONFIG_VALUE_1", "GIT_CONFIG_PARAMETERS")
 
 
 class VerificationEnvTest(unittest.TestCase):
@@ -47,9 +50,56 @@ class VerificationEnvTest(unittest.TestCase):
 
     def test_credentials_and_secrets_are_removed_and_the_rest_kept(self):
         env = evidence.verification_env({**REMOVED, **KEPT}, self.home)
-        self.assertEqual(sorted(set(REMOVED) & set(env)), [])
+        self.assertEqual(sorted(set(REMOVED) - set(OURS) & set(env)), [])
         self.assertEqual({k: env[k] for k in KEPT}, KEPT)
-        self.assertEqual(set(env), set(KEPT) | set(OVERRIDES))
+        self.assertEqual(set(env), set(KEPT) | set(OVERRIDES) | set(OURS))
+        # The inherited command-line git config is gone; only ours is left (G2).
+        self.assertEqual(env["GIT_CONFIG_PARAMETERS"], "'credential.helper=' 'core.askPass='")
+        self.assertEqual([(env[f"GIT_CONFIG_KEY_{i}"], env[f"GIT_CONFIG_VALUE_{i}"])
+                          for i in range(int(env["GIT_CONFIG_COUNT"]))],
+                         list(evidence.NO_CREDENTIALS_CONFIG))
+
+    def removed(self, variables):
+        """The names ``verification_env`` removes; values are never shown."""
+        env = evidence.verification_env(variables, self.home)
+        return sorted(name for name in variables if name not in env)
+
+    def test_names_from_the_review_are_removed(self):
+        # G3: whole words between underscores, and the words NETRC and PASSPHRASE.
+        names = ["GITHUB_PAT", "GH_PAT", "CR_PAT", "MYSQL_PWD", "SMTP_PASS", "NPM_AUTH",
+                 "DOCKER_AUTH_CONFIG", "SONAR_LOGIN", "STRIPE_KEY", "NETRC", "PASSWD",
+                 "SSH_PRIVATE_KEY", "GPG_PASSPHRASE", "PAT", "KEY"]
+        self.assertEqual(self.removed(dict.fromkeys(names, "neutral")), sorted(names))
+
+    def test_identity_paths_and_near_misses_are_kept(self):
+        names = ["PATH", "PATHEXT", "PWD", "OLDPWD", "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL",
+                 "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "LOCALAPPDATA", "APPDATA",
+                 "USERPROFILE", "SystemRoot", "NODE_OPTIONS", "PATTERN", "PASSAGE",
+                 "COMPASS_HOME", "KEYBOARD_LAYOUT", "AUTHORITY_URL", "HTTP_PROXY"]
+        variables = dict.fromkeys(names, "neutral")
+        variables["HTTP_PROXY"] = "http://proxy.example:8080"  # a URL without a password
+        self.assertEqual(self.removed(variables), [])
+
+    def test_a_github_token_value_is_removed_whatever_the_name(self):
+        # G3: every GitHub token format, built here so that no token-shaped text is in the
+        # source; only names are compared.
+        body = "x" * 36
+        variables = {
+            "SETTING_A": "gh" + "p_" + body, "SETTING_B": "gh" + "o_" + body,
+            "SETTING_C": "gh" + "u_" + body, "SETTING_D": "gh" + "s_" + body,
+            "SETTING_E": "gh" + "r_" + body, "SETTING_F": "github" + "_pat_" + "y" * 40,
+            "REMOTE": "https://x-access-token:" + "gh" + "s_" + body + "@github.com/o/r.git",
+            "SETTING_X": "gh" + "x_" + body, "SETTING_Y": "gh" + "p_short"}
+        self.assertEqual(self.removed(variables), ["REMOTE", "SETTING_A", "SETTING_B",
+                                                   "SETTING_C", "SETTING_D", "SETTING_E",
+                                                   "SETTING_F"])
+
+    def test_a_url_with_a_password_is_removed(self):
+        variables = {"DATABASE_URL": "postgres://user:" + "pw" + "@db.example/app",
+                     "HTTPS_PROXY": "http://user:" + "pw" + "@proxy.example:8080",
+                     "SERVICE_URL": "https://example.com/path?x=1",
+                     "USER_ONLY": "https://user@example.com/repo.git"}
+        self.assertEqual(self.removed(variables), ["DATABASE_URL", "HTTPS_PROXY"])
 
     def test_gh_and_git_config_are_isolated(self):
         env = evidence.verification_env(KEPT, self.home)
@@ -120,16 +170,58 @@ class LiveIsolationTest(unittest.TestCase):
     def test_git_has_no_credential_helper_for_the_commands(self):
         if not logged_in("git", "config", "--get-all", "credential.helper"):
             self.skipTest("no credential helper is configured here, so nothing to isolate")
+        # The only credential.helper value left is the empty one that resets the list.
         helpers = self.run_cleaned("git config --get-all credential.helper")
-        self.assertNotEqual(helpers.returncode, 0, "a credential helper is still configured")
-        self.assertEqual(self.run_cleaned("git config --list --show-origin").stdout.strip(),
-                         "", "a global or system git config is still read")
+        self.assertEqual(helpers.stdout.strip(), "", "a credential helper is still configured")
+        origins = self.run_cleaned("git config --list --show-origin").stdout.splitlines()
+        self.assertFalse([o for o in origins if not o.startswith("command line:")],
+                         "a global or system git config is still read")
         # With no helper and no prompt, asking git for a credential must fail. The output
         # is never shown, so a regression could not print a token into the test log.
         asked = self.run_cleaned("printf 'protocol=https\\nhost=github.com\\n\\n' | "
                                  "git credential fill")
         self.assertNotEqual(asked.returncode, 0, "git produced a credential")
         self.assertFalse("password=" in asked.stdout, "git produced a credential")
+
+
+@unittest.skipUnless(shutil.which("git"), "needs git")
+class RepositoryHelperTest(unittest.TestCase):
+    """G2: the commands run inside the target, whose own ``.git/config`` may name a
+    credential helper or an askpass program. A planted fake of each answers when only
+    global and system config are isolated (the control), and stays silent inside the
+    cleaned environment. Only fakes are involved, never a real credential."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        root = Path(self.tmp.name)
+        self.repo = root / "repo"
+        base = {k: v for k, v in os.environ.items() if not k.startswith("GIT_CONFIG")}
+        subprocess.run(["git", "init", "-q", str(self.repo)], env=base, check=True)
+        askpass = root / "askpass.sh"
+        askpass.write_text("#!/bin/sh\necho FAKE-ASKPASS\n", encoding="utf-8", newline="\n")
+        askpass.chmod(0o755)
+        for key, value in (("credential.helper",
+                            "!f() { echo username=fake; echo password=FAKE-HELPER; }; f"),
+                           ("core.askPass", askpass.as_posix())):
+            subprocess.run(["git", "config", key, value], cwd=self.repo, env=base, check=True)
+        (root / "home").mkdir()
+        self.env = evidence.verification_env(base, root / "home")
+
+    def ask(self, env):
+        return run_command_line("printf 'protocol=https\\nhost=github.com\\n\\n' | "
+                                "git credential fill", timeout=60, cwd=self.repo, env=env)
+
+    def test_control_the_planted_helper_answers_without_the_reset(self):
+        control = {k: v for k, v in self.env.items() if not k.startswith("GIT_CONFIG_")
+                   or k in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM")}
+        self.assertIn("password=FAKE-HELPER", self.ask(control).stdout)
+
+    def test_neither_helper_nor_askpass_answers_in_the_cleaned_environment(self):
+        asked = self.ask(self.env)
+        self.assertNotEqual(asked.returncode, 0)
+        self.assertNotIn("FAKE-HELPER", asked.stdout)
+        self.assertNotIn("FAKE-ASKPASS", asked.stdout)
 
 
 if __name__ == "__main__":

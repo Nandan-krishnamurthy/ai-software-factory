@@ -122,7 +122,7 @@ from factory.errors import (
     GitError,
 )
 from factory.gh import Gh, ProcessResult, run_command_line
-from factory.git import Git
+from factory.git import Git, with_config
 from factory.target import parse_github_remote
 
 SCHEMA = 1
@@ -588,35 +588,65 @@ def cmd_syntax(command: str) -> str | None:
 
 CREDENTIAL_VARIABLES = ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN",
                         "GITHUB_ENTERPRISE_TOKEN", "GIT_ASKPASS", "SSH_ASKPASS", "SSH_AUTH_SOCK")
-# Other variables named like a secret (a package registry, cloud or API token, a password, a key).
-_SECRET_NAME = re.compile(r"TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|API_?KEY|PRIVATE_?KEY|"
-                          r"ACCESS_?KEY", re.IGNORECASE)
+# Other variables named like a secret: a word anywhere (TOKEN, SECRET, PASSWORD, ...), or a
+# whole word between underscores (GITHUB_PAT, MYSQL_PWD, SMTP_PASS, NPM_AUTH, SONAR_LOGIN,
+# STRIPE_KEY), which leaves GIT_AUTHOR_NAME and PATH alone (PR #58 review, G3).
+_SECRET_NAME = re.compile(r"TOKEN|SECRET|PASSWORD|PASSWD|PASSPHRASE|CREDENTIAL|NETRC|API_?KEY|"
+                          r"PRIVATE_?KEY|ACCESS_?KEY|(?:^|_)(?:PAT|PWD|PASS|AUTH|LOGIN|KEY)(?:_|$)",
+                          re.IGNORECASE)
+_NOT_SECRET = frozenset({"PWD", "OLDPWD"})  # the shell's working directories
+# A value that is a GitHub token, whatever the variable is called (G3).
+_GITHUB_TOKEN_VALUE = re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})")
+# A URL with a password in it, such as postgres://user:password@host (G3).
+_URL_WITH_PASSWORD = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^/\s:@]+:[^/\s@]+@")
 # Inherited command-line git config could name a credential helper again.
 _GIT_CONFIG_VARIABLE = re.compile(r"GIT_CONFIG(?:_COUNT|_PARAMETERS|_KEY_\d+|_VALUE_\d+)?",
                                   re.IGNORECASE)
+# Command-line git config for the commands: no credential helper and no askpass program,
+# whatever the repository's own config says (G2).
+NO_CREDENTIALS_CONFIG = (("credential.helper", ""), ("core.askPass", ""))
+
+
+def is_secret(name: str, value: str) -> bool:
+    """Whether ``verification_env`` removes the variable ``name`` with ``value``."""
+    if name.upper() in _NOT_SECRET:
+        return False
+    return bool(name.upper() in CREDENTIAL_VARIABLES or _SECRET_NAME.search(name)
+                or _GIT_CONFIG_VARIABLE.fullmatch(name) or _GITHUB_TOKEN_VALUE.search(value)
+                or _URL_WITH_PASSWORD.search(value))
 
 
 def verification_env(base: Mapping[str, str], home: Path) -> dict[str, str]:
-    """The environment the approved commands run in (B-15, E3; ADR-0006): ``base``
-    without the GitHub tokens and authentication helpers (``CREDENTIAL_VARIABLES``), any
-    other variable named like a secret, and inherited command-line git config; ``gh``
-    pointed at an empty config folder, and git at an empty global config with no system
-    config (which on Windows names the credential manager), never prompting. Everything
-    else is kept, because a project's build and test tools need it. ``home`` is a fresh
-    folder outside the target for the empty gh config and git config.
+    """The environment the approved commands run in (B-15, E3; ADR-0006).
+
+    Removed (``is_secret``):
+    - the GitHub tokens and authentication helpers (``CREDENTIAL_VARIABLES``);
+    - any other variable named like a secret;
+    - any variable whose value is a GitHub token or a URL with a password, whatever its
+      name;
+    - inherited command-line git config.
+
+    Set:
+    - ``gh`` pointed at an empty config folder;
+    - git at an empty global config and no system config (which on Windows names the
+      credential manager), never prompting;
+    - as command-line git config, which outranks the repository's own, no credential
+      helper and no askpass program (``NO_CREDENTIALS_CONFIG``).
+
+    Everything else is kept, because a project's build and test tools need it. ``home`` is
+    a fresh folder outside the target for the empty gh config and git config.
 
     This is a speed bump, not isolation: code running as the user can still read the
-    operating system's credential store or files in the user's home directly."""
-    env = {name: value for name, value in base.items()
-           if name.upper() not in CREDENTIAL_VARIABLES and not _SECRET_NAME.search(name)
-           and not _GIT_CONFIG_VARIABLE.fullmatch(name)}
+    operating system's credential store, SSH keys and files such as ``.netrc`` in the
+    user's home, or start git or gh with settings of its own."""
+    env = {name: value for name, value in base.items() if not is_secret(name, value)}
     gh_config = home / "gh"
     gh_config.mkdir(exist_ok=True)
     git_config = home / "gitconfig"
     git_config.write_text("", encoding="utf-8")
     env.update(GH_CONFIG_DIR=str(gh_config), GIT_CONFIG_GLOBAL=str(git_config),
                GIT_CONFIG_NOSYSTEM="1", GCM_INTERACTIVE="never", GIT_TERMINAL_PROMPT="0")
-    return env
+    return with_config(env, NO_CREDENTIALS_CONFIG)
 
 
 def _run_one(name: str, command: str | None, cwd: Path, runner: Runner, timeout: float,
