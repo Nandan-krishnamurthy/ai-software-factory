@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Status** | Proposed in [PR #58](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/58) (PR B: B-46/B-15); accepted when the human merges it |
+| **Status** | Accepted: [PR #58](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/58) (PR B: B-46/B-15) merged 2026-10-30T16:49:05Z, merge commit `f006ac0` |
 | **Decided** | 2026-10-30: the plan for F1, from the second adversarial review of PR #56, approved with decisions D1–D4 (`097efb85#1384`, 2026-10-30T05:53:47Z). PR B (E0, E2, E3) authorized in `097efb85#1670` (2026-10-30T06:58:13Z) |
-| **Recorded** | 2026-10-30 |
+| **Recorded** | 2026-10-30. After acceptance, the same day, two corrections from the second adversarial review of PR #58 were added below ("Corrections after acceptance"), with the human's approval; the decisions are unchanged |
 | **Scope** | What the factory's safety layers protect against, and what they do not, before T8.1's runner works unattended between gates |
 | **Supersedes** | [ADR-0005](0005-approved-config-from-github.md) decision 5's fetch ("if the clone does not have it, they fetch it by its SHA"), and the sentence of its decision 3 about that fetch. The rest of ADR-0005 stands |
 
@@ -31,7 +31,7 @@ T8.1's acceptance criterion "the runner can't merge (the guard is still active)"
 2. **What "the runner can't merge" guarantees.**
    - **Covered:**
      - **every command the model types**, through the guard, once E1 is done;
-     - **every git call the factory makes itself** (`Git`): no hook and no fsmonitor command runs there (E2).
+     - **every git call the factory makes itself** (`Git`): no hook and no fsmonitor command runs there (E2). Other programs that git config names still run there (see "Corrections after acceptance", 2).
        - **How:** `core.hooksPath` points at an absolute path in the NUL device's namespace, where nothing written is kept (`git.unopenable`), and `core.fsmonitor` is off.
        - **Precedence:** both are set as command-line config at the end of **both** `GIT_CONFIG_COUNT` and `GIT_CONFIG_PARAMETERS`. Git reads the second after the first, and the last value wins, so neither the repository's config nor anything inherited overrides them (review findings G1 and G4).
        - **No fetch:** the factory makes no network git call in the evidence path. `local_commit` no longer fetches, and a missing commit stops with "run `git fetch origin`" (D2).
@@ -40,7 +40,7 @@ T8.1's acceptance criterion "the runner can't merge (the guard is still active)"
 3. **E3 is a speed bump, not isolation.** `verify run` gives every approved command `evidence.verification_env`:
    - no GitHub token or authentication helper;
    - **removed by name:** variables named like a secret, as a word anywhere (`TOKEN`, `SECRET`, `PASSWORD`, `PASSPHRASE`, `CREDENTIAL`, `NETRC`, `API_KEY`, ...) or as a whole word between underscores (`PAT`, `PWD`, `PASS`, `AUTH`, `LOGIN`, `KEY`). `GIT_AUTHOR_*`, `PATH` and the shell's `PWD` are kept;
-   - **removed by value:** any variable holding a GitHub token (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`) or a URL with a password, whatever it is called (G3);
+   - **removed by value:** any variable holding a GitHub token (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`) or a URL with a password, whatever it is called (G3). Only one URL form is recognized (see "Corrections after acceptance", 1);
    - no inherited command-line git config;
    - an empty `gh` config folder, an empty global git config, and no system git config;
    - `credential.helper` and `core.askPass` reset to empty as command-line config, which outranks the target repository's own `.git/config`, where the commands run (G2);
@@ -85,7 +85,7 @@ T8.1's acceptance criterion "the runner can't merge (the guard is still active)"
 - **`tests/test_config_source.py`:** a missing commit stops with the fetch instruction, and no fetch is attempted even when one would work.
 - **Review fixes G1–G4** (the adversarial review of PR #58), with real git and controls:
   - an inherited `GIT_CONFIG_PARAMETERS` naming a planted hooks folder and fsmonitor runs them for plain git, and runs neither through `Git`;
-  - on Windows, a folder planted at the old relative path `nulactory-no-hooks` is never used;
+  - on Windows, a folder planted at the old relative path `nul\factory-no-hooks` is never used;
   - a repository whose own `.git/config` names a fake credential helper and askpass program: they answer when only global and system config are isolated, and stay silent in the cleaned environment;
   - one test per filtering category (names and values), comparing names only, never values.
 - The mutation results are in [task-log.md](../task-log.md).
@@ -96,3 +96,23 @@ T8.1's acceptance criterion "the runner can't merge (the guard is still active)"
 
 - The bot identity, the GitHub rule that keeps it from merging, and the sandbox: [B-49](../backlog.md#b-49). These need the human to sequence them, and possibly a paid GitHub plan for branch protection on private repositories.
 - The guard work for risk A: E1 and T1 ([B-46](../backlog.md#b-46), PR C).
+
+## Corrections after acceptance
+
+From the second adversarial review of PR #58 (of `6b013aa`, 2026-10-30), recorded after the merge with the human's approval. They correct what the text above says was built; no decision changes. The open follow-ups are in [B-15](../backlog.md#b-15) and [B-46](../backlog.md#b-46).
+
+1. **Decision 3, "removed by value": the URL rule is narrower than "a URL with a password"** (finding 2). It recognizes only the form `scheme://user:password@…`. These are kept:
+   - a URL with an empty user name, such as `postgres://:password@host`;
+   - a token in the user name's place, such as `https://TOKEN@host`.
+
+   Both fall under "a secret in a variable whose name and value match none of the rules above".
+2. **Decision 2, "every git call the factory makes itself": E2 covers hooks and fsmonitor only** (finding 3). The factory's own git calls still start other programs that git config or the environment names:
+   - **Shown:** a smudge `filter` in the target's `.git/config` ran inside the factory's `Git.switch`.
+   - **The same class:** `core.sshCommand`, `gpg.program`, `remote.*.uploadpack`, diff drivers, and inherited variables such as `GIT_SSH_COMMAND` and `GIT_EXEC_PATH`.
+
+   These programs reach the factory's git from three sources, and E1 as planned does not close all three:
+   - **typed commands that set them:** E1's guard blocks them once PR C is done;
+   - **config the target already has:** E1's guard never sees it, and its planned `doctor` check would only report it;
+   - **config or variables written by model-written code** (risk B): no guard sees them.
+
+   Hardening the factory's own git environment further would narrow the second and third sources for the factory's git calls (a candidate for PR C in [B-46](../backlog.md#b-46), not decided). Only [B-49](../backlog.md#b-49) closes risk B.
