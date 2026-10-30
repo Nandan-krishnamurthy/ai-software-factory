@@ -156,7 +156,7 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
   3. Nothing that ran before E3 stops running, except what needs those credentials.
 - **Limit, stated plainly:** this is a speed bump, not isolation. Code running as the user can still reach the operating system's credential store directly. The full answer is [B-49](#b-49): a bot identity without merge permission, and a sandbox.
 - **Before T8.1?** Yes: E3 is one of E0–E3, which come before T8.1's sandbox demonstrations, with their limits documented (D3).
-- **E3 implemented in PR B (2026-10-30, not merged):**
+- **E3 implemented in PR B, [#58](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/58) (2026-10-30, not merged):**
   - **The cleaned environment:** `verify run` gives every approved command `evidence.verification_env`:
     - the listed variables removed;
     - any other variable named like a secret removed (`TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`, `API_KEY`, `PRIVATE_KEY`, `ACCESS_KEY`);
@@ -292,7 +292,7 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
     2. A shell redirect into it is blocked, in bash and PowerShell (`>`, `>>`, `tee`, `Out-File`, `Set-Content`).
     3. An attempt to switch the active target by any of those means is blocked, and `target show` still names the original repository.
     4. `factory.py target set` still works.
-- **E2 implemented in PR B (2026-10-30, not merged):**
+- **E2 implemented in PR B, [#58](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/58) (2026-10-30, not merged):**
   - **No hooks or fsmonitor:** `Git._env` appends `core.hooksPath` (a path that cannot exist) and `core.fsmonitor=false` through `git.with_config`, keeping any `GIT_CONFIG_COUNT` entries already there. Every git call the factory makes runs no repository hook and no fsmonitor command.
   - **No fetch:** `evidence.local_commit` no longer fetches; a missing commit stops with "run `git -C <T> fetch origin`" (D2), and S10 step 1 says what to do then.
   - **Tests** (`tests/test_factory_git_env.py`), with real git:

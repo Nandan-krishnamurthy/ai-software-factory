@@ -53,6 +53,6 @@ The latest milestone is the last entry in [progress.md](progress.md). The latest
 | [0003](adr/0003-plugin-packaging-in-t9.md) | Plugin packaging and target-root invocation belong to T9 | Accepted, work planned |
 | [0004](adr/0004-configured-commands-bash-approved-only.md) | Configured commands run with Bash, and only approved commands run | Accepted, implemented in T6.1; where it reads the default branch from is superseded by 0005 |
 | [0005](adr/0005-approved-config-from-github.md) | The approved config is read from GitHub, never from the clone's local refs | Accepted (PR #56, `d666b6f`); its fetch superseded by 0006 |
-| [0006](adr/0006-threat-model-typed-commands-and-executed-code.md) | The threat model: commands the model types, and code the factory runs | Proposed in PR B; accepted on its merge |
+| [0006](adr/0006-threat-model-typed-commands-and-executed-code.md) | The threat model: commands the model types, and code the factory runs | Proposed in PR #58; accepted on its merge |
 
 **Writing an ADR.** Use the next free four-digit number and the sections of the existing ADRs: a header table (Status, Decided, Recorded), Context, Decision, Consequences, Evidence, and gaps where there are any. An accepted ADR is not rewritten. A later decision that replaces it is a new ADR, and the old one's Status becomes "Superseded by ADR-NNNN". Decisions that concern one task only belong in the task log instead.

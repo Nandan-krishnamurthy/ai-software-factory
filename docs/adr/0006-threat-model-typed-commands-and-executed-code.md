@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Proposed in PR B (B-46/B-15); accepted when the human merges it |
+| **Status** | Proposed in [PR #58](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/58) (PR B: B-46/B-15); accepted when the human merges it |
 | **Decided** | 2026-10-30: the plan for F1, from the second adversarial review of PR #56, approved with decisions D1–D4 (`097efb85#1384`, 2026-10-30T05:53:47Z). PR B (E0, E2, E3) authorized in `097efb85#1670` (2026-10-30T06:58:13Z) |
 | **Recorded** | 2026-10-30 |
 | **Scope** | What the factory's safety layers protect against, and what they do not, before T8.1's runner works unattended between gates |

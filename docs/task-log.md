@@ -706,7 +706,7 @@ The human asked for a plan covering all four (`097efb85#1329`, 2026-10-30T05:45:
 | | |
 |---|---|
 | **Specification** | [backlog.md](backlog.md): [B-46](backlog.md#b-46) "Plan, E2 (PR B)", [B-15](backlog.md#b-15) "Plan, E3 (PR B)", and E0 from the approved F1 plan. These are backlog items, not roadmap tasks. |
-| **PR** | PR B, branch `task/B-46-B-15-git-and-verify-env`, not merged |
+| **PR** | [#58](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/58) (PR B), branch `task/B-46-B-15-git-and-verify-env`, not merged |
 | **Status** | In review |
 
 **Approved decisions.**
