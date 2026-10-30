@@ -163,22 +163,64 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
   7. Unit tests use fakes, with no network; Windows Git Bash and PowerShell, like the rest of the engine.
 - **Source:** found during the review of B-26 ([PR #45](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/45)), 2026-10-22: the code paths above and a `guard.decide` check of the three commands; the `remote set-url` check, 2026-10-23
 - **Standalone task, 2026-10-28:** the human sequenced B-28 as a standalone hardening task before T8.1 (`097efb85#173`, 2026-10-28T10:52:41Z). [PR #56](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/56) proposes the criteria above as decided, and records the design as [ADR-0005](adr/0005-approved-config-from-github.md) ([task-log.md](task-log.md#b-28-approved-config-from-github-not-local-refs)). For each proposed criterion:
-  1. **Met, via GitHub's API rather than `ls-remote`.** The default branch's name and head come from GitHub for the repository `/factory-target` recorded (`repos/<R>`, `git/ref/heads/<D>`). The config's `default_branch` and `repo` must match, or nothing runs. `ls-remote` was not used for this because it follows the `origin` URL, which `set-url`, `remote.origin.url` and `insteadOf` can change. The clone's `origin` must still be the recorded repository (`check_origin`), because `remote_head` and `fetch` use it.
+  1. **Met, via GitHub's API rather than `ls-remote`.** The default branch's name and head come from GitHub for the repository `/factory-target` recorded (`repos/<R>`, `git/ref/heads/<D>`). The config's `default_branch` and `repo` must match, or nothing runs. `ls-remote` was not used for this because it follows the `origin` URL, which `set-url`, `remote.origin.url` and `insteadOf` can change. The clone's `origin` must still be the recorded repository (`check_origin`), because `remote_head` and `fetch` use it. **Review fix (B2):** the story branch's head now comes from GitHub's API too (`remote_head`), not from `ls-remote`: the review showed that a `core.sshCommand` in the clone's config makes `ls-remote` answer from another repository while `check_origin` still passes. `check_origin` remains as a consistency check only.
   2. **Met.** The config is read through GitHub's contents API at that exact commit. `verify map` and `pr render` need the commit in the clone for their diffs, so they fetch it by its SHA if it is missing, and otherwise nothing runs.
   3. **Met.** Real-git regression tests cover `update-ref`, `remote set-head`, `symbolic-ref`, a forged `origin/main` not on the remote, and also `git replace` and grafts, which the design found to have the same effect. The factory's git now ignores replace refs and grafts.
-  4. **Met.** `config_source` is `<branch>@<full SHA>`. `verify check`, `verify map`, `verdict check`, `pr render` and `pr check` reject a source that is not the head of GitHub's default branch or an ancestor of it (GitHub's compare API), and evidence recorded before B-28 ("run `verify run` again").
+  4. **Met.** `config_source` is `<branch>@<full SHA>`. `verify check`, `verify map`, `verdict check`, `pr render` and `pr check` reject a source that is not the head of GitHub's default branch or an ancestor of it (GitHub's compare API), and evidence recorded before B-28 ("run `verify run` again"). **Review fix (B1):** an ancestor counts only while every `commands.*` entry and `test_reports` in its config are still the head's (`superseded`). The review showed that, before this fix, evidence recorded before a merge changed the approved commands passed every consumer.
   5. **Met.** Every GitHub failure, malformed answer or mismatch, a missing config and an unfetchable commit: nothing runs or is accepted, and the reason is stated.
   6. **Not done** (optional): the guard is unchanged; see [B-45](#b-45).
   7. **Met.** Unit tests use fakes with no network; the real-git tests use a throwaway local clone and contact no remote.
+- **Adversarial review, 2026-10-28:** two merge blockers, fixed in PR #56 before merge (2026-10-30):
+  - **B1:** superseded evidence was still accepted after the approved commands changed;
+  - **B2:** the clone's git config could fake the story branch's head through `core.sshCommand`.
+
+  Three further findings are recorded as [B-46](#b-46), [B-47](#b-47) and [B-48](#b-48). The review's other notes are in [task-log.md](task-log.md#b-28-approved-config-from-github-not-local-refs).
 - **Status:** verified (the commands are allowed, and the code reads local refs; the fix, by `tests/test_config_source.py`) · **Owner:** standalone hardening task before T8.1 (the human's decisions of 2026-10-23 and 2026-10-28) · **State:** **resolved** by [PR #56](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/56) (on merge); what remains is [B-45](#b-45)
 
 ### <a id="b-45"></a>B-45 What B-28 left: an optional guard block, and the clone's own object store
 - **What:**
   - **The guard still allows repointing the remote-tracking refs** (`update-ref refs/remotes/origin/*`, `remote set-head`, `symbolic-ref refs/remotes/origin/HEAD`, `remote set-url`). B-28 no longer reads any of them, so they change nothing the factory trusts. Blocking them in the target would only be defence in depth (B-28's optional criterion 6), and the project's test code would not pass through the guard anyway.
   - **Objects already in the clone are not re-hashed when git reads them.** A rewritten loose object, pack or commit-graph file in the target's `.git` could change what a local diff shows (`verify map`, `pr render`). Replace refs and grafts are ignored since B-28, and the approved config itself is read from GitHub, so neither is affected. Candidates: take the diff from GitHub's compare API, or verify the objects involved.
-  - **An older approved config is still accepted.** A `config_source` that is an ancestor of the default branch's head passes, as B-28's criterion 4 states. If a merged PR changes `commands.*` after `verify run`, the evidence names the older commands until S11 step 1 sends the story back to S09 for the new commits. S11 step 1 is station text and reads `origin/<D>` after a fetch. Candidate: also compare the commands and `test_reports` at the evidence's source with those at the head.
+  - ~~**An older approved config is still accepted.**~~ **Resolved in PR #56 before merge** (review finding B1): evidence from an older commit of the default branch now counts only while its `commands.*` and `test_reports` are still the head's (`evidence.superseded`).
 - **Source:** the B-28 design and its probes (git 2.52, 2026-10-28); [ADR-0005](adr/0005-approved-config-from-github.md), "Not decided here"; [S11](../stations/S11-pr.md) step 1
 - **Status:** analysis · **Owner:** T9.5 for the guard block (a scope decision for that task); unassigned for the rest · **State:** open
+
+### <a id="b-46"></a>B-46 A repository's own git config can make git run programs, outside the guard
+- **What:** settings in the target's `.git/config` make git start programs that the guard never sees, because the guard vets the command typed, not what git starts:
+  - `core.sshCommand` runs on any `fetch`, `ls-remote` or `push` over ssh;
+  - `core.fsmonitor` runs on `git status`;
+  - credential helpers run on network calls over HTTPS.
+- **Shown on 2026-10-28:**
+  - `guard.decide` allows `git -C <T> config core.sshCommand …`;
+  - a `core.sshCommand` set that way ran when the factory's own `git ls-remote` ran, and answered from a local fake repository.
+- **Where git still starts such programs:**
+  - the factory's own git calls, outside the guard: `local_commit`'s `fetch` and `verify run`'s `git status`;
+  - the stations' `git fetch`, `git push` and `git status`, which go through the guard as text.
+
+  After B-28's review fix, no fact the factory trusts comes from these calls.
+- **Risk:** a configured program can run any command, for example `gh pr merge`, which the guard would block if typed. Not demonstrated: no merge was attempted. Related to [B-11](#b-11) (indirect execution, "git aliases from config files"), which names none of these settings.
+- **Before T8.1?** Recommended. T8.1 runs stations unattended between gates, and its acceptance criterion "the runner can't merge (the guard is still active)" rests on the guard seeing every command. This is the human's decision, like B-28's. Candidates:
+  - the factory's git calls set the risky settings to safe values (`-c core.fsmonitor=false -c core.sshCommand=ssh`, no repository credential helper);
+  - the guard refuses `git config` writes of program-valued keys in the target;
+  - `doctor` fails on them.
+- **Source:** the adversarial review of PR #56 (finding D1, 2026-10-28), with its `core.sshCommand` proof of concept and the `guard.decide` check
+- **Status:** verified (the guard allows the setting, and git runs it); analysis (the merge path) · **Owner:** unassigned: T9.5 (guard hardening), or a standalone task sequenced by the human · **State:** open
+
+### <a id="b-47"></a>B-47 S12's check after the merge does not hold its evidence against the merge commit
+- **What:** `closeout.after_merge` reads the evidence of S12's `verify run` on the default branch and accepts it when the branch is not the story's and nothing failed. It does not check two things:
+  - that the evidence is for the merge commit, or for GitHub's current head;
+  - that its source passes `check_trusted`.
+
+  If the clone's default branch is behind (`git pull` failed or was skipped), the approved commands run against the old code, pass, and the story is closed out. The commands the story introduced have then never run against its code. This predates B-28 (the same happens with a stale `origin/main`) and is outside B-28's list of consumers.
+- **Before T8.1?** Not required: it is a correctness gap, not a merge path. But T8.1's `run --command resume` closes stories out unattended, so it should be fixed by T8.2's live evals at the latest. Candidate: `after_merge` requires the evidence's `sha` to be the merge commit (or GitHub's head of the default branch), and `check_trusted` to pass.
+- **Source:** the adversarial review of PR #56 (finding D2, 2026-10-28); `scripts/factory/closeout.py` (`after_merge`, `inspect`)
+- **Status:** analysis · **Owner:** unassigned · **State:** open
+
+### <a id="b-48"></a>B-48 "Could not confirm" and "rejected" share exit code 1
+- **What:** `main` in `scripts/factory/cli.py` returns 1 for any `FactoryError`, so a GitHub outage (`EvidenceError` from `approved_config` or `remote_head`) looks the same as rejected evidence or a failed test. S10 counts a `verify map` exit 1 as a failed attempt ([S10](../stations/S10-verify.md) step 1). A transient API failure can therefore spend a fix attempt, and repeated ones can make a story stuck. B-28 adds three or four API calls per command, which makes this more likely. The factory still fails closed: nothing is accepted.
+- **Before T8.1?** Not required for safety. For an unattended runner it is a reliability problem: candidate for T8.1's scope (the runner tells a transient error from a real one) or a small standalone fix (a distinct exit code, such as 2, for "could not confirm", which the stations treat as "stop and retry").
+- **Source:** the adversarial review of PR #56 (finding D3, 2026-10-28)
+- **Status:** analysis · **Owner:** unassigned · **State:** open
 
 ## Verification not yet done
 
