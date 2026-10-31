@@ -706,8 +706,8 @@ The human asked for a plan covering all four (`097efb85#1329`, 2026-10-30T05:45:
 | | |
 |---|---|
 | **Specification** | [backlog.md](backlog.md): [B-46](backlog.md#b-46) "Plan, E2 (PR B)", [B-15](backlog.md#b-15) "Plan, E3 (PR B)", and E0 from the approved F1 plan. These are backlog items, not roadmap tasks. |
-| **PR** | [#58](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/58) (PR B), branch `task/B-46-B-15-git-and-verify-env`, not merged |
-| **Status** | In review |
+| **PR** | [#58](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/58) (PR B), branch `task/B-46-B-15-git-and-verify-env`, merged 2026-10-30T16:49:05Z, merge commit `f006ac0` |
+| **Status** | Done |
 
 **Approved decisions.**
 - **The F1 plan, decisions D1–D4** (`097efb85#1384`, 2026-10-30T05:53:47Z):
@@ -815,9 +815,28 @@ E3f global git config read: KILLED ['test_an_inherited_override_cannot_point_els
 E3g runner gets the full environment: KILLED ['test_every_command_gets_the_cleaned_environment']
   ```
 
+**Second adversarial review of PR #58** (of `6b013aa`, 2026-10-30): **fix before merge**, only because the PR description was out of date (finding 1). No code change was required. With the human's approval, the description was updated and read back from GitHub before the merge.
+- **What held, with real git:**
+  - **G1:** 9 crafted inherited `GIT_CONFIG_PARAMETERS` values and 2 `GIT_CONFIG_COUNT` variants. Either the factory's setting won, or git refused to run.
+  - **G2:** plain, URL-scoped and wildcard credential helpers, and helpers through `include.path` and `includeIf`. None answered in the cleaned environment; each control answered.
+  - **G4:** `git hook run` finds no hook under the NUL device path, and nothing can be kept there.
+- **In Git Bash, not assumed from PowerShell:** the G-test modules (25 tests) pass, and 8 of 8 mutations of the G1–G4 fixes were caught.
+- **Rejected:** `gh` keeps its token in Windows Credential Manager here, but in the cleaned environment it does not fall back to it. `gh api` asks for `gh auth login`, and the same call outside it is authenticated.
+- **Findings 2–5: open follow-ups, not blocking, not fixed.** Each is recorded in the backlog item that owns its area:
+  - **2 (low, confirmed):** the URL value rule matches only `scheme://user:password@…`. G3's "any URL with a password" above is broader than the code. Recorded in [B-15](backlog.md#b-15).
+  - **3 (medium, confirmed):** the factory's own git still starts other programs that git config or the environment names (shown: a smudge filter in `Git.switch`). Recorded in [B-46](backlog.md#b-46), which separates three sources: typed commands (E1), config the target already has, and model-written code.
+  - **4 (low, confirmed):** values and names the secret filter misses, and one harmless false positive. Recorded in [B-15](backlog.md#b-15).
+  - **5 (low, plausible, not confirmed):** hooks defined in config, in some git version, outside `core.hooksPath`. Recorded in [B-46](backlog.md#b-46).
+- **The merge:** the human merged PR #58 at 2026-10-30T16:49:05Z (`f006ac0`). The factory never merges.
+- **Recorded after the merge** (a documentation-only follow-up, approved by the human on 2026-10-30):
+  - ADR-0006's status;
+  - a "Corrections after acceptance" section for findings 2 and 3, with a pointer from each corrected line. The README's rule is that an accepted ADR is not rewritten, so the decision text is kept as accepted;
+  - one byte in ADR-0006's Evidence section repaired: a form feed had replaced the `\f` of `nul\factory-no-hooks`;
+  - B-15 and B-46.
+
 **Handed on (all open):**
-- [B-46](backlog.md#b-46): E1 and T1 in PR C (the guard and `doctor`), not started.
-- [B-15](backlog.md#b-15): stays open. E3 is a speed bump; the remainder is [B-49](backlog.md#b-49), and closing B-15 is the human's decision.
+- [B-46](backlog.md#b-46): E1 and T1 in PR C (the guard and `doctor`), not started. The second review's findings 3 and 5 are recorded there as candidates, not decided.
+- [B-15](backlog.md#b-15): stays open. E3 is a speed bump; the remainder is [B-49](backlog.md#b-49), and closing B-15 is the human's decision. The second review's findings 2 and 4 are recorded there.
 - [B-49](backlog.md#b-49): the bot identity and a sandbox, required before unattended runs on real projects.
 - **For sandbox demonstrations after E0–E3:** a project whose build or test needs a token now fails under `verify run`, as ADR-0006 states.
 

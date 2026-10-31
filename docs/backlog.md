@@ -156,7 +156,7 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
   3. Nothing that ran before E3 stops running, except what needs those credentials.
 - **Limit, stated plainly:** this is a speed bump, not isolation. Code running as the user can still reach the operating system's credential store directly. The full answer is [B-49](#b-49): a bot identity without merge permission, and a sandbox.
 - **Before T8.1?** Yes: E3 is one of E0–E3, which come before T8.1's sandbox demonstrations, with their limits documented (D3).
-- **E3 implemented in PR B, [#58](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/58) (2026-10-30, not merged):**
+- **E3 implemented in PR B, [#58](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/58) (merged 2026-10-30T16:49:05Z, merge commit `f006ac0`):**
   - **The cleaned environment:** `verify run` gives every approved command `evidence.verification_env`:
     - the listed variables removed;
     - any other variable named like a secret removed (`TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`, `API_KEY`, `PRIVATE_KEY`, `ACCESS_KEY`);
@@ -173,7 +173,7 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
   - **G3:** names such as `GITHUB_PAT`, `GH_PAT`, `MYSQL_PWD`, `SMTP_PASS`, `NPM_AUTH`, `SONAR_LOGIN` and `STRIPE_KEY` passed the filter. Now removed:
     - whole-word `PAT`, `PWD`, `PASS`, `AUTH`, `LOGIN` and `KEY` names, and `NETRC` and `PASSPHRASE`;
     - any value in a GitHub token format, whatever the name;
-    - any URL with a password in it.
+    - a URL with a password in it, in the form `scheme://user:password@…` only (corrected after merge: finding 2 below).
 
     `GIT_AUTHOR_*`, `PATH` and the shell's `PWD` are kept. Each category has a test that compares names only. The strategy is unchanged: **no strict allow-list** (the human's decision, 2026-10-30).
 - **Still exposed, documented in [ADR-0006](adr/0006-threat-model-typed-commands-and-executed-code.md) (G5, G6), not fixed:**
@@ -185,6 +185,22 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
     - read a secret in a variable whose name and value match no rule.
 
   **E3 is not complete credential isolation.**
+- **Second adversarial review of PR #58 (2026-10-30), recorded after merge. Open follow-ups, not blocking, not fixed:**
+  - **Finding 2 (low, confirmed): the URL value rule is narrower than the documents said.** It matches only `scheme://user:password@…`. These are kept:
+    - a URL with an empty user name (`postgres://:pw@host`);
+    - a token in the user name's place (`https://TOKEN@host`).
+
+    ADR-0006 and this item said "any URL with a password". ADR-0006's "Corrections after acceptance" and the G3 bullet above now say what is matched.
+    - **Candidate:** widen the pattern to those two forms.
+    - **When:** E3 code work, with the rest of this item. Not PR C, which is the guard.
+  - **Finding 4 (low, confirmed): what the filter does not recognize.**
+    - legacy 40-character hexadecimal GitHub tokens;
+    - other providers' token formats (GitLab, AWS);
+    - a GitHub token glued after `_`, with no word boundary before it;
+    - variables that point to a credential file (`KUBECONFIG`, `PGPASSFILE`), like `~/.netrc` above.
+
+    One harmless false positive: `TOKENIZERS_PARALLELISM` is removed. This is the remainder of having no strict allow-list (P-1).
+    - **When:** with the rest of this item and [B-49](#b-49). Accepting it as a limitation is the human's decision.
 - **Stays open:** E3 is a speed bump, not isolation. Code running as the user can still reach the credential store; that remainder is [B-49](#b-49). Closing this item is the human's decision.
 - **Status:** verified (the inherited environment; E3, by the tests above) · **Owner:** PR B, before T8.1 (the human's decision D3/D4, `097efb85#1384`; PR B authorized in `097efb85#1670`) · **State:** open
 
@@ -309,7 +325,7 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
     2. A shell redirect into it is blocked, in bash and PowerShell (`>`, `>>`, `tee`, `Out-File`, `Set-Content`).
     3. An attempt to switch the active target by any of those means is blocked, and `target show` still names the original repository.
     4. `factory.py target set` still works.
-- **E2 implemented in PR B, [#58](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/58) (2026-10-30, not merged):**
+- **E2 implemented in PR B, [#58](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/58) (merged 2026-10-30T16:49:05Z, merge commit `f006ac0`):**
   - **No hooks or fsmonitor:** `Git._env` appends `core.hooksPath` (a path that cannot exist) and `core.fsmonitor=false` through `git.with_config`, keeping any `GIT_CONFIG_COUNT` entries already there. Every git call the factory makes runs no repository hook and no fsmonitor command.
   - **No fetch:** `evidence.local_commit` no longer fetches; a missing commit stops with "run `git -C <T> fetch origin`" (D2), and S10 step 1 says what to do then.
   - **Tests** (`tests/test_factory_git_env.py`), with real git:
@@ -321,6 +337,33 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
   - **G1:** an inherited `GIT_CONFIG_PARAMETERS` (what `git -c` passes on, which a typed command could set before `python scripts/factory.py …`) overrode `GIT_CONFIG_COUNT`, and a planted hook ran through `Git`. `git.with_config` now appends the settings at the end of both variables.
   - **G4:** `os.devnull` is `nul` on Windows, so `nul\factory-no-hooks` was a relative path, looked up inside the repository. `git.unopenable` gives an absolute path in the NUL device's namespace (`\\.\NUL\…`), where nothing written is kept, for the hooks folder and the graft file.
   - **Tests:** real git, each with a control showing the planted program runs for plain git.
+- **Second adversarial review of PR #58 (2026-10-30), recorded after merge. Open follow-ups, not blocking, not fixed:**
+  - **Finding 3 (medium, confirmed): E2 covers hooks and fsmonitor only.** The factory's own git calls still start other programs that git config or the environment names.
+    - **Shown:** a smudge `filter` in the target's `.git/config` ran inside the factory's `Git.switch`.
+    - **The same class:**
+      - `core.sshCommand` (`fetch`, `push`);
+      - `gpg.program` (a signed commit);
+      - `remote.*.uploadpack` and `receivepack`;
+      - diff drivers (`acmap` already passes `--no-ext-diff --no-textconv`);
+      - inherited variables such as `GIT_SSH_COMMAND` and `GIT_EXEC_PATH`, because `Git._env` starts from the whole environment.
+
+    These programs reach the factory's git from three separate sources. **PR C, as planned, does not close all three:**
+    1. **Typed commands that set them.** E1's planned guard blocks (`guard._check_git`, `guard._check_command`, above) cover this, once PR C is done.
+    2. **Git config the target already has** (a repository the factory did not write, or one changed before the factory ran). E1's guard never sees it. E1's planned `doctor` check would report it, but nothing planned stops the factory's git from running it.
+    3. **Config or variables written by model-written code** (risk B in ADR-0006). No guard sees it. Only [B-49](#b-49) closes this.
+
+    - **Candidates for PR C, not decided:**
+      - `Git._env` drops git's program variables, and sets more program-valued keys to safe values (the `core.sshCommand=ssh` candidate above);
+      - `doctor` fails on these keys rather than only reporting them.
+
+      Whether PR C takes these is the human's decision. For the factory's own git calls, they would narrow sources 2 and 3 for the keys they cover. Filters and diff drivers are configured by name, so no single setting turns them all off, the way `core.hooksPath` does for hooks. The candidates do not stop model-written code from running git by itself ([B-49](#b-49)).
+    - ADR-0006's "Corrections after acceptance" now says that E2 covers hooks and fsmonitor only.
+  - **Finding 5 (low, PLAUSIBLE, not confirmed): hooks defined in config.** A git version may run hooks defined in config (`hook.<name>.command` with `hook.<name>.event`) that `core.hooksPath` does not govern.
+    - **Evidence:** not confirmed for any git release. Git 2.52 on this machine ran no such hook in the probe, for plain git or through `Git`.
+    - `hook.*` is not in E1's list of blocked keys above.
+    - **Candidates for PR C, not decided:**
+      - add `hook.*` to E1's blocked keys and to `doctor`'s report;
+      - a real-git test that fails if a config-defined hook runs through `Git`.
 - **Stays open:** E1 and T1 (PR C, the guard and `doctor`) are not done.
 - **Status:** verified (the guard allows the setting, and git runs it; the wider set above, by `guard.decide`; E2, by the tests above); analysis (the merge path) · **Owner:** PR B (E2, implemented) and PR C (E1 and T1, not started), both before T8.1, in that order (D4); the guard-only rest stays a T9.5 scope decision · **State:** open
 
