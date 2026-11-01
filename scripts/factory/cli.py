@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -57,6 +58,11 @@ def build_parser() -> argparse.ArgumentParser:
     show_parser = target_sub.add_parser("show", help="print the active target")
     show_parser.add_argument("--json", action="store_true", help="machine-readable output")
     show_parser.set_defaults(handler=_target_show)
+    check_parser = target_sub.add_parser(
+        "check", help="validate a path as a target without changing anything (read-only)")
+    check_parser.add_argument("path", help="local path to validate")
+    check_parser.add_argument("--json", action="store_true", help="machine-readable output")
+    check_parser.set_defaults(handler=_target_check)
 
     doctor_parser = subparsers.add_parser(
         "doctor", help="check the target is ready for the factory")
@@ -531,9 +537,43 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _target_set(args: argparse.Namespace) -> int:
+    # D-10: the active target is changed only by a human in a real terminal, never by Claude.
+    # CLAUDECODE is only a hint; the terminal confirmation below is the real gate.
+    if os.environ.get("CLAUDECODE"):
+        print("error: the active target is changed only by a human in a real terminal, not "
+              "through Claude Code (D-10). Open your own terminal and run:\n"
+              f"  python scripts/factory.py target set {args.path}", file=sys.stderr)
+        return 2
+    candidate = target.validate_target(args.path)  # read-only: identity for the prompt
+    prompt = f"Switch the factory to {candidate.repo} at {candidate.path}? [y/N]: "
+    try:
+        answer = input(prompt)
+    except EOFError:  # empty or closed stdin: refuse (D-10)
+        answer = ""
+    if answer.strip().lower() not in ("y", "yes"):
+        print("aborted: the active target was not changed.", file=sys.stderr)
+        return 1
     active = target.set_target(args.path)
     print(active.banner())
     print("Active target recorded; Claude Code may now access this directory.")
+    return 0
+
+
+def _target_check(args: argparse.Namespace) -> int:
+    try:
+        candidate = target.validate_target(args.path)
+    except target.TargetError as err:
+        if args.json:
+            print(json.dumps({"ok": False, "error": str(err)}))
+        else:
+            print(f"not a usable target: {err}", file=sys.stderr)
+        return 1
+    if args.json:
+        print(json.dumps({"ok": True, "path": str(candidate.path), "repo": candidate.repo}))
+    else:
+        print(f"OK: {candidate.path} ({candidate.repo}) is a valid target.")
+        print("To activate it, run this yourself in a terminal:\n"
+              f"  python scripts/factory.py target set {args.path}")
     return 0
 
 

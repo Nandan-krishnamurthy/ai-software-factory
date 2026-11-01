@@ -77,6 +77,8 @@ class GuardContext:
     default_branch: str = "main"
     scratch_dirs: tuple[Path, ...] = ()
     extra_write_dirs: tuple[Path, ...] = ()  # e.g. ~/.claude/projects (Claude's memory)
+    # True when .factory-local/target.json exists but could not be read (D-5): fail closed.
+    target_broken: bool = False
     # I/O is injected, so decide() stays pure and testable.
     current_branch: Callable[[Path], str | None] = field(default=lambda repo_dir: None)
     is_reviewed: Callable[[str, Path], bool | None] = field(default=lambda branch, d: None)
@@ -96,6 +98,10 @@ WRITE_TOOLS = {"Write": "file_path", "Edit": "file_path", "MultiEdit": "file_pat
 
 def decide(tool_name: str, tool_input: dict, ctx: GuardContext) -> Decision:
     try:
+        if ctx.target_broken and (tool_name in SHELL_TOOLS or tool_name in WRITE_TOOLS):
+            _block("the factory's target pointer (.factory-local/target.json) exists but could "
+                   "not be read; fix it in your own terminal with `python scripts/factory.py "
+                   "target set <path>` before running commands (D-5).")
         if tool_name in SHELL_TOOLS:
             command = tool_input.get("command")
             if not isinstance(command, str):
@@ -461,6 +467,8 @@ def _check_command(cmd: _Command, dialect: str, ctx: GuardContext, cwd: Path,
         assignment = _pwsh_assignment(cmd.raw or words)
         if assignment is not None:  # `$x = <pipeline>`: the right-hand side runs
             name, rhs_raw = assignment
+            if name.startswith("env:"):  # `$env:GIT_SSH_COMMAND = …` (D-4)
+                _block_if_git_var(name[4:])
             rhs = _pwsh_substitute([w.replace(_QUOTE, "") for w in rhs_raw], variables)
             for target in _pwsh_substitute(writes, variables):
                 _check_redirect_target(target, ctx, cwd)
@@ -477,6 +485,7 @@ def _check_command(cmd: _Command, dialect: str, ctx: GuardContext, cwd: Path,
         words, writes = _pwsh_substitute(words, variables), _pwsh_substitute(writes, variables)
     for target in writes:
         _check_redirect_target(target, ctx, cwd)
+    _scan_git_env(words, dialect)  # before _strip_wrappers removes env-var prefixes (D-4)
     words = _strip_wrappers(words)
     if not words:
         return cwd
@@ -531,6 +540,8 @@ def _check_command(cmd: _Command, dialect: str, ctx: GuardContext, cwd: Path,
         _check_script(" ".join(rest), "powershell", ctx, cwd, depth + 1)
         return cwd
 
+    _check_factory_target(name, args)
+    _scan_protected_args(name, args, ctx, cwd)
     if name == "git":
         _check_git(args, ctx, cwd)
     elif name == "gh":
@@ -540,7 +551,8 @@ def _check_command(cmd: _Command, dialect: str, ctx: GuardContext, cwd: Path,
     elif name in _INTERPRETERS:
         for text in _interpreter_code(args, cmd.heredocs):
             _scan_code(text)
-    elif name in ("tee", "tee-object", "out-file", "set-content", "add-content"):
+    elif name in ("tee", "tee-object", "out-file", "set-content", "add-content",
+                  "sc", "ac", "clear-content", "clc"):
         for target in _write_command_targets(name, args):
             _check_redirect_target(target, ctx, cwd)
     return cwd
@@ -717,6 +729,21 @@ _GIT_VALUE_OPTS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exe
                    "--super-prefix", "--config-env"}
 _DANGEROUS_CONFIG = re.compile(
     r"^(alias\..+|remote\..+\.push|branch\..+\.merge|push\.default)$", re.IGNORECASE)
+# Config keys that make git start a program the guard never sees (B-46 E1; ADR-0006).
+_PROGRAM_CONFIG = re.compile(r"""^(
+    core\.(hookspath|fsmonitor|sshcommand|editor|pager|askpass) |
+    include\.path | includeif\..*\.path |
+    filter\..+ | diff\.external | diff\..+\.(command|textconv) | merge\..+\.driver |
+    credential(\..*)?\.helper | gpg(\..*)?\.program | sequence\.editor |
+    protocol\..*\.allow | url\..+\.insteadof |
+    remote\..+\.(uploadpack|receivepack) | init\.templatedir
+    )$""", re.IGNORECASE | re.VERBOSE)
+
+
+def is_risky_config(key: str) -> bool:
+    """True for a git config key that redirects pushes, defines an alias, or makes git run
+    a program (E1; used by the guard and by ``doctor``)."""
+    return bool(_DANGEROUS_CONFIG.match(key) or _PROGRAM_CONFIG.match(key))
 
 
 def _check_git(args: list[str], ctx: GuardContext, cwd: Path) -> None:
@@ -729,10 +756,19 @@ def _check_git(args: list[str], ctx: GuardContext, cwd: Path) -> None:
             i += 2
         elif a == "-c" and i + 1 < len(args):
             key = args[i + 1].split("=", 1)[0]
-            if _DANGEROUS_CONFIG.match(key):
-                _block(f"`git -c {key}=…` could redirect pushes or define aliases the guard "
-                       "cannot see (rules S1, S4)")
+            if is_risky_config(key):
+                _block(f"`git -c {key}=…` could redirect pushes, define an alias, or make git "
+                       "run a program the guard cannot see (rules S1, S4; E1)")
             i += 2
+        elif a == "--config-env" or a.startswith("--config-env="):
+            spec = a.split("=", 1)[1] if "=" in a else (args[i + 1] if i + 1 < len(args) else "")
+            if is_risky_config(spec.split("=", 1)[0]):
+                _block(f"`git --config-env {spec}` could make git run a program the guard "
+                       "cannot see (E1)")
+            i += 1 if "=" in a else 2
+        elif a == "--exec-path" or a.startswith("--exec-path="):
+            _block("`git --exec-path` can make git run git-* programs from a chosen directory "
+                   "(E1); not allowed")
         elif a in _GIT_VALUE_OPTS:
             i += 2
         elif a.startswith("-"):
@@ -746,13 +782,21 @@ def _check_git(args: list[str], ctx: GuardContext, cwd: Path) -> None:
         _check_push(rest, ctx, repo_dir)
     elif sub in ("send-pack", "http-push"):
         _block(f"`git {sub}` bypasses the push checks; use `git push` (rule S1)")
+    elif sub == "hook":
+        if "run" in rest:
+            _block("`git hook run` executes a repository hook; not allowed (E1, ADR-0006)")
+    elif sub in ("clone", "init", "submodule"):
+        if any(t == "--template" or t.startswith("--template=") for t in rest):
+            _block(f"`git {sub} --template` installs hooks from a template directory (E1); "
+                   "not allowed")
     elif sub == "config":
-        reading = any(a in ("--get", "--get-all", "--get-regexp", "--list", "-l",
-                            "--show-origin", "get", "list") for a in rest)
+        reading = any(a in ("--get", "--get-all", "--get-regexp", "--get-urlmatch",
+                            "--list", "-l", "--show-origin", "--show-scope", "get", "list",
+                            "get-all", "get-regexp") for a in rest)
         for a in rest:
-            if _DANGEROUS_CONFIG.match(a.split("=", 1)[0]) and not reading:
-                _block(f"setting git config {a!r} could redirect pushes or define aliases "
-                       "the guard cannot see (rules S1, S4)")
+            if is_risky_config(a.split("=", 1)[0]) and not reading:
+                _block(f"setting git config {a!r} could redirect pushes, define an alias, or "
+                       "make git run a program the guard cannot see (rules S1, S4; E1)")
 
 
 _PUSH_VALUE_OPTS = {"--repo", "-o", "--push-option", "--receive-pack", "--exec"}
@@ -994,6 +1038,11 @@ def _scan_code(text: str) -> None:
         _block("this script runs `gh pr merge`; the human merges (D1, rule S1)")
     if re.search(r"\bgit\b[\s'\",\]\[]+push\b[^\n]*[\s'\":/]+(main|master)\b", text):
         _block("this script appears to push to the default branch (rule S1)")
+    # D-9 (best effort): inline code that touches the target pointer, git hooks or config.
+    if re.search(r"\.factory-local\b", text) or re.search(r"\bset_target\b", text) \
+            or re.search(r"\.git[\\/](hooks|config)\b", text):
+        _block("this code refers to the factory's target pointer, git hooks or git config; "
+               "those are changed only outside Claude (E1, T1, D-9)")
 
 
 # ----------------------------------------------------------------------------- paths
@@ -1087,13 +1136,145 @@ def _within(path: str, root: Path | None) -> bool:
     return path == base or path.startswith(base.rstrip("\\/") + os.sep)
 
 
+def _resolve_real(path: str, cwd: Path) -> str | None:
+    """``path`` normalized and with symlinks/junctions resolved, or ``None`` when it cannot
+    be worked out (a run-time substitution or unexpanded variable)."""
+    try:
+        norm = _normalize(path, cwd)
+    except Blocked:
+        return None
+    try:
+        return os.path.normcase(os.path.realpath(norm))
+    except OSError:
+        return norm
+
+
+def _under(real: str, root: Path) -> bool:
+    """True when the already-resolved ``real`` is ``root`` or inside it, matching whole path
+    components (so ``.github`` is not inside ``.git``, nor ``.factory`` in ``.factory-local``)."""
+    base = os.path.normcase(os.path.realpath(os.path.abspath(root)))
+    return real == base or real.startswith(base.rstrip("\\/") + os.sep)
+
+
+def _protected_label(path: str, ctx: GuardContext, cwd: Path) -> str | None:
+    """The reason ``path`` is protected from the model's commands, or ``None``.
+
+    ``.factory-local/`` is protected in both modes (D-10/T1: only ``factory.py target set``,
+    run by the human in a terminal, changes it). With an external target active, the target's
+    and the factory's ``.git/`` and the factory's ``scripts/`` and ``.claude/`` are read-only
+    (E1, D-11). When the factory itself is being developed (no target), its own tree stays
+    writable."""
+    real = _resolve_real(path, cwd)
+    if real is None:
+        return None
+    if _under(real, ctx.factory_root / ".factory-local"):
+        return ("the factory's .factory-local/ is set only by `python scripts/factory.py "
+                "target set <path>`, run by you in a terminal (D-10, T1)")
+    if ctx.target_root is not None:
+        for folder, why in (
+            (ctx.target_root / ".git", "the target's .git/ is protected (E1, rule S3)"),
+            (ctx.factory_root / ".git", "the factory's .git/ is protected (E1)"),
+            (ctx.factory_root / "scripts",
+             "the factory's scripts/ (the guard's own code) is read-only while a target is "
+             "active (D-11, rule S3)"),
+            (ctx.factory_root / ".claude",
+             "the factory's .claude/ settings and hooks are read-only while a target is "
+             "active (D-11, rule S3)"),
+        ):
+            if _under(real, folder):
+                return why
+    return None
+
+
+# Commands that only read; naming a protected path with one of these is allowed.
+_READ_ONLY = frozenset({
+    "cat", "type", "head", "tail", "less", "more", "nl", "od", "xxd", "strings", "cmp",
+    "get-content", "gc", "ls", "dir", "get-childitem", "gci", "test-path", "get-item", "gi",
+    "resolve-path", "rg", "grep", "egrep", "fgrep", "findstr", "select-string", "sls", "wc",
+    "stat", "file", "readlink", "dirname", "basename", "get-filehash", "md5sum", "sha1sum",
+    "sha256sum", "git", "gh", "cd", "pushd", "popd", "set-location", "sl", "chdir",
+    "push-location", "pop-location", "eval", "invoke-expression", "iex", "cmd",
+    "start-process", "saps", "start",
+})
+
+
+def _scan_protected_args(name: str, args: list[str], ctx: GuardContext, cwd: Path) -> None:
+    """Block a command that is not a known reader when any of its path arguments is a
+    protected path (E1, T1, D-11). Interpreters are handled by ``_scan_code`` (D-9)."""
+    if name in _READ_ONLY or name in _SHELLS or name in _POWERSHELLS or name in _INTERPRETERS:
+        return
+    for a in args:
+        if not a or a.startswith("-"):
+            continue
+        label = _protected_label(a, ctx, cwd)
+        if label:
+            _block(f"{a}: {label}")
+
+
+def _check_factory_target(name: str, args: list[str]) -> None:
+    """Block Claude running ``factory.py target set`` in either mode: the active target is
+    changed only by the human, in a terminal (D-10). ``target show`` and ``target check``
+    stay available."""
+    rest: list[str] | None = None
+    if name in _INTERPRETERS:
+        for index, a in enumerate(args):
+            if not a.startswith("-"):
+                if a.endswith("factory.py"):
+                    rest = args[index + 1:]
+                break
+    elif name == "factory.py":
+        rest = args
+    if rest is None:
+        return
+    positional = [a for a in rest if not a.startswith("-")]
+    if positional[:2] == ["target", "set"]:
+        _block("Claude must not change the factory's active target. Run `python "
+               "scripts/factory.py target set <path>` yourself in a terminal (D-10). "
+               "`target show` and `target check <path>` are available here.")
+
+
+_GIT_PROGRAM_VAR = re.compile(
+    r"^(GIT_SSH_COMMAND|GIT_SSH|GIT_PROXY_COMMAND|GIT_EXTERNAL_DIFF|GIT_ASKPASS|SSH_ASKPASS|"
+    r"GIT_EDITOR|GIT_SEQUENCE_EDITOR|GIT_PAGER|GIT_EXEC_PATH|GIT_TEMPLATE_DIR|GIT_CONFIG.*)$",
+    re.IGNORECASE)
+
+
+def _block_if_git_var(name: str) -> None:
+    if _GIT_PROGRAM_VAR.match(name):
+        _block(f"setting {name} changes how git finds programs and would reach the factory's "
+               "own git calls; not allowed (E1, rule S1)")
+
+
+def _scan_git_env(words: list[str], dialect: str) -> None:
+    """Block git program-running variables set as a prefix, through ``env``/``export``, with
+    ``setx``, or through ``[Environment]::SetEnvironmentVariable`` (D-4)."""
+    match = re.search(r"SetEnvironmentVariable\s*\(\s*['\"]([A-Za-z_]\w*)", " ".join(words))
+    if match:
+        _block_if_git_var(match.group(1))
+    for index, w in enumerate(words):
+        assignment = _BASH_ASSIGNMENT.match(w)
+        if assignment and (index == 0 or _BASH_ASSIGNMENT.match(words[index - 1])):
+            _block_if_git_var(assignment["name"])  # prefix VAR=val
+        name = _exe_name(w)
+        if name in ("env", "export"):
+            for a in words[index + 1:]:
+                inner = _BASH_ASSIGNMENT.match(a)
+                if inner:
+                    _block_if_git_var(inner["name"])
+                elif name == "env" and not a.startswith("-"):
+                    break
+        elif name == "setx" and index + 1 < len(words):
+            _block_if_git_var(words[index + 1])
+
+
 def _check_write_path(path: str, ctx: GuardContext, cwd: Path) -> None:
+    label = _protected_label(path, ctx, cwd)
+    if label:
+        _block(f"{path}: {label}")
     p = _normalize(path, cwd)
     shared = [*ctx.scratch_dirs, *ctx.extra_write_dirs]
     if ctx.target_root is not None:
         if _within(p, ctx.factory_root):
-            if _within(p, ctx.factory_root / ".factory-local"):
-                return
             _block(f"{path}: the factory repo is read-only while a target is active "
                    "(rule S3, D4)")
         if _within(p, ctx.target_root) or any(_within(p, d) for d in shared):

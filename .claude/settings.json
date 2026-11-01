@@ -13,6 +13,8 @@
       "Bash(python scripts/factory.py:*)"
     ],
     "deny": [
+      "Skill(factory-target)",
+      "Skill(factory-target *)",
       "Bash(gh pr merge:*)",
       "Bash(gh pr review:*)",
       "Bash(gh pr comment:*)",

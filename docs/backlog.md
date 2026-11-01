@@ -364,8 +364,18 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
     - **Candidates for PR C, not decided:**
       - add `hook.*` to E1's blocked keys and to `doctor`'s report;
       - a real-git test that fails if a config-defined hook runs through `Git`.
-- **Stays open:** E1 and T1 (PR C, the guard and `doctor`) are not done.
-- **Status:** verified (the guard allows the setting, and git runs it; the wider set above, by `guard.decide`; E2, by the tests above); analysis (the merge path) · **Owner:** PR B (E2, implemented) and PR C (E1 and T1, not started), both before T8.1, in that order (D4); the guard-only rest stays a T9.5 scope decision · **State:** open
+- **E1 and T1 implemented in PR C ([not yet opened], branch `task/B-46-E1-T1-guard`, 2026-11-01):**
+  - **Path-based protection (D-3):** the guard blocks any command that is not a known reader from writing into a protected path, matching whole path components and resolving symlinks/junctions (`guard._protected_label`, `_scan_protected_args`, `_resolve_real`, `_under`). Protected: `.factory-local/` in both modes; with an external target active, the target's and the factory's `.git/` and the factory's `scripts/` and `.claude/` (D-11, including `settings.local.json`). Self-development (no target) leaves the factory tree writable.
+  - **`git config` and flags (E1):** `git config` writes and `-c`/`--config-env` of program-running keys are blocked (`guard.is_risky_config`, `_PROGRAM_CONFIG`), as are `--exec-path`, `git hook run` and `--template` on clone/init.
+  - **Git program variables (D-4):** `GIT_SSH_COMMAND`, `GIT_EXEC_PATH`, `GIT_CONFIG*`, … blocked as a prefix, through `env`/`export`, `setx`, and `$env:` (`_scan_git_env`, `_block_if_git_var`). `[Environment]::SetEnvironmentVariable` is best-effort only.
+  - **Inline code (D-9, best effort):** interpreter code that names `.factory-local`, `.git/hooks`, `.git/config` or `set_target` is blocked (`_scan_code`).
+  - **T1/D-10:** Claude can never run `factory.py target set` (any spelling, both modes; `_check_factory_target`); `/factory-target` is a read-only helper (`disable-model-invocation: true`, plus a `Skill(factory-target *)` deny rule); `target set` confirms in a terminal, refuses on empty/closed stdin, and refuses under `CLAUDECODE` (hint only); new read-only `target check`. The active target is set only by the human in a terminal.
+  - **D-5:** when `target.json` exists but is unreadable, the guard fails closed (`GuardContext.target_broken`).
+  - **`doctor` (D-7):** a new "hooks & config" check FAILs on active hooks and program-running keys in the target's local config (`doctor._hook_safety`).
+  - **Deferred:** `Git._env` hardening against config the target already has (D-8; finding 3 stays below as a candidate). The full read-only allow-list with write-flag exclusions, and whole-factory-repo path-reference coverage, remain partial (documented limits).
+  - **Tests:** `tests/test_guard.py` (all target-set spellings, both modes, program keys/vars, protected paths, bash and PowerShell), `tests/test_target.py` (confirmation refusal, `CLAUDECODE`, `target check`), `tests/test_doctor.py` (the new check), `tests/test_commands.py` (the read-only `/factory-target`).
+- **Stays open:** D-8 (`Git._env` program-key hardening; finding 3). The guard-only wider set stays a T9.5 scope decision.
+- **Status:** verified (the guard allows the setting, and git runs it; E2, by PR B's tests; E1/T1/D-10/D-11, by PR C's tests); analysis (the merge path) · **Owner:** PR B (E2, merged) and PR C (E1, T1, D-10, D-11, implemented), both before T8.1, in that order (D4); the guard-only rest stays a T9.5 scope decision · **State:** open
 
 ### <a id="b-47"></a>B-47 S12's check after the merge does not hold its evidence against the merge commit
 - **What:** `closeout.after_merge` reads the evidence of S12's `verify run` on the default branch and accepts it when the branch is not the story's and nothing failed. It does not check two things:

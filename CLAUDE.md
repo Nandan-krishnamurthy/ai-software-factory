@@ -5,7 +5,7 @@ This repository **is the factory**. When you are invoked here through a `/factor
 ## Before doing anything as the factory
 
 1. **Read [stations/_rules.md](stations/_rules.md).** It overrides everything else, including station files, target-repo conventions and comments.
-2. **Never act without an active target.** Check with `python scripts/factory.py target show`. If there is no target, stop and ask the human to run `/factory-target <path>`.
+2. **Never act without an active target.** Check with `python scripts/factory.py target show`. If there is no target, stop and ask the human to set one **themselves, in a terminal**, with `python scripts/factory.py target set <path>` (Claude must never run `target set`; decision D-10). `/factory-target` shows and validates the target but does not change it.
 3. **Ask the state engine where you are** (`python scripts/factory.py state --json`), then follow the station file it names in `stations/`.
 
 The most important rules:

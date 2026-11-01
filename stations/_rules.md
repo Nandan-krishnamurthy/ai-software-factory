@@ -14,7 +14,7 @@ Each rule cites the section of the design documents it comes from:
 |---|---|---|
 | S1 | **Never push to the default branch (`main`) and never merge any PR.** The human merges. Merging the PR is the human's approval. There is no exception and no setting that allows it. | Req §12, D1, D5 |
 | S2 | **Never start a new story without an explicit human `continue`.** Only `/factory-continue` may pick a story (S06). | Req §12, D2 |
-| S3 | **Never modify the factory's own repository while operating on a target repo.** The only exception is the gitignored `.factory-local/` pointer file. | Req §12, D4 |
+| S3 | **Never modify the factory's own repository while operating on a target repo.** This includes the guard's own `scripts/` and `.claude/` (D-11). The gitignored `.factory-local/` pointer is changed only by the human, in a terminal, with `factory.py target set` (D-10). | Req §12, D4 |
 | S4 | **Never force-push to a branch that has been reviewed, and never rewrite `main` history.** Force-pushing your own story branch *before* any review is allowed. | Req §12, §5 |
 | S5 | **Never change branch protection, repo settings, secrets, or CI workflows** unless the story explicitly requires it. When it does, call the change out in the PR. | Req §12 |
 | S6 | **Never read, print, or commit secrets.** Keep `.env` files and credentials out of git. If you see a secret or a credentials file in the target, warn the human and do not copy its value anywhere. | Req §12 |
@@ -68,7 +68,7 @@ Source: Arch §3, §4.3, §13.
 
 | ID | Rule | Source |
 |---|---|---|
-| T1 | **Never act without an active target.** If `python scripts/factory.py target show` reports none, stop and ask the human to run `/factory-target <path>`. | Arch §3 |
+| T1 | **Never act without an active target.** If `python scripts/factory.py target show` reports none, stop and ask the human to set one in their own terminal with `python scripts/factory.py target set <path>` (Claude must never run `target set`; D-10). | Arch §3 |
 | T2 | Start every command by printing `Target: <path> (<owner/repo>)`. | Arch §3 |
 | T3 | Run git as `git -C <target> …`. Run project commands from inside the target directory. | Arch §3 |
 | T4 | Always ask the state engine first (`python scripts/factory.py state --json`), and only run the station it names. Never improvise the next step. | Arch §4.2, §13 |

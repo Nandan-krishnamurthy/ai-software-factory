@@ -28,11 +28,21 @@ Then **open Claude Code in this folder**. The slash commands (`.claude/commands/
 
 ### 1. Select the target
 
+Set the target **yourself, in your own terminal** (not through Claude) — this is the one
+operational step the factory never does on its own (decision D-10):
+
 ```
-/factory-target C:\path\to\target-repo
+python scripts/factory.py target set C:\path\to\target-repo
 ```
 
-This validates the path (a git repo with a GitHub `origin`, not the factory itself), records it in the gitignored `.factory-local/target.json`, gives Claude Code access to it, and runs `doctor`. Fix any `FAIL` before going on, except missing labels on a new target: `/factory-start` creates them. Pointing the factory at another repo is just another `/factory-target`; no factory file changes.
+It validates the path (a git repo with a GitHub `origin`, not the factory itself), shows the
+repository and path, and asks you to confirm; it then records it in the gitignored
+`.factory-local/target.json` and gives Claude Code access to it. Switching to another repo is
+just another `target set`; no factory file changes.
+
+Then, inside Claude, run `/factory-target <path>` to see the current target, validate a path
+(`target check`, read-only) and run `doctor`. Fix any `FAIL` before going on, except missing
+labels on a new target: `/factory-start` creates them.
 
 ### 2. Plan an increment (up to Gate A)
 
@@ -90,7 +100,7 @@ It finds the PR with GitHub's commit-to-PR API, falling back to the `Merge pull 
 
 | Command | What it does | Stops at |
 |---|---|---|
-| `/factory-target <path>` | Select and check the target repo | Immediately |
+| `/factory-target <path>` | Show and validate the target (read-only); you set it with `target set` in a terminal | Immediately |
 | `/factory-start <requirements-file>` | Begin an increment and plan it | Gate A (Planning PR) |
 | `/factory-resume` | Finish whatever is in motion: planning, rework, issue creation, a story already started, a close-out. **Never starts a new story.** | The next gate |
 | `/factory-continue` | Your "continue" at Gate C: finish anything pending, then start **one** story and take it to a PR | Gate B (story PR) |
@@ -125,7 +135,7 @@ While a target is active, the factory never modifies its own repo (rule S3). To 
    python -m ruff check
    ```
    Code in `scripts/` uses the standard library only, `pathlib` for paths, and argument lists for subprocesses.
-4. Run `/factory-target <path>` again before the next factory command.
+4. Set the target again in your terminal (`python scripts/factory.py target set <path>`) before the next factory command.
 
 ## Documents
 
