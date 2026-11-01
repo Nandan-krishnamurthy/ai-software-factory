@@ -15,20 +15,20 @@ At the end of a rework (**rework mode**, architecture §7.2), the same station r
 
 ## Preconditions
 - `python scripts/factory.py state --json` reports `STORY_IN_PROGRESS` with `next_station` `S11`, or `GATE_B_CHANGES_REQUESTED` with `next_station` `S11` (**rework mode**; `details.pr` is `<P>`). Use `details.issue` as `<I>`, `details.branch` as `<B>` and `increment` as `<INC>`.
-- `git -C <T> switch <B>` and `git -C <T> pull --ff-only` succeed, and `git -C <T> status --porcelain` prints nothing.
+- `python scripts/factory.py git switch <B>` and `python scripts/factory.py git pull --ff-only` succeed, and `python scripts/factory.py git status --porcelain` prints nothing.
 - `python scripts/factory.py verdict check --issue <I>` exits 0: the checkpoint comment holds the AC verifier's verdict from S10, complete, with evidence, backed by the AC-to-test map of the evidence for the branch head, and with no `fail` on any criterion or the suite. A failing verdict stops this station.
 
 ## Inputs
 - `gh issue view <I> --repo <R> --json title,body,comments`: the story (its **Traces to** REQs and ACs) and the checkpoint comment.
-- `git -C <T> diff origin/<D>...<B>` and `git -C <T> log origin/<D>..<B> --format=%B`: what changed, for the Summary.
+- `git -C <T> diff --no-ext-diff --no-textconv origin/<D>...<B>` and `git -C <T> log origin/<D>..<B> --format=%B`: what changed, for the Summary.
 - `.factory/config.json`: `ci.required`.
 - `docs/factory/traceability.md` on `<B>`.
 - Rework mode only: `python scripts/factory.py feedback --pr <P> --rework --json`, the items still without an answer; the `Feedback <id>:` lines in the commit bodies (S08); and the checkpoint's `review_round`.
 
 ## Steps
-1. **Up to date with `<D>`.** Run `git -C <T> fetch origin`, then `git -C <T> rev-list --count <B>..origin/<D>`.
+1. **Up to date with `<D>`.** Run `python scripts/factory.py git fetch origin`, then `git -C <T> rev-list --count <B>..origin/<D>`.
    - If it prints `0`, go on to step 2.
-   - Otherwise fold the new `<D>` commits into the story branch with `git -C <T> pull --no-rebase --no-edit origin <D>` (the new commit lands on `<B>` only, never on `<D>`; there is no force-push) and push it with `git -C <T> push origin <B>`. The code changed, so the evidence and the verdict no longer describe it: record `python scripts/factory.py comment --issue <I> --kind checkpoint --station S11 --next S09 --branch <B>` and stop. S09 runs the commands again, and S10 verifies again.
+   - Otherwise fold the new `<D>` commits into the story branch with `python scripts/factory.py git pull --no-rebase --no-edit origin <D>` (the new commit lands on `<B>` only, never on `<D>`; there is no force-push) and push it with `python scripts/factory.py git push origin <B>`. The code changed, so the evidence and the verdict no longer describe it: record `python scripts/factory.py comment --issue <I> --kind checkpoint --station S11 --next S09 --branch <B>` and stop. S09 runs the commands again, and S10 verifies again.
 2. **Find the PR.** Run `gh pr list --repo <R> --head <B> --state open --json number,url,isDraft`. If one exists, it is `<P>`, and step 5 updates it.
 3. **Your sections.** Write `<SCRATCH>/notes-<I>.md` with only these sections, as the [templates README](../templates/README.md) describes them:
    - `## Summary`: what changed and why, in 2–5 bullets. If the PR is a draft from an earlier stuck run, say that the problem is now solved.
@@ -70,9 +70,9 @@ Steps 1–9 run as above. The PR `<P>` exists, so step 5 edits it, and the body 
 - Rework mode: one marked reply per feedback item (`to=<id>`), the round summary, and `review_round` `<k>` in the checkpoint.
 
 ## Checkpoint
-- `git -C <T> add docs/factory/traceability.md .factory/log.md`
-- `git -C <T> commit -m "docs: traceability for #<I> (#<I>)" -m "Factory-Station: S11"`
-- `git -C <T> push origin <B>`
+- `python scripts/factory.py git add docs/factory/traceability.md .factory/log.md`
+- `python scripts/factory.py git commit -m "docs: traceability for #<I> (#<I>)" -m "Factory-Station: S11"`
+- `python scripts/factory.py git push origin <B>`
 - After the label: `python scripts/factory.py comment --issue <I> --kind checkpoint --station S11 --next GATE_B --branch <B> --body-file <SCRATCH>/verdict-<I>.md`
 
 If this station stops after opening the PR but before moving the label, the state engine names S11 again, and steps 2 and 5 update the same PR; step 6 is skipped once the rows list `#<P>`.
@@ -85,7 +85,7 @@ In rework mode the order is reversed: the checkpoint first (`--review-round <k>`
 - `pr render` or `pr check` reports a problem other than a pending `Q8 CI` (steps 4 and 8): write the problems to `<SCRATCH>/question-<I>.md`, ask as above, and stop. Never change a fact to make it pass.
 - `python scripts/factory.py verdict check --issue <I>` exits 1 (the verdict is missing, invalid, or an AC or the suite failed): stop; S10 must run again.
 - A required CI check fails (step 9).
-- `git -C <T> status --porcelain` shows changes that this station did not make.
+- `python scripts/factory.py git status --porcelain` shows changes that this station did not make.
 
 ## Done check
 - [ ] `gh pr list --repo <R> --head <B> --state open --json number,body` lists exactly one PR, whose body contains `<!-- factory:pr story=` and `Closes #<I>`.

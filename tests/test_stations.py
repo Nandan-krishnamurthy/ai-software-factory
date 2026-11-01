@@ -475,7 +475,7 @@ class ExistingProjectPlanningTest(unittest.TestCase):
         self.assertIn("**Resumed run** (`state --json` reports `PLANNING`)", steps)
         self.assertIn("**New increment** (`UNCONFIGURED` or `INCREMENT_COMPLETE`)", steps)
         new = steps[steps.index("**New increment**"):]
-        self.assertLess(new.index("`git -C <T> pull --ff-only`"),
+        self.assertLess(new.index("`python scripts/factory.py git pull --ff-only`"),
                         new.index("`python scripts/factory.py increment next --json`"))
         self.assertIn("`002-<slug>` after `001-initial`", steps)
 
@@ -683,7 +683,7 @@ class StoryStationsTest(unittest.TestCase):
                 self.assertIn(f"python scripts/factory.py comment --issue <I> --kind checkpoint "
                               f"--station {sid} --next {nxt} --branch <B>", checkpoint)
                 if sid != "S10":  # S10 changes no code
-                    self.assertIn("git -C <T> push", checkpoint)
+                    self.assertIn("python scripts/factory.py git push", checkpoint)
                     self.assertIn(f'-m "{state.FACTORY_COMMIT_TRAILER}: {sid}"', checkpoint)
 
     def test_done_checks_match_the_state_engine(self):
@@ -750,7 +750,8 @@ class StoryStationsTest(unittest.TestCase):
         self.assertEqual((s12.allowed_from, s12.next), (["GATE_B"], "GATE_C"))
         steps = self.section("S12", "Steps")
         confirm = steps.index("python scripts/factory.py closeout --issue <I> --json")
-        for later in ("git -C <T> switch <D>", "git -C <T> branch -D <B>",
+        for later in ("python scripts/factory.py git switch <D>",
+                      "python scripts/factory.py git branch -D <B>",
                       "python scripts/factory.py comment --issue <I> --kind reply",
                       "python scripts/factory.py closeout --issue <I> --finish"):
             self.assertLess(confirm, steps.index(later), later)
@@ -761,7 +762,7 @@ class StoryStationsTest(unittest.TestCase):
 
     def test_s12_deletes_only_the_merged_branch_and_marks_done_before_the_checkpoint(self):
         steps = self.section("S12", "Steps")
-        delete = steps.index("git -C <T> branch -D <B>")
+        delete = steps.index("python scripts/factory.py git branch -D <B>")
         self.assertLess(steps.index("git -C <T> rev-parse <B>"), delete)
         self.assertIn("If they differ, the branch has commits that are not in the PR: keep it",
                       steps)
@@ -795,7 +796,7 @@ class StoryStationsTest(unittest.TestCase):
         # than S11 re-running the commands by hand.
         steps = self.section("S11", "Steps")
         self.assertIn("git -C <T> rev-list --count <B>..origin/<D>", steps)
-        self.assertIn("git -C <T> pull --no-rebase --no-edit origin <D>", steps)
+        self.assertIn("python scripts/factory.py git pull --no-rebase --no-edit origin <D>", steps)
         back = steps.index("--station S11 --next S09 --branch <B>")
         self.assertLess(steps.index("pull --no-rebase"), back)
         self.assertLess(back, steps.index("python scripts/factory.py pr --head <B>"))
@@ -915,7 +916,7 @@ class VerificationEngineTest(unittest.TestCase):
         # B-01: the walking skeleton's commands are approved by the merge and run then.
         steps = self.by_id["S12"].sections["Steps"]
         run = steps.index("python scripts/factory.py verify run --issue <I>")
-        self.assertLess(steps.index("git -C <T> switch <D>"), run)
+        self.assertLess(steps.index("python scripts/factory.py git switch <D>"), run)
         self.assertLess(run, steps.index("python scripts/factory.py closeout --issue <I> "
                                          "--finish"))
         self.assertIn("verify_after_merge", steps)

@@ -42,8 +42,8 @@ def run_doctor(target: Target, gh: Gh, factory_root: Path | None = None) -> list
         add("target", OK, f"{target.path} ({target.repo}); not the factory repo")
     except FactoryError as err:
         add("target", FAIL, str(err))
-        for name in ("working tree", "hooks & config", "config", "gh auth", "remote",
-                     "labels", "branch protection"):
+        for name in ("working tree", "hooks & config", "git lfs", "config", "gh auth",
+                     "remote", "labels", "branch protection"):
             add(name, SKIP, "target is invalid")
         return checks
 
@@ -63,6 +63,12 @@ def run_doctor(target: Target, gh: Gh, factory_root: Path | None = None) -> list
     # 2b. Hooks and program-running config in the target's own git (E1, D-7, ADR-0006).
     status_h, detail_h = _hook_safety(target.path)
     add("hooks & config", status_h, detail_h)
+
+    # 2c. Git LFS: the factory's own git runs with hooks disabled (D-1/C2), so LFS's
+    # pre-push hook would not upload objects — a push could silently omit them. FAIL until
+    # LFS is supported.
+    status_l, detail_l = _lfs(target.path)
+    add("git lfs", status_l, detail_l)
 
     # 3. Config.
     config: Config | None = None
@@ -180,6 +186,33 @@ def _hook_safety(path: Path) -> tuple[str, str]:
                       "calls (E2), but they still run for git the project's code runs. "
                       "Disable or review them before an unattended run (D-7, ADR-0006).")
     return OK, "no active hooks or program-running config in the target's local git"
+
+
+def _lfs(path: Path) -> tuple[str, str]:
+    """FAIL when the target uses Git LFS (C2): the factory's wrapper runs git with hooks
+    disabled, so LFS's ``pre-push`` hook never uploads objects and a push could omit them.
+    Detected by ``filter.lfs`` in the local config or ``filter=lfs`` in a ``.gitattributes``."""
+    git = Git(path)
+    try:
+        configured = bool(git.run(["config", "--local", "--get-regexp", r"^filter\.lfs\."]).strip())
+    except GitError:
+        configured = False  # exit 1 means no such key
+    attr = False
+    for name in (".gitattributes", path / ".git" / "info" / "attributes"):
+        f = (path / name) if isinstance(name, str) else name
+        try:
+            if f.is_file() and "filter=lfs" in f.read_text(encoding="utf-8", errors="ignore"):
+                attr = True
+                break
+        except OSError:
+            pass
+    if configured or attr:
+        where = "filter.lfs in local config" if configured else ".gitattributes (filter=lfs)"
+        return FAIL, (f"Git LFS is in use ({where}). The factory disables hooks for its own "
+                      "git (C2), so LFS's pre-push hook would not upload objects and a push "
+                      "could silently omit them. LFS is not supported yet; do not run the "
+                      "factory on this repo.")
+    return OK, "no Git LFS configuration detected"
 
 
 def _branch_protection(gh: Gh, repo: str, branch: str, is_empty: bool | None) -> tuple[str, str]:

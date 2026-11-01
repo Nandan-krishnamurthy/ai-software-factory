@@ -14,17 +14,17 @@ After the human has approved the plan by merging the Planning PR (Gate A), creat
 ## Preconditions
 - `python scripts/factory.py state --json` reports `ISSUES_PENDING` with `next_station` `S05b`. Use its `increment` as `<INC>`.
 - `gh pr list --repo <R> --head factory/plan-<INC> --state merged --json number` lists the merged Planning PR `<N>`. The human merged it: the factory only observes merges.
-- `git -C <T> status --porcelain` prints nothing. Otherwise report the files and stop.
+- `python scripts/factory.py git status --porcelain` prints nothing. Otherwise report the files and stop.
 
 ## Inputs
 - `docs/factory/increments/<INC>/05-stories.md` on `<D>`: the approved version. `issues sync` reads it from GitHub itself.
 - `python scripts/factory.py issues sync --dry-run --increment <INC>`: the plan.
 
 ## Steps
-1. Run `git -C <T> switch <D>` and `git -C <T> pull --ff-only`, so the local clone has the approved documents.
+1. Run `python scripts/factory.py git switch <D>` and `python scripts/factory.py git pull --ff-only`, so the local clone has the approved documents.
 2. Run `python scripts/factory.py issues sync --dry-run --increment <INC>` and read the plan.
 3. Run `python scripts/factory.py issues sync --increment <INC>`. It creates only the missing issues, in dependency order, labelled `factory:story` and `status:ready`, so running it again is safe.
-4. Run `git -C <T> branch -d factory/plan-<INC>` to remove the local planning branch. If git refuses (the branch is not fully merged), leave it and mention it.
+4. Run `python scripts/factory.py git branch -d factory/plan-<INC>` to remove the local planning branch. If git refuses (the branch is not fully merged), leave it and mention it.
 5. If step 3 created any issues, post a summary on the Planning PR:
    - Write it to `<SCRATCH>/issues-<INC>.md`: the issues created, with their numbers and titles, and which stories are ready to start (those with `Blocked by: None`).
    - Run `python scripts/factory.py comment --pr <N> --kind reply --body-file <SCRATCH>/issues-<INC>.md`.
@@ -41,7 +41,7 @@ The issues themselves are the checkpoint. `issues sync` finds existing issues by
 - `issues sync` reports a contract problem in the approved `05-stories.md`. The merged plan cannot be changed here: report the problem and stop. The fix needs a new Planning PR.
 - `issues sync` refuses because labels are missing: run `python scripts/factory.py labels ensure`, then run step 3 again.
 - `issues sync` reports several issues with the same story marker: report them and stop. A human must remove the extra marker.
-- `git -C <T> pull --ff-only` fails: report it and stop. Never reset the default branch.
+- `python scripts/factory.py git pull --ff-only` fails: report it and stop. Never reset the default branch.
 
 ## Done check
 - [ ] `python scripts/factory.py issues sync --dry-run --increment <INC>` reports `0 to create`.

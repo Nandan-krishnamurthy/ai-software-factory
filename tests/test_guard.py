@@ -74,7 +74,7 @@ BLOCK = [
     ("chained &&", bash("cd /tmp && gh pr merge 5"), "gh pr merge"),
     ("chained ;", bash("echo hi; gh pr merge 5"), "gh pr merge"),
     ("chained ||", bash("false || gh pr merge 5"), "gh pr merge"),
-    ("newline", bash("git status\ngh pr merge 5"), "gh pr merge"),
+    ("newline", bash("git log -1\ngh pr merge 5"), "gh pr merge"),
     ("pipe to xargs", bash("gh pr list -q '.[].number' | xargs -n1 gh pr merge"), "gh pr merge"),
     ("bash -c", bash('bash -c "gh pr merge 5"'), "gh pr merge"),
     ("bash -lc single-quoted", bash("bash -lc 'gh pr merge 5'"), "gh pr merge"),
@@ -116,7 +116,7 @@ BLOCK = [
     ("pwsh gh pr merge", pwsh("gh pr merge 5"), "gh pr merge"),
     ("pwsh call operator", pwsh('& "C:\\Program Files\\GitHub CLI\\gh.exe" pr merge 5'),
      "gh pr merge"),
-    ("pwsh chained ;", pwsh("git status; gh pr merge 5"), "gh pr merge"),
+    ("pwsh chained ;", pwsh("git log -1; gh pr merge 5"), "gh pr merge"),
     ("pwsh -Command", pwsh('pwsh -NoProfile -Command "gh pr merge 5"'), "gh pr merge"),
     ("pwsh Start-Process", pwsh("Start-Process gh -ArgumentList 'pr merge 5' -Wait"),
      "gh pr merge"),
@@ -234,6 +234,91 @@ BLOCK = [
     ("force current branch", bash("git push --force"), "under review"),
     ("force unknown review state", bash("git push --force origin story/99-unknown"),
      "could not confirm"),
+    # --- C2: raw hook-running git must use the wrapper with a target active ------------
+    ("raw status via wrapper", bash("git status"), "wrapper"),
+    ("raw commit via wrapper", bash('git commit -m "x"'), "wrapper"),
+    ("raw add via wrapper", bash("git add ."), "wrapper"),
+    ("raw push story via wrapper", bash("git push -u origin story/12-add-due-date"), "wrapper"),
+    ("raw switch via wrapper", bash("git switch main"), "wrapper"),
+    ("raw fetch via wrapper", bash("git fetch origin"), "wrapper"),
+    ("raw pull via wrapper", bash("git pull --ff-only"), "wrapper"),
+    ("raw branch via wrapper", bash("git branch --show-current"), "wrapper"),
+    ("raw ls-files via wrapper", bash("git ls-files"), "wrapper"),
+    ("raw git -C target push via wrapper",
+     bash(f'git -C "{TARGET}" push -u origin story/12-add-due-date'), "wrapper"),
+    ("raw working-tree diff", bash("git diff"), "commit range"),
+    ("raw diff range without flags", bash("git diff origin/main...HEAD"), "commit range"),
+    ("raw diff cached", bash("git diff --cached"), "commit range"),
+    ("raw hash-object -w", bash("git hash-object -w f.txt"), "object store"),
+    ("raw merge refused", bash("git merge --no-ff origin/main"), "not an allowed raw"),
+    ("raw rebase refused", bash("git rebase origin/main"), "not an allowed raw"),
+    ("raw reset refused", bash("git reset --hard origin/main"), "not an allowed raw"),
+    # --- C2: the wrapper gets the same push/merge checks as raw git --------------------
+    ("wrapper push to main", bash("python scripts/factory.py git push origin HEAD:main"),
+     "default branch"),
+    ("wrapper force to reviewed",
+     bash("python scripts/factory.py git push --force origin story/12-add-due-date"),
+     "under review"),
+    ("wrapper -c program key",
+     bash("python scripts/factory.py git -c core.sshCommand=evil fetch"), "program"),
+    # --- C2: every supported invocation form of the wrapper is recognised -------------
+    ("wrapper via py", bash("py scripts/factory.py git push origin HEAD:main"),
+     "default branch"),
+    ("wrapper via python3", bash("python3 scripts/factory.py git push origin HEAD:main"),
+     "default branch"),
+    ("wrapper via python -u", bash("python -u scripts/factory.py git push origin HEAD:main"),
+     "default branch"),
+    ("wrapper via py -3", bash("py -3 scripts/factory.py git push origin HEAD:main"),
+     "default branch"),
+    ("wrapper via absolute path",
+     bash(f'python "{FACTORY / "scripts" / "factory.py"}" git push origin HEAD:main'),
+     "default branch"),
+    ("wrapper direct exec", bash("./scripts/factory.py git push origin HEAD:main"),
+     "default branch"),
+    ("wrapper env prefix", bash("FOO=1 python scripts/factory.py git push origin HEAD:main"),
+     "default branch"),
+    ("wrapper inside bash -c",
+     bash('bash -c "python scripts/factory.py git push origin HEAD:main"'), "default branch"),
+    ("wrapper in pwsh with call operator",
+     pwsh("& python scripts/factory.py git push origin HEAD:main"), "default branch"),
+    ("wrapper with -- separator",
+     bash("python scripts/factory.py git -- push origin HEAD:main"), "default branch"),
+    # B1: interpreter options with a separate value must not hide factory.py.
+    ("wrapper via python -X utf8",
+     bash("python -X utf8 scripts/factory.py git push origin HEAD:main"), "default branch"),
+    ("wrapper via python -W ignore",
+     bash("python -W ignore scripts/factory.py git push origin HEAD:main"), "default branch"),
+    ("target set via python -X utf8",
+     bash("python -X utf8 scripts/factory.py target set /work/app"), "active target"),
+    ("target set via python -W ignore",
+     bash("python -W ignore scripts/factory.py target set /work/app"), "active target"),
+    # B3: a versioned or windowed interpreter name is still that interpreter.
+    ("wrapper via python3.12",
+     bash("python3.12 scripts/factory.py git push origin HEAD:main"), "default branch"),
+    ("target set via python3.11",
+     bash("python3.11 scripts/factory.py target set /work/app"), "active target"),
+    ("target set via pythonw", bash("pythonw scripts/factory.py target set /work/app"),
+     "active target"),
+    ("python3.12 -c writes factory-local",
+     bash("python3.12 -c \"open('.factory-local/target.json','w')\""), "D-9"),
+    ("python3.12 -c merge",
+     bash("python3.12 -c \"import subprocess; subprocess.run(['gh','pr','merge','5'])\""),
+     "gh pr merge"),
+    # B2: with --repo every positional is a refspec.
+    ("wrapper push --repo= to main",
+     bash("python scripts/factory.py git push --repo=origin HEAD:main"), "default branch"),
+    ("wrapper push --repo to main",
+     bash("python scripts/factory.py git push --repo origin HEAD:main"), "default branch"),
+    # Refspec spellings through the wrapper.
+    ("wrapper +feature:main", bash("python scripts/factory.py git push origin +feature:main"),
+     "default branch"),
+    ("wrapper delete main", bash("python scripts/factory.py git push origin :main"),
+     "delete the default branch"),
+    ("wrapper refs/heads/main",
+     bash("python scripts/factory.py git push origin HEAD:refs/heads/main"), "default branch"),
+    ("wrapper --mirror", bash("python scripts/factory.py git push --mirror origin"), "mirror"),
+    ("wrapper -C elsewhere to main",
+     bash("python scripts/factory.py git -C /x push origin HEAD:main"), "default branch"),
     # --- comments, reviews, settings -------------------------------------------------
     ("gh pr comment", bash("gh pr comment 5 --body hi"), "factory.py comment"),
     ("gh issue comment", bash("gh issue comment 3 -b hi"), "factory.py comment"),
@@ -273,18 +358,30 @@ BLOCK = [
 ]
 
 ALLOW = [
-    ("git status", bash("git status")),
-    ("push story branch", bash("git push -u origin story/12-add-due-date")),
-    ("push HEAD:story", bash("git push origin HEAD:story/12-add-due-date")),
-    ("plain push on story branch", bash("git push")),
-    ("git -C target push", bash(f'git -C "{TARGET}" push -u origin story/12-add-due-date')),
-    ("force before review", bash("git push --force-with-lease origin story/13-fresh")),
-    ("push tag", bash("git push origin refs/tags/v1.0")),
-    ("dry run to main", bash("git push --dry-run origin main")),
-    ("local merge", bash("git merge --no-ff origin/main")),
-    ("commit mentioning merge",
-     bash('git commit -m "Refuse mergePullRequest and gh pr merge"')),
-    ("git log grep", bash("git log --grep=merge --oneline")),
+    # Hook-running git goes through the wrapper (C2); read-only git stays raw.
+    ("wrapper status", bash("python scripts/factory.py git status")),
+    ("wrapper push story branch",
+     bash("python scripts/factory.py git push -u origin story/12-add-due-date")),
+    ("wrapper push HEAD:story",
+     bash("python scripts/factory.py git push origin HEAD:story/12-add-due-date")),
+    ("wrapper plain push", bash("python scripts/factory.py git push")),
+    ("wrapper force before review",
+     bash("python scripts/factory.py git push --force-with-lease origin story/13-fresh")),
+    ("wrapper push tag", bash("python scripts/factory.py git push origin refs/tags/v1.0")),
+    ("wrapper dry run to main", bash("python scripts/factory.py git push --dry-run origin main")),
+    ("wrapper commit mentioning merge",
+     bash('python scripts/factory.py git commit -m "Refuse mergePullRequest and gh pr merge"')),
+    ("wrapper add", bash("python scripts/factory.py git add .factory/log.md")),
+    ("wrapper switch", bash("python scripts/factory.py git switch -c story/12-add-due-date")),
+    ("wrapper branch show-current", bash("python scripts/factory.py git branch --show-current")),
+    ("raw read-only log grep", bash("git log --grep=merge --oneline")),
+    ("raw read-only rev-parse", bash("git rev-parse HEAD")),
+    ("raw read-only ls-remote", bash("git ls-remote --heads origin story/12-add-due-date")),
+    ("raw diff with range and flags",
+     bash("git diff --no-ext-diff --no-textconv origin/main...HEAD")),
+    ("raw hash-object no -w", bash("git hash-object f.txt")),
+    ("python3.12 target show", bash("python3.12 scripts/factory.py target show")),
+    ("python3.12 -m pytest", bash("python3.12 -m pytest -q")),
     ("gh pr create with heredoc body",
      bash("gh pr create --title 'Add merge sort' --body-file - <<'EOF'\n"
           "Never run gh pr merge; mergePullRequest is blocked.\nEOF")),
@@ -302,12 +399,12 @@ ALLOW = [
     ("devnull redirects", bash("echo x > /dev/null 2>&1; ls 2>/dev/null")),
     ("echo text", bash('echo "gh pr merge is forbidden"')),
     ("curl GET", bash("curl -s https://api.github.com/repos/o/r")),
-    ("bash -c harmless", bash('bash -c "git status && git log --oneline -1"')),
+    ("bash -c harmless", bash('bash -c "git rev-parse HEAD && git log --oneline -1"')),
     ("heredoc into target file",
      bash(f"cat > \"{TARGET / 'notes.md'}\" <<'EOF'\nhello\nEOF")),
     ("redirect into scratch", bash(f'echo x > "{SCRATCH / "out.txt"}"')),
     ("pwsh tests", pwsh("python -m unittest 2>&1 | Select-Object -Last 3")),
-    ("pwsh redirect to null", pwsh("git status > $null")),
+    ("pwsh redirect to null", pwsh("python scripts/factory.py git status > $null")),
     ("Write in target", write(TARGET / "src" / "app.py")),
     ("Edit in target", write(TARGET / "README.md", "Edit")),
     ("relative write in target", write("src/new.py")),
@@ -315,7 +412,7 @@ ALLOW = [
     ("Write memory", write(MEMORY / "proj" / "memory" / "note.md")),
     ("read .git config", bash(f'cat "{TARGET / ".git" / "config"}"')),
     ("read factory script", bash(f'rg pattern "{FACTORY / "scripts" / "factory" / "guard.py"}"')),
-    ("git add in target", bash("git -C /work/app add .factory/log.md")),
+    ("raw read-only -C target", bash("git -C /work/app rev-parse --short HEAD")),
     ("factory.py target show", bash("python scripts/factory.py target show")),
     ("factory.py target check", bash("python scripts/factory.py target check /work/app")),
     ("env CI only", bash("CI=1 npm test")),
@@ -343,6 +440,13 @@ DEV_BLOCK = [
     ("dev: redirect factory-local",
      bash(f'echo x > "{FACTORY / ".factory-local" / "target.json"}"'), ".factory-local"),
     ("dev: target set", bash("python scripts/factory.py target set /work/app"), "active target"),
+    ("dev: target set via -X", bash("python -X utf8 scripts/factory.py target set /x"),
+     "active target"),
+    # B2 pre-dated C2: raw push with --repo in self-development mode.
+    ("dev: raw push --repo= to main", bash("git push --repo=origin HEAD:main"),
+     "default branch"),
+    ("dev: raw push --repo to main", bash("git push --repo origin HEAD:main"),
+     "default branch"),
 ]
 DEV_ALLOW = [
     ("dev: write factory", write(FACTORY / "scripts" / "factory" / "x.py")),
@@ -412,7 +516,7 @@ class GuardTableTest(unittest.TestCase):
 # and `Out-File -Encoding utf8 <path>` was taken to write a file called `utf8`.
 DEMO_PWSH_ALLOW = [
     ("demo: variable holding the target path",
-     pwsh(f'$T="{TARGET}"; git -C $T status --porcelain; '
+     pwsh(f'$T="{TARGET}"; python scripts/factory.py git status --porcelain; '
           "python scripts/factory.py closeout --issue 3 --json")),
     ("demo: if ($?)",
      pwsh(f'python scripts/factory.py comment --issue 3 --kind reply --body-file '
@@ -427,12 +531,13 @@ PWSH_ALLOW = [
     ("pwsh assignment with spaces", pwsh(f'$T = "{TARGET}"; git -C $T log -1')),
     ("pwsh env assignment", pwsh('$env:NO_COLOR = "1"; npm test')),
     ("pwsh $LASTEXITCODE test", pwsh("npm test; if ($LASTEXITCODE -ne 0) { exit 1 }")),
-    ("pwsh $? and -and", pwsh("git status; if ($? -and $LASTEXITCODE -eq 0) { git log -1 }")),
-    ("pwsh assignment from a command", pwsh("$branch = git branch --show-current")),
-    ("pwsh $null discard", pwsh("$null = git fetch origin; git status > $null")),
+    ("pwsh $? and -and", pwsh("git log -1; if ($? -and $LASTEXITCODE -eq 0) { git log -1 }")),
+    ("pwsh assignment from a command", pwsh("$branch = git rev-parse --abbrev-ref HEAD")),
+    ("pwsh $null discard", pwsh("$null = python scripts/factory.py git fetch origin; "
+                                "python scripts/factory.py git status > $null")),
     ("pwsh known variable in cd", pwsh(f'$T = "{TARGET}"; cd $T; "x" > notes.txt')),
-    ("pwsh push through known -C",
-     pwsh(f'$T = "{TARGET}"; git -C $T push -u origin story/12-add-due-date')),
+    ("pwsh wrapper push",
+     pwsh("python scripts/factory.py git push -u origin story/12-add-due-date")),
     ("Out-File -FilePath and -Encoding",
      pwsh(f'"x" | Out-File -FilePath "{SCRATCH / "a.md"}" -Encoding utf8')),
     ("Out-File abbreviated -Enc", pwsh(f'"x" | Out-File -Enc utf8 "{SCRATCH / "a.md"}"')),
@@ -531,19 +636,24 @@ T, S = TARGET.as_posix(), SCRATCH.as_posix()
 DEMO_BASH_ALLOW = [
     ("demo: log line through $T",
      bash(f'T="{T}"; echo "2026-09-30T12:36:50Z S07 001-initial #7 branch story/7-x" >> '
-          '"$T/.factory/log.md" && git -C "$T" add .factory/log.md && git -C "$T" commit -q '
-          '-m "chore: start story #7" -m "Factory-Station: S07" && git -C "$T" push -u origin '
+          '"$T/.factory/log.md" && python scripts/factory.py git add .factory/log.md && '
+          'python scripts/factory.py git commit -q '
+          '-m "chore: start story #7" -m "Factory-Station: S07" && '
+          'python scripts/factory.py git push -u origin '
           "story/12-add-due-date 2>&1 | tail -2")),
     ("demo: printf into $T",
      bash(f'T="{T}"; printf \'%s S00 001-initial intake\\n\' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
-          '>> "$T/.factory/log.md"; cat "$T/.factory/log.md"; git -C "$T" status --porcelain')),
+          '>> "$T/.factory/log.md"; cat "$T/.factory/log.md"; '
+          'python scripts/factory.py git status --porcelain')),
     ("demo: scratch dir in $S, chained with &&",
      bash(f"S={S} && mkdir -p $S/oldguard/factory && git show main:scripts/factory/guard.py "
           "> $S/oldguard/factory/guard_old.py")),
     ("demo: $T and $B for the story branch",
-     bash(f"T={T}; B=story/12-add-due-date; git -C $T switch -c $B origin/main && echo "
+     bash(f"T={T}; B=story/12-add-due-date; "
+          "python scripts/factory.py git switch -c $B origin/main && echo "
           '"$(date -u +%Y-%m-%dT%H:%M:%SZ) S07 001-initial #2 branch $B" >> $T/.factory/log.md '
-          "&& git -C $T add .factory/log.md && git -C $T push -u origin $B")),
+          "&& python scripts/factory.py git add .factory/log.md && "
+          "python scripts/factory.py git push -u origin $B")),
     ("demo: brace group redirected into $P",
      bash(f"P={S}; {{ cat <<'EOF'\n## Summary\nEOF\ngrep -E '^- \\[' $P/verdict-2.md\n}} "
           "> $P/pr-2.md; grep -c '{{' $P/pr-2.md; gh pr create --title x --body-file $P/pr-2.md")),
@@ -567,7 +677,8 @@ DEMO_BASH_BLOCK = [
 ]
 
 BASH_VAR_ALLOW = [
-    ("bash: branch in a variable", bash("B=story/12-add-due-date; git push -u origin $B")),
+    ("bash: branch in a variable",
+     bash("B=story/12-add-due-date; python scripts/factory.py git push -u origin $B")),
     ("bash: cd into a known variable", bash(f'T="{T}"; cd "$T" && echo x > notes.txt')),
     ("bash: ${T} braces", bash(f'T="{T}" N=out; echo "${{T}}" > "${{T}}/${{N}}.txt"')),
     ("bash: single-quoted value", bash(f"S='{S}'; echo '$HOME' > \"$S/x\"")),
@@ -654,12 +765,13 @@ KEYWORD_BLOCK = [
 ]
 
 KEYWORD_ALLOW = [
-    ("if/else on git", bash("if git diff --quiet; then echo clean; else echo dirty; fi")),
+    ("if/else on git", bash("if git rev-parse -q HEAD; then echo a; else echo b; fi")),
     ("for loop", bash('for f in a b; do echo "$f"; done')),
     ("while read", bash('while read line; do echo "$line"; done < in.txt')),
     ("push story branch in if",
-     bash("if [ -f x ]; then git push -u origin story/12-add-due-date; fi")),
-    ("negated test", bash("! git diff --quiet")),
+     bash("if [ -f x ]; then python scripts/factory.py git push -u origin "
+          "story/12-add-due-date; fi")),
+    ("negated test", bash("! git log -1 --oneline")),
     ("multi-line loop", bash("for t in unit e2e; do\n  npm run test:$t\ndone")),
 ]
 

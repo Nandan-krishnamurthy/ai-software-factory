@@ -13,8 +13,8 @@ Order the work into milestones, so that stories can be cut from the plan and pic
 
 ## Preconditions
 - `python scripts/factory.py state --json` reports `PLANNING` with `next_station` `S04`. Use its `increment` as `<INC>`.
-- `git -C <T> switch factory/plan-<INC>` and `git -C <T> pull --ff-only` succeed.
-- `git -C <T> status --porcelain` prints nothing. Otherwise report the files and stop.
+- `python scripts/factory.py git switch factory/plan-<INC>` and `python scripts/factory.py git pull --ff-only` succeed.
+- `python scripts/factory.py git status --porcelain` prints nothing. Otherwise report the files and stop.
 
 ## Inputs
 - `docs/factory/increments/<INC>/02-requirements.md`
@@ -42,13 +42,13 @@ Order the work into milestones, so that stories can be cut from the plan and pic
 - `.factory/log.md`
 
 ## Checkpoint
-- `git -C <T> add docs/factory/increments/<INC>/04-implementation-plan.md .factory/log.md`
-- `git -C <T> commit -m "S04: implementation plan for <INC>" -m "Factory-Station: S04"`
-- `git -C <T> push origin factory/plan-<INC>`
+- `python scripts/factory.py git add docs/factory/increments/<INC>/04-implementation-plan.md .factory/log.md`
+- `python scripts/factory.py git commit -m "S04: implementation plan for <INC>" -m "Factory-Station: S04"`
+- `python scripts/factory.py git push origin factory/plan-<INC>`
 
 ## Stop conditions
 - An in-scope requirement cannot be placed in any milestone, for example because it depends on something outside the increment: ask the human.
-- `git -C <T> status --porcelain` shows changes that this station did not make.
+- `python scripts/factory.py git status --porcelain` shows changes that this station did not make.
 
 ## Done check
 - [ ] Every in-scope `REQ-###` (listed under `## Functional` or `## Non-functional` in `02-requirements.md`) has a row in `## Requirement coverage`.

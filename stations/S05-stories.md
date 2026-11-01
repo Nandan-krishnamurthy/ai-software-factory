@@ -16,8 +16,8 @@ Break the plan into small stories that meet the Story Contract, start the tracea
   - `PLANNING` with `next_station` `S05`: **normal mode**;
   - `GATE_A_CHANGES`: **revision mode**, and its `details.pr` is `<N>`.
 - Use its `increment` as `<INC>`.
-- `git -C <T> switch factory/plan-<INC>` and `git -C <T> pull --ff-only` succeed.
-- `git -C <T> status --porcelain` prints nothing. Otherwise report the files and stop.
+- `python scripts/factory.py git switch factory/plan-<INC>` and `python scripts/factory.py git pull --ff-only` succeed.
+- `python scripts/factory.py git status --porcelain` prints nothing. Otherwise report the files and stop.
 
 ## Inputs
 - `docs/factory/increments/<INC>/02-requirements.md`, `03-architecture.md` and `04-implementation-plan.md`.
@@ -77,9 +77,9 @@ Break the plan into small stories that meet the Story Contract, start the tracea
 - The Planning PR on `<R>`, labelled `factory:planning`, with the `factory:planning` marker. Revision mode only: one marked reply per feedback item.
 
 ## Checkpoint
-- `git -C <T> add docs/factory/ .factory/log.md`
-- `git -C <T> commit -m "S05: stories for <INC>" -m "Factory-Station: S05"`
-- `git -C <T> push origin factory/plan-<INC>`
+- `python scripts/factory.py git add docs/factory/ .factory/log.md`
+- `python scripts/factory.py git commit -m "S05: stories for <INC>" -m "Factory-Station: S05"`
+- `python scripts/factory.py git push origin factory/plan-<INC>`
 
 The Planning PR itself is the gate checkpoint: once it is open, `state --json` reports `GATE_A_WAITING`. Opening it is idempotent (step 8 looks for an existing PR first).
 
@@ -89,7 +89,7 @@ The Planning PR itself is the gate checkpoint: once it is open, `state --json` r
 - `plan check` flags a new requirement that only restates a requirement that is already Done: ask the human (rule H6), and do not plan it.
 - A story's `- Files:` estimate cannot be brought under `limits.max_diff_lines` by splitting it: ask the human.
 - Revision mode: a feedback item contradicts another, or contradicts the rules. Reply explaining the conflict, and do not guess.
-- `git -C <T> status --porcelain` shows changes that this station did not make.
+- `python scripts/factory.py git status --porcelain` shows changes that this station did not make.
 
 ## Done check
 - [ ] `python scripts/factory.py issues sync --dry-run --increment <INC>` exits 0, and the PR body contains its output.

@@ -28,6 +28,14 @@ def unopenable(name: str) -> str:
 NO_HOOKS = unopenable("factory-no-hooks")
 SAFE_CONFIG = (("core.hooksPath", NO_HOOKS), ("core.fsmonitor", "false"))
 
+# The git subcommands that can trigger a repository hook or write the index, which the
+# stations run through the factory wrapper (`factory.py git …`, D-1 Option C) so they run
+# with hooks and fsmonitor disabled (E2). Read-only commands (`log`, `rev-parse`, `show`,
+# `diff A..B`, ...) are run raw by the stations and are not accepted here.
+WRAPPER_SUBCOMMANDS = frozenset({
+    "commit", "push", "pull", "switch", "fetch", "branch", "add", "status", "ls-files",
+})
+
 
 def _sq(text: str) -> str:
     """``text`` single-quoted the way git writes ``GIT_CONFIG_PARAMETERS``."""

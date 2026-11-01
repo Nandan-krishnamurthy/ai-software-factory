@@ -101,8 +101,25 @@ class HealthyTargetTest(DoctorTestCase):
         self.assertEqual(set(self.statuses(by_name).values()), {OK}, render(checks))
         self.assertEqual(doctor.exit_code(checks), 0)
         self.assertIn("Doctor PASSED: 0 failed, 0 warning(s).", render(checks))
-        self.assertEqual(list(by_name), ["target", "working tree", "hooks & config", "config",
-                                         "gh auth", "remote", "labels", "branch protection"])
+        self.assertEqual(list(by_name), ["target", "working tree", "hooks & config", "git lfs",
+                                         "config", "gh auth", "remote", "labels",
+                                         "branch protection"])
+
+    def test_git_lfs_fails(self):
+        # C2: LFS in the target's config makes the "git lfs" check FAIL (its pre-push hook
+        # would not run under the factory's hook-disabled git).
+        self.write_config()
+        Git(self.path).run(["config", "--local", "filter.lfs.clean", "git-lfs clean -- %f"])
+        by_name, _ = self.doctor([user(), repo_view(), label_list(), protection()])
+        self.assertEqual(by_name["git lfs"].status, FAIL)
+        self.assertIn("LFS", by_name["git lfs"].detail)
+
+    def test_git_lfs_via_gitattributes_fails(self):
+        self.write_config()
+        (self.path / ".gitattributes").write_text("*.psd filter=lfs diff=lfs merge=lfs\n",
+                                                   encoding="utf-8")
+        by_name, _ = self.doctor([user(), repo_view(), label_list(), protection()])
+        self.assertEqual(by_name["git lfs"].status, FAIL)
 
     def test_fresh_target_only_warns(self):
         """Before /factory-start: no config, empty repo. Warnings only, exit 0."""
@@ -260,7 +277,7 @@ class DoctorCliTest(DoctorTestCase):
         self.assertEqual(code, 0)
         payload = json.loads(out)  # with --json the Target banner goes to stderr
         self.assertTrue(payload["ok"])
-        self.assertEqual(len(payload["checks"]), 8)
+        self.assertEqual(len(payload["checks"]), 9)
 
     def test_cli_labels_ensure(self):
         creates = [call(["label", "create", s.name, "--repo", REPO, "--color", s.color,

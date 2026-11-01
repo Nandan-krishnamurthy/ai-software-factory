@@ -70,5 +70,5 @@ Source: Arch §3, §4.3, §13.
 |---|---|---|
 | T1 | **Never act without an active target.** If `python scripts/factory.py target show` reports none, stop and ask the human to set one in their own terminal with `python scripts/factory.py target set <path>` (Claude must never run `target set`; D-10). | Arch §3 |
 | T2 | Start every command by printing `Target: <path> (<owner/repo>)`. | Arch §3 |
-| T3 | Run git as `git -C <target> …`. Run project commands from inside the target directory. | Arch §3 |
+| T3 | Run hook-running git (`commit`, `push`, `pull`, `switch`, `fetch`, `branch`, `add`, `status`, `ls-files`) through the wrapper `python scripts/factory.py git <sub> …`, which disables repository hooks (D-1, C2). Run read-only git raw as `git -C <target> …` (`log`, `rev-parse`, `rev-list`, `show`, `cat-file`, `hash-object` without `-w`, `config --get`, `ls-remote`, and `diff <A>…<B> --no-ext-diff --no-textconv`). Run project commands from inside the target directory. | Arch §3, C2 |
 | T4 | Always ask the state engine first (`python scripts/factory.py state --json`), and only run the station it names. Never improvise the next step. | Arch §4.2, §13 |
