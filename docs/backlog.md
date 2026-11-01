@@ -384,7 +384,7 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
   - **Limitation:** project hooks (Husky, lint-staged, commitlint) do not run for the factory's commits; CI and `verify run` must cover them. The wrapper is not a sandbox for model-written code (B-49).
 - **Stays open:**
   - **D-8:** `Git._env` program-key hardening (finding 3).
-  - **Finding 5 (PLAUSIBLE, not confirmed):** hooks defined in config (`hook.<name>.command`) that `core.hooksPath` may not govern. Not covered by PR C or PR C2: `hook.*` is not in the guard's blocked keys and `doctor` does not report it.
+  - **Finding 5 — an unconfirmed follow-up that needs verification, not a confirmed vulnerability and not a blocker:** a git version might run hooks defined in config (`hook.<name>.command`) that `core.hooksPath` does not govern. Git 2.52 on this machine ran no such hook in the earlier probe, and no git release is known to behave this way. First step: verify against the git versions the factory supports. Neither PR C nor PR C2 addresses it (`hook.*` is not in the guard's blocked keys and `doctor` does not report it).
   - The guard-only wider set stays a T9.5 scope decision.
 - **Status:** verified (the guard allows the setting, and git runs it; E2, by PR B's tests; E1/T1/D-10/D-11, by PR C's tests; D-1, by PR C2's tests); analysis (the merge path) · **Owner:** PR B (E2, merged), PR C (E1, T1, D-10, D-11, merged `8c87503`) and PR C2 (D-1, merged `e4ffe42`), all before T8.1 (D4); D-8 and finding 5 remain; the guard-only rest stays a T9.5 scope decision · **State:** open
 

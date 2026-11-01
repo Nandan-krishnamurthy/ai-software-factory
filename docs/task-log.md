@@ -899,4 +899,4 @@ E3g runner gets the full environment: KILLED ['test_every_command_gets_the_clean
 - **The merge:** the human merged PR #62 at 2026-11-01T12:09:26Z (`e4ffe42`; PR head `44bfaf9`). The factory never merges.
 
 **Handed on (open):**
-- [B-46](backlog.md#b-46): D-8 (finding 3); finding 5 (`hook.*` config-defined hooks, PLAUSIBLE, not covered); the guard-only wider set stays a T9.5 scope decision.
+- [B-46](backlog.md#b-46): D-8 (finding 3); finding 5 (`hook.*` config-defined hooks: an unconfirmed follow-up that needs verification, not a confirmed vulnerability or a blocker); the guard-only wider set stays a T9.5 scope decision.
