@@ -405,6 +405,19 @@ def _exe_name(word: str) -> str:
     return re.sub(r"\.(exe|cmd|bat|ps1)$", "", base)
 
 
+# A versioned or windowed interpreter (`python3.12`, `python3.11`, `pythonw`, `node20`) is the
+# same interpreter: without this it was not treated as one, so its inline code, a
+# `factory.py target set` and a wrapper push went unchecked (C2 review, B3).
+_VERSIONED_INTERPRETER = re.compile(r"(python)w?[\d.]*|(node|ruby|perl|php|deno|bun)[\d.]+")
+
+
+def _canonical_exe(name: str) -> str:
+    match = _VERSIONED_INTERPRETER.fullmatch(name)
+    if match:
+        return match.group(1) or match.group(2)
+    return name
+
+
 def _check_script(text: str, dialect: str, ctx: GuardContext, cwd: Path, depth: int) -> Path:
     """Check every command in ``text``. Returns the working directory after ``cd``s."""
     if depth > _MAX_DEPTH:
@@ -499,7 +512,7 @@ def _check_command(cmd: _Command, dialect: str, ctx: GuardContext, cwd: Path,
             return cwd  # e.g. `if ($?)` or `$LASTEXITCODE -ne 0`: it runs no command
         _block(f"the command name {exe.replace(_DYNAMIC, '$(...)')!r} is computed at run "
                "time, so the guard cannot check it; run the command directly")
-    name = _exe_name(exe)
+    name = _canonical_exe(_exe_name(exe))
     args = [w.replace(_DYNAMIC, "") for w in words[1:]]
 
     if cmd.after in ("|", "|&") and not cmd.heredocs and _runs_piped_code(name, args):
@@ -545,9 +558,11 @@ def _check_command(cmd: _Command, dialect: str, ctx: GuardContext, cwd: Path,
         return cwd
 
     _check_factory_target(name, args)
+    _check_factory_git(name, args, ctx, cwd)
     _scan_protected_args(name, args, ctx, cwd)
     if name == "git":
-        _check_git(args, ctx, cwd)
+        _check_git(args, ctx, cwd)  # push/config/program-key rules give their own reasons first
+        _check_raw_git_policy(args, ctx, cwd)  # then: hook-running git must use the wrapper (C2)
     elif name == "gh":
         _check_gh(args, cmd.heredocs)
     elif name in _HTTP_CLIENTS:
@@ -808,15 +823,19 @@ _PUSH_VALUE_OPTS = {"--repo", "-o", "--push-option", "--receive-pack", "--exec"}
 
 def _check_push(args: list[str], ctx: GuardContext, repo_dir: Path) -> None:
     force = delete = False
+    repo_given = False  # with --repo, every positional is a refspec (C2 review, B2)
     positional: list[str] = []
     i = 0
     while i < len(args):
         a = args[i]
         if a in _PUSH_VALUE_OPTS:
+            repo_given |= a == "--repo"
             i += 2
             continue
         if a.startswith("--"):
             opt = a.split("=", 1)[0]
+            if opt == "--repo":
+                repo_given = True
             if opt in ("--force", "--force-with-lease", "--force-if-includes"):
                 force = True
             elif opt in ("--mirror", "--all", "--branches", "--prune"):
@@ -837,7 +856,8 @@ def _check_push(args: list[str], ctx: GuardContext, repo_dir: Path) -> None:
             positional.append(a)
         i += 1
 
-    refspecs = positional[1:]
+    # The first positional is the remote, unless --repo named it (then all are refspecs).
+    refspecs = positional if repo_given else positional[1:]
     targets: list[tuple[str, bool, bool]] = []  # (destination branch, forced, deleting)
     if not refspecs:
         branch = ctx.current_branch(repo_dir)
@@ -1237,19 +1257,41 @@ def _check_pwsh_dotnet_writes(text: str, ctx: GuardContext, cwd: Path) -> None:
                 _block(f"{literal}: {label} (a .NET file write targets it; F3)")
 
 
+# Interpreter options whose value is a separate argument (`python -X utf8 …`, `-W ignore`):
+# the value must not be mistaken for the script path (C2 review, B1).
+_PY_VALUE_OPTS = frozenset({"-X", "-W", "--check-hash-based-pycs"})
+
+
+def _factory_py_args(name: str, args: list[str]) -> list[str] | None:
+    """The arguments after ``factory.py`` for a supported invocation form — ``python``/
+    ``py``/``python3`` (with options such as ``-u``, ``-X utf8`` or ``-W ignore``) running a
+    path that ends ``factory.py``, or ``factory.py`` run directly — else ``None``. With
+    ``-c``/``-m`` the interpreter runs inline code or a module, not a script file (D-9 scans
+    inline code)."""
+    if name in _INTERPRETERS:
+        i = 0
+        while i < len(args):
+            a = args[i]
+            if a in ("-c", "-m"):
+                return None
+            if a in _PY_VALUE_OPTS:
+                i += 2
+                continue
+            if a.startswith("-"):
+                i += 1
+                continue
+            return args[i + 1:] if a.endswith("factory.py") else None
+        return None
+    if name == "factory.py":
+        return args
+    return None
+
+
 def _check_factory_target(name: str, args: list[str]) -> None:
     """Block Claude running ``factory.py target set`` in either mode: the active target is
     changed only by the human, in a terminal (D-10). ``target show`` and ``target check``
     stay available."""
-    rest: list[str] | None = None
-    if name in _INTERPRETERS:
-        for index, a in enumerate(args):
-            if not a.startswith("-"):
-                if a.endswith("factory.py"):
-                    rest = args[index + 1:]
-                break
-    elif name == "factory.py":
-        rest = args
+    rest = _factory_py_args(name, args)
     if rest is None:
         return
     positional = [a for a in rest if not a.startswith("-")]
@@ -1257,6 +1299,70 @@ def _check_factory_target(name: str, args: list[str]) -> None:
         _block("Claude must not change the factory's active target. Run `python "
                "scripts/factory.py target set <path>` yourself in a terminal (D-10). "
                "`target show` and `target check <path>` are available here.")
+
+
+# Must equal git.WRAPPER_SUBCOMMANDS (a test asserts this): the hook-running git commands the
+# stations run through `factory.py git …` (D-1, C2). Kept here so the guard imports no
+# subprocess-backed module.
+_WRAPPER_GIT_SUBCOMMANDS = frozenset({
+    "commit", "push", "pull", "switch", "fetch", "branch", "add", "status", "ls-files",
+})
+# Raw git subcommands the stations may still run directly with a target active (read-only;
+# C2). `diff` and `hash-object` are handled specially below.
+_RAW_READONLY_GIT = frozenset({
+    "log", "rev-parse", "rev-list", "show", "cat-file", "config", "ls-remote",
+})
+
+
+def _check_factory_git(name: str, args: list[str], ctx: GuardContext, cwd: Path) -> None:
+    """A wrapper call ``factory.py git <gitargs>`` gets the same push/config checks as raw
+    git, so it can never become a way around the merge and push rules (C2)."""
+    rest = _factory_py_args(name, args)
+    if rest is None:
+        return
+    positional = [a for a in rest if not a.startswith("-")]
+    if not positional or positional[0] != "git":
+        return
+    gitargs = rest[rest.index("git") + 1:]
+    _check_git(gitargs, ctx, ctx.target_root or cwd)
+
+
+def _check_raw_git_policy(args: list[str], ctx: GuardContext, cwd: Path) -> None:
+    """With a target active, hook-running git must go through the factory wrapper; only the
+    agreed read-only commands may be run raw (C2). Self-development (no target) is unchanged."""
+    if ctx.target_root is None:
+        return
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a in _GIT_VALUE_OPTS:
+            i += 2
+        elif a.startswith("-"):
+            i += 1
+        else:
+            break
+    if i >= len(args):
+        return
+    sub, rest = args[i], args[i + 1:]
+    if sub in _WRAPPER_GIT_SUBCOMMANDS:
+        _block(f"run `git {sub}` through the factory wrapper so repository hooks stay "
+               f"disabled: `python scripts/factory.py git {sub} …` (D-1, C2). Raw `git "
+               f"{sub}` is not allowed while a target is active.")
+    if sub == "diff":
+        ranged = any(".." in a for a in rest if not a.startswith("-"))
+        if not (ranged and "--no-ext-diff" in rest and "--no-textconv" in rest):
+            _block("raw `git diff` must compare an explicit commit range and pass "
+                   "`--no-ext-diff --no-textconv` (C2-4): a working-tree diff can run a diff "
+                   "driver and write the index.")
+        return
+    if sub == "hash-object":
+        if any(a == "-w" or a.startswith("-w") or a == "--stdin-paths" for a in rest):
+            _block("`git hash-object -w` writes to the object store; not allowed raw (C2).")
+        return
+    if sub not in _RAW_READONLY_GIT:
+        _block(f"`git {sub}` is not an allowed raw git command while a target is active; use "
+               "`python scripts/factory.py git …` for writes, or an allowed read-only command "
+               "(C2).")
 
 
 _GIT_PROGRAM_VAR = re.compile(

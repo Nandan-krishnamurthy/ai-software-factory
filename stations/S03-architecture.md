@@ -13,8 +13,8 @@ Design how the increment's requirements will be built: components, data model, k
 
 ## Preconditions
 - `python scripts/factory.py state --json` reports `PLANNING` with `next_station` `S03`. Use its `increment` as `<INC>`.
-- `git -C <T> switch factory/plan-<INC>` and `git -C <T> pull --ff-only` succeed.
-- `git -C <T> status --porcelain` prints nothing. Otherwise report the files and stop.
+- `python scripts/factory.py git switch factory/plan-<INC>` and `python scripts/factory.py git pull --ff-only` succeed.
+- `python scripts/factory.py git status --porcelain` prints nothing. Otherwise report the files and stop.
 
 ## Inputs
 - `docs/factory/increments/<INC>/02-requirements.md`
@@ -47,14 +47,14 @@ Design how the increment's requirements will be built: components, data model, k
 - `.factory/log.md`
 
 ## Checkpoint
-- `git -C <T> add docs/factory/increments/<INC>/ .factory/log.md`
-- `git -C <T> commit -m "S03: architecture for <INC>" -m "Factory-Station: S03"`
-- `git -C <T> push origin factory/plan-<INC>`
+- `python scripts/factory.py git add docs/factory/increments/<INC>/ .factory/log.md`
+- `python scripts/factory.py git commit -m "S03: architecture for <INC>" -m "Factory-Station: S03"`
+- `python scripts/factory.py git push origin factory/plan-<INC>`
 
 ## Stop conditions
 - The requirements cannot be met without credentials, paid services or infrastructure that are not available: ask the human (rule H6).
 - Two requirements conflict and no design satisfies both: ask the human.
-- `git -C <T> status --porcelain` shows changes that this station did not make.
+- `python scripts/factory.py git status --porcelain` shows changes that this station did not make.
 
 ## Done check
 - [ ] Every `REQ-###` in `02-requirements.md` has a row in the `## Requirement mapping` table, and the table names no other REQ.

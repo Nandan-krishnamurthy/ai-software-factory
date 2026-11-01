@@ -13,13 +13,13 @@ Have every acceptance criterion checked by someone other than the implementer: t
 
 ## Preconditions
 - `python scripts/factory.py state --json` reports `STORY_IN_PROGRESS` with `next_station` `S10`, or `GATE_B_CHANGES_REQUESTED` with `next_station` `S10` (a rework, see [S08](S08-implement.md): the same steps apply). Use `details.issue` as `<I>`, `details.branch` as `<B>` and `increment` as `<INC>`.
-- `git -C <T> switch <B>` and `git -C <T> pull --ff-only` succeed, and `git -C <T> status --porcelain` prints nothing.
+- `python scripts/factory.py git switch <B>` and `python scripts/factory.py git pull --ff-only` succeed, and `python scripts/factory.py git status --porcelain` prints nothing.
 - `python scripts/factory.py verify check --issue <I>` exits 0: the checkpoint holds S09's evidence for the head of `<B>` on `origin`. Otherwise S09 must run again: record `python scripts/factory.py comment --issue <I> --kind checkpoint --station S10 --next S09 --branch <B>` and stop.
 - The `ac-verifier` subagent is available (`.claude/agents/ac-verifier.md` in the factory repo). If it is not, stop: never verify your own work in its place.
 
 ## Inputs
 - The acceptance criteria from `gh issue view <I> --repo <R> --json body` (the lines `- [ ] AC<n>: …`).
-- The diff: `git -C <T> diff origin/<D>...<B>`.
+- The diff: `git -C <T> diff --no-ext-diff --no-textconv origin/<D>...<B>`.
 - The test commands: `commands.test` (and `commands.build`, `commands.lint`, `commands.typecheck`) from `.factory/config.json` on `<B>`, and the target path `<T>`.
 - The checkpoint's `fix_attempts` (`gh issue view <I> --repo <R> --json comments`) and `limits.max_fix_attempts`.
 
@@ -27,7 +27,7 @@ Have every acceptance criterion checked by someone other than the implementer: t
 1. **Map the recorded run:** `python scripts/factory.py verify map --issue <I>`. It finds the tests named `#<I> AC<n>` in the branch diff and their results in S09's recorded run, and stores the map in the checkpoint beside the evidence. It runs no tests.
    - Exit 0: go to step 2. An AC shown as `missing` is not an error here: the verdict must then be `not-verifiable` with manual steps, or `verdict check` refuses it.
    - Exit 1 (a mapped test failed): this counts as a failed attempt. Save its output to `<SCRATCH>/map-<I>.md` and go to step 5 with that file in place of the verdict.
-   - An `error:` saying that the clone does not have the default branch's head: run `git -C <T> fetch origin`, then run step 1 again. This is not a failed attempt: the factory never fetches by itself (ADR-0006).
+   - An `error:` saying that the clone does not have the default branch's head: run `python scripts/factory.py git fetch origin`, then run step 1 again. This is not a failed attempt: the factory never fetches by itself (ADR-0006).
    - An `error:`: report it exactly and stop.
 2. Start the `ac-verifier` subagent with **only** the inputs above: the acceptance criteria, the diff, the commands and `<T>`. Do not give it your reasoning, your own verdict, the map or the conversation (architecture §4.5).
 3. Write its answer, **unchanged**, to `<SCRATCH>/verdict-<I>.md`: one line per criterion (`- [x] AC<n> — pass — evidence: …`, `- [ ] AC<n> — fail — evidence: …`, `- [ ] AC<n> — not-verifiable — manual steps: …`), then its `Suite:` line. Never edit, complete or soften it.
@@ -53,7 +53,7 @@ Nothing is committed: the code has not changed since S09. The verdict is kept on
 - The `ac-verifier` subagent is not available: report it and stop. Self-verification is not a substitute.
 - The verifier's answer is still `INVALID` after one retry: write the problems `verdict check` printed to `<SCRATCH>/question-<I>.md`, run `python scripts/factory.py comment --issue <I> --kind reply --body-file <SCRATCH>/question-<I>.md` and `gh issue edit <I> --repo <R> --add-label factory:needs-human`, and stop.
 - A criterion fails after `limits.max_fix_attempts` attempts: **Stuck**, as in S09.
-- `git -C <T> status --porcelain` shows changes that this station did not make.
+- `python scripts/factory.py git status --porcelain` shows changes that this station did not make.
 
 ## Done check
 - [ ] `python scripts/factory.py verdict check --issue <I>` (which reads the verdict, the map and the evidence from the checkpoint comment) prints `OK` and exits 0: one line per criterion, each with evidence, nothing failed, and every `pass` backed by the map.

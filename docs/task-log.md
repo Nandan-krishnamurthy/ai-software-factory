@@ -867,3 +867,34 @@ E3g runner gets the full environment: KILLED ['test_every_command_gets_the_clean
 
 **Handed on (open):**
 - [B-46](backlog.md#b-46): PR C2 (the secure git wrapper, Option C) and D-8 remain; the guard-only wider set stays a T9.5 scope decision.
+
+---
+
+## PR C2: the secure git wrapper (D-1 Option C, B-46)
+
+| | |
+|---|---|
+| **Specification** | [backlog.md](backlog.md): [B-46](backlog.md#b-46) D-1 (Option C) and the C2 decisions made with the human (2026-10-31/11-01). A backlog item, not a roadmap task. |
+| **PR** | branch `task/B-46-C2-git-wrapper` (not yet opened) |
+| **Status** | Implemented; in review |
+
+**Decisions carried in (human).** D-1: Option C, delivered as PR C2 after PR C. C2-1: only hook-capable git uses the wrapper; read-only git stays raw. C2-2/C2-3: `add`, `status` and `ls-files` use the wrapper (the hook matrix showed `post-index-change` and fsmonitor). C2-4: raw `diff` only with an explicit range. C2-5: `commit --amend` refused. C2-6: raw range `diff` must pass `--no-ext-diff --no-textconv`. 2026-11-01: route **all** `branch` forms through the wrapper; Git LFS makes `doctor` FAIL; the guard must recognise every supported invocation form, and the wrapper's push checks must not be bypassable through alternate syntax.
+
+**Built.**
+- **`cli.py`:** the `git` subcommand and `_git` handler: resolves the active target, refuses anything outside `git.WRAPPER_SUBCOMMANDS` and `commit --amend`, and runs the rest through `Git.run` (`Git._env`: hooks and fsmonitor off, credentials kept for story pushes).
+- **`git.py`:** `WRAPPER_SUBCOMMANDS`.
+- **`guard.py`:** `_factory_py_args` (shared by the D-10 and wrapper checks); `_check_factory_git` (wrapper calls get `_check_git`/`_check_push` against the target); `_check_raw_git_policy` (with a target active: hook-running git → the wrapper; read-only set raw; `diff` range + flags; `hash-object -w` refused; anything else fails closed). `_check_git` runs before the policy, so a raw push to `main` still blocks with its own reason.
+- **`doctor.py`:** the "git lfs" check (`_lfs`).
+- **Stations:** 80 lines moved to the wrapper; two raw `diff` lines gained the flags; `_rules.md` T3 rewritten.
+- **Docs:** architecture §8 (the wrapper, the hooks-only limitation, LFS, not a sandbox).
+
+**Adversarial review before opening (B1, B2).** Probing alternate syntax found two bypasses, fixed in this PR:
+- **B1:** `python -X utf8 scripts/factory.py …` and `python -W ignore …` — the option's value was read as the script path, so `factory.py` went unrecognised. This bypassed the wrapper's push checks **and PR C's D-10 `target set` block in both modes** (the `CLAUDECODE` and empty-stdin refusals inside `target set` still held at run time). `_factory_py_args` now skips value-taking options and treats `-c`/`-m` as not a script run.
+- **B2:** `git push --repo=<remote> <refspec>` / `--repo <remote> <refspec>` — the refspec was taken for the remote, so `HEAD:main` was never checked. Pre-dated C2 (raw pushes in self-development); the wrapper made it reachable with a target. With `--repo`, every positional is now a refspec.
+
+- **B3 (fresh review):** `python3.12`/`python3.11`/`pythonw` were not recognised as Python: their `-c` code went unscanned (D-9 and the existing merge-in-code check), and `target set` and wrapper pushes went unchecked. `_canonical_exe` now maps versioned and windowed interpreter names to their base name. B1 and B3 both reached PR C's merged D-10 guard block; the runtime `CLAUDECODE`/empty-stdin refusals inside `target set` held.
+
+**Not in PR C2.** D-8 (`Git._env` hardening, finding 3), B-49, B-50, T8, the roadmap.
+
+**Handed on (open):**
+- [B-46](backlog.md#b-46): D-8; the guard-only wider set stays a T9.5 scope decision.

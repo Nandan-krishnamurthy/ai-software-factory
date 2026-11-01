@@ -31,6 +31,7 @@ from factory import (
     trace,
     verdict,
 )
+from factory import git as git_mod
 from factory.config import load_config
 from factory.errors import FactoryError
 from factory.gh import Gh
@@ -68,6 +69,12 @@ def build_parser() -> argparse.ArgumentParser:
         "doctor", help="check the target is ready for the factory")
     doctor_parser.add_argument("--json", action="store_true", help="machine-readable output")
     doctor_parser.set_defaults(handler=_doctor, needs_target=True)
+
+    git_parser = subparsers.add_parser(
+        "git", help="run a hook-running git command in the target with hooks disabled (D-1)")
+    git_parser.add_argument("gitargs", nargs=argparse.REMAINDER,
+                            help="the git subcommand and its arguments")
+    git_parser.set_defaults(handler=_git, needs_target=True)
 
     discover_parser = subparsers.add_parser(
         "discover", help="the build/lint/test commands the target declares, with evidence",
@@ -574,6 +581,40 @@ def _target_check(args: argparse.Namespace) -> int:
         print(f"OK: {candidate.path} ({candidate.repo}) is a valid target.")
         print("To activate it, run this yourself in a terminal:\n"
               f"  python scripts/factory.py target set {args.path}")
+    return 0
+
+
+def _git(args: argparse.Namespace) -> int:
+    """The secure git wrapper (D-1, Option C): run a hook-running git command in the active
+    target through ``Git._env``, which disables repository hooks and fsmonitor (E2). Only the
+    agreed subcommands are allowed, and ``commit --amend`` is refused. Read-only git commands
+    (``log``, ``rev-parse``, ``diff A..B``, ...) are run raw by the stations, not here."""
+    gitargs = list(args.gitargs)
+    if gitargs and gitargs[0] == "--":  # argparse REMAINDER keeps a leading separator
+        gitargs = gitargs[1:]
+    if not gitargs:
+        print("error: factory.py git needs a subcommand, e.g. `git commit -m '…'`",
+              file=sys.stderr)
+        return 2
+    sub = gitargs[0]
+    if sub not in git_mod.WRAPPER_SUBCOMMANDS:
+        allowed = ", ".join(sorted(git_mod.WRAPPER_SUBCOMMANDS))
+        print(f"error: `git {sub}` is not allowed through the factory wrapper. Allowed: "
+              f"{allowed}. Read-only git is run directly as `git -C <target> …` "
+              "(stations/_rules.md, rule T3).", file=sys.stderr)
+        return 2
+    if sub == "commit" and ("--amend" in gitargs or "-a--amend" in gitargs):
+        print("error: `git commit --amend` is not allowed through the factory wrapper "
+              "(it rewrites a commit; C2-5).", file=sys.stderr)
+        return 2
+    git = Git(args.target.path)
+    try:
+        out = git.run(gitargs)
+    except FactoryError as err:
+        print(str(err), file=sys.stderr)
+        return 1
+    if out:
+        _print_safe(out.rstrip("\n"))
     return 0
 
 
