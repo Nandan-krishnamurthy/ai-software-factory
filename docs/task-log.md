@@ -866,7 +866,7 @@ E3g runner gets the full environment: KILLED ['test_every_command_gets_the_clean
 **Not in PR C.** PR C2 (the git-hook wrapper), D-8 (`Git._env` hardening), B-13, B-14, B-49, B-50, T8. The read-only allow-list with write-flag exclusions and whole-factory-repo path-reference coverage are partial, documented limits.
 
 **Handed on (open):**
-- [B-46](backlog.md#b-46): PR C2 (the secure git wrapper, Option C) and D-8 remained at PR C's merge; PR C2 has since been implemented in [#62](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/62) (in review), and D-8 remains; the guard-only wider set stays a T9.5 scope decision.
+- [B-46](backlog.md#b-46): PR C2 (the secure git wrapper, Option C) and D-8 remained at PR C's merge; PR C2 has since been merged in [#62](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/62) (`e4ffe42`), and D-8 remains; the guard-only wider set stays a T9.5 scope decision.
 
 ---
 
@@ -875,8 +875,8 @@ E3g runner gets the full environment: KILLED ['test_every_command_gets_the_clean
 | | |
 |---|---|
 | **Specification** | [backlog.md](backlog.md): [B-46](backlog.md#b-46) D-1 (Option C) and the C2 decisions made with the human (2026-10-31/11-01). A backlog item, not a roadmap task. |
-| **PR** | [#62](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/62), branch `task/B-46-C2-git-wrapper`, opened 2026-11-01 |
-| **Status** | Implemented; PR open and in review, not merged |
+| **PR** | [#62](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/62), branch `task/B-46-C2-git-wrapper`, merged 2026-11-01T12:09:26Z, merge commit `e4ffe42` |
+| **Status** | Done |
 
 **Decisions carried in (human).** D-1: Option C, delivered as PR C2 after PR C. C2-1: only hook-capable git uses the wrapper; read-only git stays raw. C2-2/C2-3: `add`, `status` and `ls-files` use the wrapper (the hook matrix showed `post-index-change` and fsmonitor). C2-4: raw `diff` only with an explicit range. C2-5: `commit --amend` refused. C2-6: raw range `diff` must pass `--no-ext-diff --no-textconv`. 2026-11-01: route **all** `branch` forms through the wrapper; Git LFS makes `doctor` FAIL; the guard must recognise every supported invocation form, and the wrapper's push checks must not be bypassable through alternate syntax.
 
@@ -896,5 +896,7 @@ E3g runner gets the full environment: KILLED ['test_every_command_gets_the_clean
 
 **Not in PR C2.** D-8 (`Git._env` hardening, finding 3), B-49, B-50, T8, the roadmap.
 
+- **The merge:** the human merged PR #62 at 2026-11-01T12:09:26Z (`e4ffe42`; PR head `44bfaf9`). The factory never merges.
+
 **Handed on (open):**
-- [B-46](backlog.md#b-46): D-8; the guard-only wider set stays a T9.5 scope decision.
+- [B-46](backlog.md#b-46): D-8 (finding 3); finding 5 (`hook.*` config-defined hooks, PLAUSIBLE, not covered); the guard-only wider set stays a T9.5 scope decision.
