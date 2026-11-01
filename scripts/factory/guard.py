@@ -336,7 +336,9 @@ def _tokenize(text: str, dialect: str) -> tuple[list[tuple[str, str]], list[str]
                 while i < n and (text[i].isdigit() or text[i] == "-"):
                     i += 1
                 continue
-            tokens.append((_REDIR_OUT if ch == ">" else _REDIR_IN, op))
+            # `<>` and `N<>` open the target read-write, so they write (F2). Only a plain
+            # input redirect (`<`, here-string `<<<`) stays an input.
+            tokens.append((_REDIR_OUT if ">" in op else _REDIR_IN, op))
         else:
             add(ch)
             i += 1
@@ -408,6 +410,8 @@ def _check_script(text: str, dialect: str, ctx: GuardContext, cwd: Path, depth: 
     if depth > _MAX_DEPTH:
         _block("command nesting is too deep for the guard to inspect")
     parsed = _parse(text, dialect)
+    if dialect == "powershell":
+        _check_pwsh_dotnet_writes(text, ctx, cwd)
     for inner in parsed.substitutions:
         _check_script(inner, dialect, ctx, cwd, depth + 1)
     variables: dict[str, str | None] = {}  # assigned earlier in this script
@@ -1203,12 +1207,34 @@ def _scan_protected_args(name: str, args: list[str], ctx: GuardContext, cwd: Pat
     protected path (E1, T1, D-11). Interpreters are handled by ``_scan_code`` (D-9)."""
     if name in _READ_ONLY or name in _SHELLS or name in _POWERSHELLS or name in _INTERPRETERS:
         return
+    if name == "dd":  # `dd of=<file>` writes; `if=<file>` only reads, so leave it alone (F1)
+        for a in args:
+            if a.lower().startswith("of=") and len(a) > 3:
+                _check_redirect_target(a[3:], ctx, cwd)
+        return
     for a in args:
         if not a or a.startswith("-"):
             continue
         label = _protected_label(a, ctx, cwd)
         if label:
             _block(f"{a}: {label}")
+
+
+# PowerShell .NET/file write calls: the destination is a string literal inside the call's
+# parentheses, which the tokenizer splits into a separate group, so it is not a scanned
+# argument (F3). Read-only verbs (`OpenRead`, `OpenText`, `ReadAll…`) are deliberately
+# excluded by requiring one of these write verbs immediately before `(`.
+_PWSH_WRITE_CALL = re.compile(
+    r"::\s*(WriteAll\w*|AppendAll\w*|Create\w*|OpenWrite|OpenOrCreate|Open|AppendText|"
+    r"Move|Copy|Replace|Delete|Encrypt)\s*\(([^)]*)\)", re.IGNORECASE)
+
+
+def _check_pwsh_dotnet_writes(text: str, ctx: GuardContext, cwd: Path) -> None:
+    for call in _PWSH_WRITE_CALL.finditer(text):
+        for literal in re.findall(r"""['"]([^'"]+)['"]""", call.group(2)):
+            label = _protected_label(literal, ctx, cwd)
+            if label:
+                _block(f"{literal}: {label} (a .NET file write targets it; F3)")
 
 
 def _check_factory_target(name: str, args: list[str]) -> None:
