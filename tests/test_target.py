@@ -196,9 +196,18 @@ class SetAndGetTargetTest(TempWorld):
 class CliTest(TempWorld):
     """The CLI prints `Target: <path> (<owner/repo>)` (rule T2)."""
 
-    def run_cli(self, *argv):
+    def run_cli(self, *argv, stdin="y\n", claude=False):
+        # `target set` confirms in a real terminal and refuses under CLAUDECODE (D-10); the
+        # tests act as the human by clearing CLAUDECODE and answering the prompt, unless a
+        # test asks otherwise.
+        import os
         out, err = io.StringIO(), io.StringIO()
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+        if claude:
+            env["CLAUDECODE"] = "1"
         with mock.patch.object(target, "FACTORY_ROOT", self.factory), \
+                mock.patch.dict(os.environ, env, clear=True), \
+                mock.patch.object(sys, "stdin", io.StringIO(stdin)), \
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = cli.main(list(argv))
         return code, out.getvalue(), err.getvalue()
@@ -226,6 +235,40 @@ class CliTest(TempWorld):
         code, _, err = self.run_cli("target", "set", str(self.factory))
         self.assertEqual(code, 1)
         self.assertIn("cannot be the factory repository", err)
+
+    def test_set_refuses_under_claude_code(self):
+        repo = make_repo(self.root / "app")
+        code, _, err = self.run_cli("target", "set", str(repo), claude=True)
+        self.assertEqual(code, 2)
+        self.assertIn("real terminal", err)
+        # Nothing was recorded.
+        self.assertFalse((self.factory / target.TARGET_FILE).exists())
+
+    def test_set_refuses_on_empty_stdin(self):
+        repo = make_repo(self.root / "app")
+        code, _, err = self.run_cli("target", "set", str(repo), stdin="")
+        self.assertEqual(code, 1)
+        self.assertIn("not changed", err)
+        self.assertFalse((self.factory / target.TARGET_FILE).exists())
+
+    def test_set_refuses_on_no(self):
+        repo = make_repo(self.root / "app")
+        code, _, err = self.run_cli("target", "set", str(repo), stdin="n\n")
+        self.assertEqual(code, 1)
+        self.assertFalse((self.factory / target.TARGET_FILE).exists())
+
+    def test_check_validates_without_changing(self):
+        repo = make_repo(self.root / "app")
+        code, out, _ = self.run_cli("target", "check", str(repo))
+        self.assertEqual(code, 0)
+        self.assertIn("is a valid target", out)
+        self.assertIn("target set", out)  # tells the human the terminal command
+        self.assertFalse((self.factory / target.TARGET_FILE).exists())  # changed nothing
+
+    def test_check_rejects_invalid(self):
+        code, _, err = self.run_cli("target", "check", str(self.factory))
+        self.assertEqual(code, 1)
+        self.assertIn("not a usable target", err)
 
     def test_every_target_command_gets_the_banner(self):
         """Any subcommand marked needs_target=True is preceded by the banner."""

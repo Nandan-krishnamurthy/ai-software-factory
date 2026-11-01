@@ -12,9 +12,10 @@ from urllib.parse import quote
 
 from factory import labels as labels_mod
 from factory.config import Config, ConfigError, ConfigNotFound, load_config
-from factory.errors import CommandError, CommandNotFound, FactoryError
+from factory.errors import CommandError, CommandNotFound, FactoryError, GitError
 from factory.gh import Gh
 from factory.git import Git
+from factory.guard import is_risky_config
 from factory.target import Target, validate_target
 
 OK, WARN, FAIL, SKIP = "ok", "warn", "fail", "skip"
@@ -41,8 +42,8 @@ def run_doctor(target: Target, gh: Gh, factory_root: Path | None = None) -> list
         add("target", OK, f"{target.path} ({target.repo}); not the factory repo")
     except FactoryError as err:
         add("target", FAIL, str(err))
-        for name in ("working tree", "config", "gh auth", "remote", "labels",
-                     "branch protection"):
+        for name in ("working tree", "hooks & config", "config", "gh auth", "remote",
+                     "labels", "branch protection"):
             add(name, SKIP, "target is invalid")
         return checks
 
@@ -58,6 +59,10 @@ def run_doctor(target: Target, gh: Gh, factory_root: Path | None = None) -> list
             add("working tree", OK, "clean")
     except CommandError as err:
         add("working tree", FAIL, str(err))
+
+    # 2b. Hooks and program-running config in the target's own git (E1, D-7, ADR-0006).
+    status_h, detail_h = _hook_safety(target.path)
+    add("hooks & config", status_h, detail_h)
 
     # 3. Config.
     config: Config | None = None
@@ -135,6 +140,46 @@ def run_doctor(target: Target, gh: Gh, factory_root: Path | None = None) -> list
     status, detail = _branch_protection(gh, target.repo, branch, repo_info.get("isEmpty"))
     add("branch protection", status, detail)
     return checks
+
+
+def _hook_safety(path: Path) -> tuple[str, str]:
+    """Report the target's own active git hooks and program-running config (E1, D-7).
+
+    The factory disables hooks for its *own* git calls (E2), but hooks still run for git
+    that the project's own code runs (an install step that adds a hook, test scripts).
+    Program keys in the target's config (``core.sshCommand``, ``filter.*``, helpers, ...) make
+    git start programs the guard never sees. FAIL so the human reviews them before any
+    unattended run; this is advice, not a claim that the factory itself is unsafe."""
+    git = Git(path)
+    findings: list[str] = []
+    try:
+        hooks_path = git.run(["config", "--local", "--get", "core.hooksPath"]).strip()
+    except GitError:
+        hooks_path = ""
+    if hooks_path:
+        findings.append(f"core.hooksPath={hooks_path!r}")
+    hooks_dir = (path / hooks_path) if hooks_path else (path / ".git" / "hooks")
+    try:
+        active = sorted(p.name for p in hooks_dir.iterdir()
+                        if p.is_file() and not p.name.endswith(".sample"))
+    except OSError:
+        active = []
+    if active:
+        shown = ", ".join(active[:8]) + (f" (+{len(active) - 8} more)" if len(active) > 8 else "")
+        findings.append(f"active hook file(s): {shown}")
+    try:
+        listing = git.run(["config", "--local", "--list"]).splitlines()
+    except GitError:
+        listing = []
+    risky = sorted({line.split("=", 1)[0] for line in listing
+                    if "=" in line and is_risky_config(line.split("=", 1)[0])})
+    if risky:
+        findings.append("program-running config: " + ", ".join(risky[:8]))
+    if findings:
+        return FAIL, ("; ".join(findings) + ". The factory ignores these for its own git "
+                      "calls (E2), but they still run for git the project's code runs. "
+                      "Disable or review them before an unattended run (D-7, ADR-0006).")
+    return OK, "no active hooks or program-running config in the target's local git"
 
 
 def _branch_protection(gh: Gh, repo: str, branch: str, is_empty: bool | None) -> tuple[str, str]:

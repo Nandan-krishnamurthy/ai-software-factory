@@ -70,12 +70,15 @@ The factory is a **Claude Code project** (this repo). You open Claude Code in th
 
 ```
 cd C:\Projects\ai-software-factory
+# in your own terminal, not through Claude (D-10):
+python scripts/factory.py target set C:\Projects\task-tracker
 claude
-> /factory-target C:\Projects\task-tracker
+> /factory-target C:\Projects\task-tracker   # read-only: shows and validates it
 > /factory-start
 ```
 
-- `/factory-target <path>` checks the path. It must be a git repo with a GitHub remote, and must not be the factory repo itself. It then records the path in `.factory-local/target.json` (gitignored, so it survives across sessions) and adds the path to Claude Code's allowed directories via `.claude/settings.local.json` → `permissions.additionalDirectories` (also gitignored).
+- **`target set <path>`** is run by the human in a terminal (never by Claude; decision D-10). It must be a git repo with a GitHub remote, and must not be the factory repo itself. It shows the repository and path, asks for confirmation, then records the path in `.factory-local/target.json` (gitignored, so it survives across sessions) and adds the path to Claude Code's allowed directories via `.claude/settings.local.json` → `permissions.additionalDirectories` (also gitignored).
+- `/factory-target <path>` is a read-only helper inside Claude: it shows the current target, validates a path with `target check`, and runs `doctor`. It never changes the target.
 - Every command and station starts by printing **`Target: <path> (<owner/repo>)`**. This reduces the risk of working on the wrong repo.
 - Git commands run as `git -C <target> …`, and project commands (tests, build) run from inside the target directory.
 - **The target's own `CLAUDE.md`** is not loaded automatically in this setup, because Claude Code loads `CLAUDE.md` from its working directory, which is the factory repo. Stations therefore read `<target>/CLAUDE.md` explicitly and follow it as project conventions. Where it conflicts with the factory safety rules, the safety rules win.
@@ -137,7 +140,7 @@ ai-software-factory/
 
 | Command | Purpose | Stations it may run | Stops at |
 |---|---|---|---|
-| `/factory-target <path>` | Select and validate the target | None (runs `factory.py doctor`) | Immediately |
+| `/factory-target <path>` | Show and validate the target, read-only (the human sets it with `target set` in a terminal; D-10) | None (runs `factory.py target show`/`check`, `doctor`) | Immediately |
 | `/factory-start [requirements-file]` | Begin a new **increment** (§5.2): new project or new requirements for an existing project | S0 → S1 (if existing) → S2 → S3 → S4 → S5 | **Gate A** (Planning PR open) |
 | `/factory-resume` | Finish whatever is already in motion, or whatever your last action on GitHub unlocked | Planning revisions, S5b, the in-progress story station, S8 rework, S12 | The next gate. **Never runs S6.** |
 | `/factory-continue` | Your Gate C "continue" | Anything `/factory-resume` would do first (including S12 close-out of a story you merged), then S6 → S7 → … → S11 for exactly one story | **Gate B** (PR open) |
@@ -205,8 +208,8 @@ Written in Python 3.11+ using only the standard library. It calls `git` and `gh`
 
 | Subcommand | What it does | Idempotent |
 |---|---|---|
-| `target set <path>` / `target show` | Manages `.factory-local/target.json` | ✔ |
-| `doctor` | Checks: `gh auth`, remote reachable, target is not the factory repo, clean working tree, required labels exist, branch protection (warns only), config valid | ✔ (read-only) |
+| `target set <path>` (human-only, terminal; D-10) / `target show` / `target check <path>` (read-only) | Manages `.factory-local/target.json` | ✔ |
+| `doctor` | Checks: `gh auth`, remote reachable, target is not the factory repo, clean working tree, active hooks and program-running git config (fails; D-7), required labels exist, branch protection (warns only), config valid | ✔ (read-only) |
 | `labels ensure` | Creates or updates the §4 labels, plus `factory:needs-human` and `factory:planning` | ✔ |
 | `state [--json]` | **Reconciler.** Works out the current state and the next action (§6) | ✔ (read-only) |
 | `increment show` / `increment next [--slug S]` | Reports the current increment, the next free `REQ-`/`STORY-` IDs and warnings about IDs that are mentioned but never allocated; `next` allocates the next `NNN-slug` or refuses (§5.2). Changes nothing. | ✔ (read-only) |

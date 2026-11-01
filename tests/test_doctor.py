@@ -101,8 +101,8 @@ class HealthyTargetTest(DoctorTestCase):
         self.assertEqual(set(self.statuses(by_name).values()), {OK}, render(checks))
         self.assertEqual(doctor.exit_code(checks), 0)
         self.assertIn("Doctor PASSED: 0 failed, 0 warning(s).", render(checks))
-        self.assertEqual(list(by_name), ["target", "working tree", "config", "gh auth",
-                                         "remote", "labels", "branch protection"])
+        self.assertEqual(list(by_name), ["target", "working tree", "hooks & config", "config",
+                                         "gh auth", "remote", "labels", "branch protection"])
 
     def test_fresh_target_only_warns(self):
         """Before /factory-start: no config, empty repo. Warnings only, exit 0."""
@@ -260,7 +260,7 @@ class DoctorCliTest(DoctorTestCase):
         self.assertEqual(code, 0)
         payload = json.loads(out)  # with --json the Target banner goes to stderr
         self.assertTrue(payload["ok"])
-        self.assertEqual(len(payload["checks"]), 7)
+        self.assertEqual(len(payload["checks"]), 8)
 
     def test_cli_labels_ensure(self):
         creates = [call(["label", "create", s.name, "--repo", REPO, "--color", s.color,

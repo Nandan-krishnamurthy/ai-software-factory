@@ -840,3 +840,30 @@ E3g runner gets the full environment: KILLED ['test_every_command_gets_the_clean
 - [B-49](backlog.md#b-49): the bot identity and a sandbox, required before unattended runs on real projects.
 - **For sandbox demonstrations after E0–E3:** a project whose build or test needs a token now fails under `verify run`, as ADR-0006 states.
 
+
+---
+
+## PR C: E1 guard hardening, T1 `.factory-local/` protection, and D-10 terminal-only target (B-46)
+
+| | |
+|---|---|
+| **Specification** | [backlog.md](backlog.md): [B-46](backlog.md#b-46) "Plan, E1 (PR C)" and T1; the D-2…D-11 decisions made with the human (2026-10-30/11-01). Backlog items, not roadmap tasks. |
+| **PR** | branch `task/B-46-E1-T1-guard` (not yet opened) |
+| **Status** | Implemented; in review |
+
+**Decisions carried in (human, 2026-10-30/11-01).** D-1: the git-hook wrapper is deferred to **PR C2** (Option C). D-2: the new write/path checks apply only with a target active; no-target behaviour is unchanged, and B-13/B-14 stay open. D-3: path-reference protection, not a command list. D-4: block git program variables only. D-5: fail closed on an unusable `target.json`. D-6: resolve symlinks/junctions. D-7: `doctor` FAILs on risky hooks/keys. D-8: defer `Git._env` hardening. D-9: best-effort inline-code scan. D-10: terminal-only target switching (Option T), after the V-1…V-4 hook verification showed a Claude-created scheduled prompt fires `UserPromptExpansion` indistinguishably from a human one. D-11: protect the factory's `scripts/` and `.claude/` (incl. `settings.local.json`) and fix the `sc`/`ac` aliases.
+
+**Built.**
+- **`guard.py`:** `_protected_label`/`_resolve_real`/`_under` (whole-component, realpath); `_scan_protected_args`; `_check_factory_target` (blocks `target set` in both modes); `is_risky_config`/`_PROGRAM_CONFIG` and the hardened `_check_git` (config writes, `-c`/`--config-env` program keys, `--exec-path`, `hook run`, `--template`); `_scan_git_env`/`_block_if_git_var` (D-4); `_scan_code` additions (D-9); `_check_write_path` now blocks `.factory-local/` in both modes and keeps the factory read-only with a target active; `GuardContext.target_broken` (D-5).
+- **`guard_hook.py`:** sets `target_broken` when the pointer exists but is unreadable; distinguishes `NoTarget` from a broken pointer.
+- **`cli.py`/`target.py`:** `target set` validates (read-only) then confirms in a terminal, refuses on empty/closed stdin, and refuses under `CLAUDECODE` (hint only); new read-only `target check`; the `NoTarget` message points to the terminal command.
+- **`doctor.py`:** a "hooks & config" check (`_hook_safety`) that FAILs on active hooks or program-running keys in the target's local config (D-7).
+- **`.claude/commands/factory-target.md`:** rewritten as a read-only helper; `disable-model-invocation: true`. **`.claude/settings.json`:** a `Skill(factory-target *)` deny rule.
+- **Docs:** README, CLAUDE.md, `stations/_rules.md` (S3, T1), architecture §3 and the command tables updated. Specs 03/05 unchanged.
+
+**Hook verification (D-10 prerequisite), 2026-10-31**, in an isolated VS Code window on Claude Code 2.1.314: `UserPromptExpansion` fires in this version but sends `command_args`/`command_source`/`expansion_type` (not the documented `source`/`origin`); a loop and a one-time task **Claude created** both fired expansions indistinguishable from a human's; commands Claude invokes through the Skill tool do **not** fire an expansion; `disable-model-invocation` hides the command from the model. Conclusion: a hook cannot reliably tell a human `/factory-target` from a Claude-scheduled one → H2 rejected, Option T adopted. The throwaway probe is in the session scratchpad; the factory and Task Tracker repos were unchanged (before/after snapshots identical).
+
+**Not in PR C.** PR C2 (the git-hook wrapper), D-8 (`Git._env` hardening), B-13, B-14, B-49, B-50, T8. The read-only allow-list with write-flag exclusions and whole-factory-repo path-reference coverage are partial, documented limits.
+
+**Handed on (open):**
+- [B-46](backlog.md#b-46): PR C2 (the secure git wrapper, Option C) and D-8 remain; the guard-only wider set stays a T9.5 scope decision.

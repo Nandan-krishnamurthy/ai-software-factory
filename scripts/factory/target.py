@@ -31,7 +31,9 @@ class TargetError(FactoryError):
 
 class NoTarget(TargetError):
     def __init__(self):
-        super().__init__("no active target. Run /factory-target <path> first (rule T1).")
+        super().__init__("no active target. In your own terminal, run "
+                         "`python scripts/factory.py target set <path>` (or /factory-target "
+                         "to see the command), then retry (rule T1, D-10).")
 
 
 @dataclass(frozen=True)

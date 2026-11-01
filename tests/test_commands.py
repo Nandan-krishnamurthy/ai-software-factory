@@ -48,7 +48,7 @@ COMMANDS_DIR = REPO_ROOT / ".claude" / "commands"
 PLANNING_COMMANDS = {"factory-target.md", "factory-start.md", "factory-status.md",
                      "factory-resume.md"}
 READ_ONLY = {  # command file -> the factory.py subcommands it may run
-    "factory-target.md": {"target set", "doctor", "state"},
+    "factory-target.md": {"target show", "target check", "doctor", "state"},
     "factory-status.md": {"target show", "status", "state", "increment show", "feedback"},
 }
 MAX_LINES = 40  # command files are thin wrappers (architecture §4.2)
@@ -585,7 +585,7 @@ class CommandFileLintTest(unittest.TestCase):
         self.assertNotIn("labels ensure", text)  # READ_ONLY: it changes nothing on GitHub
 
     def test_arguments_are_passed_through(self):
-        self.assertIn('target set "$ARGUMENTS"', self.files["factory-target.md"])
+        self.assertIn('target check "$ARGUMENTS"', self.files["factory-target.md"])
         self.assertIn("$ARGUMENTS", self.files["factory-start.md"])
         self.assertIn("argument-hint", self.files["factory-start.md"])
 

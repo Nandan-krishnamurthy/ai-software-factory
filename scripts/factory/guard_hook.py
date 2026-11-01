@@ -26,11 +26,16 @@ BLOCK_EXIT = 2
 
 def build_context(hook_input: dict) -> GuardContext:
     factory_root = target_mod.FACTORY_ROOT
+    target_broken = False
     try:
         active = target_mod.get_target()
         target_root = active.path
+    except target_mod.NoTarget:
+        active, target_root = None, None  # genuine no-target (developing the factory)
     except FactoryError:
+        # The pointer exists but is unreadable, incomplete, or names a missing path (D-5).
         active, target_root = None, None
+        target_broken = (factory_root / target_mod.TARGET_FILE).is_file()
 
     default_branch = "main"
     if active is not None:
@@ -49,6 +54,7 @@ def build_context(hook_input: dict) -> GuardContext:
         extra_write_dirs=(Path.home() / ".claude" / "projects",),
         current_branch=_current_branch,
         is_reviewed=_is_reviewed,
+        target_broken=target_broken,
     )
 
 
