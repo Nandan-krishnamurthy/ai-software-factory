@@ -848,8 +848,8 @@ E3g runner gets the full environment: KILLED ['test_every_command_gets_the_clean
 | | |
 |---|---|
 | **Specification** | [backlog.md](backlog.md): [B-46](backlog.md#b-46) "Plan, E1 (PR C)" and T1; the D-2…D-11 decisions made with the human (2026-10-30/11-01). Backlog items, not roadmap tasks. |
-| **PR** | branch `task/B-46-E1-T1-guard` (not yet opened) |
-| **Status** | Implemented; in review |
+| **PR** | [#60](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/60), branch `task/B-46-E1-T1-guard`, merged 2026-11-01T09:35:02Z, merge commit `8c87503` |
+| **Status** | Done |
 
 **Decisions carried in (human, 2026-10-30/11-01).** D-1: the git-hook wrapper is deferred to **PR C2** (Option C). D-2: the new write/path checks apply only with a target active; no-target behaviour is unchanged, and B-13/B-14 stay open. D-3: path-reference protection, not a command list. D-4: block git program variables only. D-5: fail closed on an unusable `target.json`. D-6: resolve symlinks/junctions. D-7: `doctor` FAILs on risky hooks/keys. D-8: defer `Git._env` hardening. D-9: best-effort inline-code scan. D-10: terminal-only target switching (Option T), after the V-1…V-4 hook verification showed a Claude-created scheduled prompt fires `UserPromptExpansion` indistinguishably from a human one. D-11: protect the factory's `scripts/` and `.claude/` (incl. `settings.local.json`) and fix the `sc`/`ac` aliases.
 
