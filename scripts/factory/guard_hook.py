@@ -31,11 +31,15 @@ def build_context(hook_input: dict) -> GuardContext:
         active = target_mod.get_target()
         target_root = active.path
     except target_mod.NoTarget:
-        active, target_root = None, None  # genuine no-target (developing the factory)
+        # Only a genuinely absent pointer means no target (developing the factory). A pointer
+        # that exists in a form `get_target` reads as "none" — `{}`, `null`, a non-object, or
+        # a directory — is unusable, so fail closed (D-5).
+        active, target_root = None, None
+        target_broken = os.path.lexists(factory_root / target_mod.TARGET_FILE)
     except FactoryError:
         # The pointer exists but is unreadable, incomplete, or names a missing path (D-5).
         active, target_root = None, None
-        target_broken = (factory_root / target_mod.TARGET_FILE).is_file()
+        target_broken = os.path.lexists(factory_root / target_mod.TARGET_FILE)
 
     default_branch = "main"
     if active is not None:

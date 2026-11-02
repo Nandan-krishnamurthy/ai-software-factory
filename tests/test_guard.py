@@ -819,6 +819,99 @@ class HookAdapterTest(unittest.TestCase):
         self.assertIn("boom", message)
 
 
+class PointerFailClosedTest(unittest.TestCase):
+    """D-5 through the whole hook path (``build_context`` → ``target_broken`` → ``decide``):
+    only a genuinely absent target pointer means no-target mode. A pointer that exists in
+    any unusable form makes the guard fail closed for shell and write tools alike."""
+
+    BROKEN = {
+        "corrupt JSON": "{not json",
+        "empty file": "",
+        "incomplete record": json.dumps({"path": "/somewhere"}),
+        "names a missing folder": None,  # filled in setUp with a path that does not exist
+        "empty object": "{}",
+        "JSON null": "null",
+        "JSON list": "[]",
+        "JSON string": '"x"',
+        "a directory": "<dir>",
+    }
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name).resolve()
+        self.factory = self.root / "factory"
+        self.pointer = self.factory / guard_hook.target_mod.TARGET_FILE
+        self.pointer.parent.mkdir(parents=True)
+
+    def place(self, content):
+        if content == "<dir>":
+            self.pointer.mkdir()
+        elif content is not None:
+            self.pointer.write_text(content, encoding="utf-8")
+
+    def hook(self, tool, tool_input):
+        payload = {"tool_name": tool, "cwd": str(self.factory), "tool_input": tool_input}
+        with mock.patch.object(guard_hook.target_mod, "FACTORY_ROOT", self.factory):
+            return guard_hook.run(json.dumps(payload).encode("utf-8"))
+
+    def context(self):
+        with mock.patch.object(guard_hook.target_mod, "FACTORY_ROOT", self.factory):
+            return guard_hook.build_context({"cwd": str(self.factory)})
+
+    def calls(self):
+        guard_file = str(self.factory / "scripts" / "factory" / "guard.py")
+        return [("Bash", {"command": "git log -1"}),
+                ("PowerShell", {"command": "Get-ChildItem"}),
+                ("Write", {"file_path": guard_file})]
+
+    def test_every_unusable_pointer_fails_closed(self):
+        for label, content in self.BROKEN.items():
+            if content is None:
+                content = json.dumps({"path": str(self.root / "gone"), "repo": "o/r"})
+            with self.subTest(state=label):
+                self.place(content)
+                try:
+                    ctx = self.context()
+                    self.assertTrue(ctx.target_broken, label)
+                    self.assertIsNone(ctx.target_root)
+                    for tool, tool_input in self.calls():
+                        code, message = self.hook(tool, tool_input)
+                        self.assertEqual(code, 2, f"{label}: {tool} was allowed")
+                        self.assertIn("could not be read", message)
+                finally:
+                    if self.pointer.is_dir():
+                        self.pointer.rmdir()
+                    elif self.pointer.exists():
+                        self.pointer.unlink()
+
+    def test_an_unreadable_pointer_fails_closed(self):
+        # Windows cannot reliably make a file unreadable to its owner, so the read error is
+        # simulated: any exception while reading the pointer must block, not allow.
+        self.place('{"path": "x", "repo": "o/r"}')
+        with mock.patch.object(guard_hook.target_mod, "get_target",
+                               side_effect=PermissionError("denied")):
+            for tool, tool_input in self.calls():
+                with self.subTest(tool=tool):
+                    self.assertEqual(self.hook(tool, tool_input)[0], 2)
+
+    def test_an_absent_pointer_is_self_development(self):
+        ctx = self.context()
+        self.assertFalse(ctx.target_broken)
+        self.assertIsNone(ctx.target_root)
+        for tool, tool_input in self.calls():  # the factory tree is writable with no target
+            with self.subTest(tool=tool):
+                self.assertEqual(self.hook(tool, tool_input), (0, ""))
+
+    def test_a_valid_pointer_is_target_mode(self):
+        app = self.root / "app"
+        app.mkdir()
+        self.place(json.dumps({"path": str(app), "repo": "o/app"}))
+        ctx = self.context()
+        self.assertFalse(ctx.target_broken)
+        self.assertEqual(ctx.target_root, app)
+
+
 def hook_shell() -> str | None:
     """The bash Claude Code runs hooks with. On Windows that is Git Bash, not WSL's
     System32\\bash.exe (which `shutil.which("bash")` may find first)."""
