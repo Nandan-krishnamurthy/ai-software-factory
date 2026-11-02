@@ -908,8 +908,8 @@ E3g runner gets the full environment: KILLED ['test_every_command_gets_the_clean
 | | |
 |---|---|
 | **Specification** | [backlog.md](backlog.md): [B-46](backlog.md#b-46) D-5 and D-6; the human's approval of 2026-11-02 (Option A for D-5; D-6 recorded as an open gap). A backlog item, not a roadmap task. |
-| **PR** | [#64](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/64), branch `task/B-46-D5-D6-coverage`, open |
-| **Status** | In review (PR #64 open, not merged) |
+| **PR** | [#64](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/64), branch `task/B-46-D5-D6-coverage`, merged 2026-11-02T07:21:43Z, merge commit `7314c8d` |
+| **Status** | Done |
 
 **Why.** The post-merge verification of PR C and PR C2 (2026-11-01) found that no test covered D-5: the mutation removing `decide()`'s `target_broken` block survived. Probing every broken state of the target pointer then showed a real defect: a pointer that exists but reads as "none" (`{}`, `null`, `[]`, any non-object JSON, or a directory) made `get_target` raise `NoTarget`, and `build_context` treated that as self-development mode, where the factory's `scripts/` and `.claude/` are writable. Corrupt, empty or incomplete pointers, and one naming a missing folder, already failed closed.
 
@@ -922,6 +922,8 @@ E3g runner gets the full environment: KILLED ['test_every_command_gets_the_clean
 **Mutation checks (scratch copy):** `decide()` ignoring `target_broken` (the previously surviving C6) — caught; `build_context` never setting `target_broken` — caught; the fix reverted — caught.
 
 **Not in this change.** D-6 real-filesystem test (open gap), D-8, finding 5, T8.1, B-49, B-50, the roadmap.
+
+- **The merge:** the human merged PR #64 at 2026-11-02T07:21:43Z (`7314c8d`; PR head `b5fe735`; base before the merge `8ef792e`). The factory never merges.
 
 **Handed on (open):**
 - [B-46](backlog.md#b-46): D-8 (finding 3); finding 5 (unconfirmed, needs verification); D-6 real-filesystem coverage, including a dangling symlink at the target pointer (unverified); the guard-only wider set stays a T9.5 scope decision.
