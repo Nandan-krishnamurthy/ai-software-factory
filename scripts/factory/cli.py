@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 from factory import (
@@ -24,6 +25,7 @@ from factory import (
     plan,
     prbody,
     questions,
+    runner,
     signals,
     state,
     status,
@@ -491,6 +493,42 @@ def build_parser() -> argparse.ArgumentParser:
     state_parser.add_argument("--json", action="store_true",
                               help="machine-readable output (schema documented in state.py)")
     state_parser.set_defaults(handler=_state, needs_target=True)
+
+    scratch_parser = subparsers.add_parser(
+        "scratch", help="print the scratch folder (<SCRATCH>) the stations write files to",
+        description="Prints the system temp directory as a literal path: the <SCRATCH> of "
+                    "the station files, where the factory also keeps its evidence, maps and "
+                    "PR bodies, and where the guard allows writes. Use it instead of $TEMP "
+                    "or a script (rule S15). Read-only.")
+    scratch_parser.add_argument("--json", action="store_true", help="machine-readable output")
+    scratch_parser.set_defaults(handler=_scratch)
+
+    run_parser = subparsers.add_parser(
+        "run", help="run the factory headless up to the next gate (a human, in a terminal)",
+        description="The headless runner (T8.1): loops state -> claude -p "
+                    "\"/factory-<command>\" -> state, and stops at the next gate, at "
+                    "NEEDS_HUMAN or INCONSISTENT, when the state stops changing, or when "
+                    "Claude fails or needs a permission. It never passes a bypass or "
+                    "skip-permissions flag. Only a human starts it, in a terminal: Claude "
+                    "cannot, and continue asks you to confirm. The run log goes to "
+                    ".factory-local/runs/.")
+    run_parser.add_argument("--until-gate", action="store_true", required=True,
+                            help="required: run until the next gate, never past it")
+    run_parser.add_argument("--command", required=True, choices=sorted(runner.COMMANDS),
+                            help="continue = your one 'continue' (starts at most one story, "
+                                 "then runs as resume); resume = never starts a story")
+    run_parser.add_argument("--max-no-progress", type=_positive_int,
+                            default=runner.DEFAULT_MAX_NO_PROGRESS, metavar="N",
+                            help="stop when the state is unchanged after N invocations in a "
+                                 "row (default %(default)s)")
+    run_parser.add_argument("--max-invocations", type=_positive_int,
+                            default=runner.DEFAULT_MAX_INVOCATIONS, metavar="N",
+                            help="stop after N Claude invocations (default %(default)s)")
+    run_parser.add_argument("--timeout-minutes", type=_positive_float,
+                            default=runner.DEFAULT_TIMEOUT_MINUTES, metavar="M",
+                            help="stop Claude after M minutes per invocation "
+                                 "(default %(default)s)")
+    run_parser.set_defaults(handler=_run)
     return parser
 
 
@@ -564,6 +602,80 @@ def _target_set(args: argparse.Namespace) -> int:
     print(active.banner())
     print("Active target recorded; Claude Code may now access this directory.")
     return 0
+
+
+def _scratch(args: argparse.Namespace) -> int:
+    folder = str(Path(tempfile.gettempdir()))
+    print(json.dumps({"scratch": folder}) if args.json else folder)
+    return 0
+
+
+def _run(args: argparse.Namespace) -> int:
+    # R2 (T8.1): only the human starts the runner, in a terminal. A runner Claude started
+    # would let Claude say "continue" (D2). The guard blocks `factory.py run`; CLAUDECODE is
+    # a second hint; for continue, the terminal confirmation below is the real gate.
+    if os.environ.get("CLAUDECODE"):
+        print("error: the headless runner is started only by a human in a real terminal, "
+              "not through Claude Code (T8.1, D2). Open your own terminal and run:\n"
+              f"  python scripts/factory.py run --until-gate --command {args.command}",
+              file=sys.stderr)
+        return 2
+    active = target.get_target()
+    print(active.banner(), flush=True)
+    factory_root = target.FACTORY_ROOT
+    runner.check_hooks(factory_root)
+    executable = runner.find_claude()
+    if args.command == "continue":
+        prompt = (f"Say continue for {active.repo}: start at most one story, run it "
+                  "unattended, and stop at Gate B? [y/N]: ")
+        try:
+            answer = input(prompt)
+        except EOFError:  # empty or closed stdin: refuse, as `target set` does (D-10)
+            answer = ""
+        if answer.strip().lower() not in ("y", "yes"):
+            print("aborted: nothing was started.", file=sys.stderr)
+            return 1
+
+    limits = runner.Limits(args.max_no_progress, args.max_invocations,
+                           args.timeout_minutes * 60.0)
+    gh = Gh()
+
+    def read_state() -> dict:
+        if target.get_target() != active:
+            raise runner.RunnerError("the active target changed during the run; stopped.")
+        return state.derive_state(state.collect_snapshot(gh, active.repo)).to_dict()
+
+    def invoke(command: str) -> runner.Invocation:
+        return runner.invoke_claude(command, cwd=factory_root, timeout_s=limits.timeout_s,
+                                    executable=executable)
+
+    log = runner.RunLog(factory_root, args.command)
+    log.write({"event": "start", "command": args.command, "target": str(active.path),
+               "repo": active.repo, "argv": runner.claude_argv(executable, "<command>"),
+               "cwd": str(factory_root),
+               "limits": {"max_no_progress": limits.max_no_progress,
+                          "max_invocations": limits.max_invocations,
+                          "timeout_minutes": args.timeout_minutes}})
+    print(f"Run log: {log.path}", flush=True)
+    try:
+        outcome = runner.run_until_gate(
+            args.command, read_state=read_state,
+            read_dirty=lambda: ensure.dirty_files(Git(active.path)), invoke=invoke,
+            log=log.write, limits=limits)
+    except FactoryError as err:
+        log.write({"event": "stop", "exit_code": 1, "reason": f"error: {err}"})
+        raise
+    except KeyboardInterrupt:
+        log.write({"event": "stop", "exit_code": 130, "reason": "interrupted"})
+        print("interrupted: the runner stopped.", file=sys.stderr)
+        return 130
+    log.write({"event": "stop", "exit_code": outcome.exit_code, "reason": outcome.reason,
+               "invocations": outcome.invocations,
+               "stories_started": list(outcome.stories_started)})
+    stream = sys.stdout if outcome.exit_code == runner.EXIT_GATE else sys.stderr
+    print(f"{outcome.reason}\n{outcome.invocations} Claude invocation(s); run log: "
+          f"{log.path}", file=stream)
+    return outcome.exit_code
 
 
 def _target_check(args: argparse.Namespace) -> int:

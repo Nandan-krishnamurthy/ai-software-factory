@@ -10,6 +10,7 @@
       "Bash(gh pr view:*)",
       "Bash(gh pr edit:*)",
       "Bash(gh pr list:*)",
+      "Bash(gh pr checks:*)",
       "Bash(python scripts/factory.py:*)"
     ],
     "deny": [

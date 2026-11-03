@@ -8,7 +8,7 @@ next: [S01, S02]
 
 Read [`stations/_rules.md`](_rules.md) before anything else. Where this file and the rules disagree, the rules win.
 
-**Notation** (used by every station): `<T>` is the target path and `<R>` its `owner/repo` (from `python scripts/factory.py target show`). `<D>` is the target's default branch, `<INC>` the increment (e.g. `001-initial`), and `<SCRATCH>` the system temp directory. Never write files in the factory repo while a target is active (rule S3).
+**Notation** (used by every station): `<T>` is the target path and `<R>` its `owner/repo` (from `python scripts/factory.py target show`). `<D>` is the target's default branch, `<INC>` the increment (e.g. `001-initial`), and `<SCRATCH>` the system temp directory, as the literal path `python scripts/factory.py scratch` prints (never `$TEMP` or a script; rule S15). Never write files in the factory repo while a target is active (rule S3).
 
 ## Purpose
 Start a new increment: the first one of a project, or the next one once the current increment is complete (architecture §5.2). Validate the target, create the labels, choose the increment name, write `.factory/config.json`, store the requirements as `00-prd.md`, and push the planning branch `factory/plan-<INC>`. For a project that already has code or earlier increments, the state engine then names S01 Codebase Discovery; otherwise S02.

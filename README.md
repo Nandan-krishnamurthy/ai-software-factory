@@ -96,6 +96,40 @@ From any line in the active target, `trace` follows the chain line → commit �
 
 It finds the PR with GitHub's commit-to-PR API, falling back to the `Merge pull request #<P>` merge commit. This is verified against live GitHub for merge-commit merges, which is how the factory's PRs have been merged so far. For squash and rebase merges, `trace` relies on GitHub associating the PR with the commit it wrote; that is tested only against GitHub-shaped answers, not yet against a real squash or rebase merge.
 
+### Running unattended between gates (headless runner)
+
+```
+python scripts/factory.py run --until-gate --command continue
+python scripts/factory.py run --until-gate --command resume
+```
+
+Run it yourself, in your own terminal, from the factory repo with the target set. It loops `state` → `claude -p "/factory-<command>"` → `state` and does what `/factory-continue` or `/factory-resume` would do, without you in the session, then stops at the next gate. It never goes past a gate.
+
+- **`--command continue`** is your "continue" at Gate C. It asks you to confirm, starts **at most one** story, and from then on runs as `resume`. It stops at Gate B.
+- **`--command resume`** never starts a story. Use it after you merge, to close the story out (it stops at Gate C), or after `/changes`, to rework the PR (it stops at Gate B).
+
+It stops with a non-zero exit code and the reason when:
+
+| Exit | When |
+|---|---|
+| 3 | `NEEDS_HUMAN` or `INCONSISTENT`, uncommitted changes in the target, or a story started that the command may not start |
+| 4 | the state has not changed after 2 invocations in a row (`--max-no-progress`), or after 12 invocations (`--max-invocations`) |
+| 5 | Claude failed, timed out (60 minutes per invocation, `--timeout-minutes`) or printed no result |
+| 6 | Claude needed a permission it does not have: a headless session cannot ask you, so the runner stops and lists what was denied |
+
+It exits 0 when it stops at a gate.
+
+Claude runs with the factory's own permission rules and guard hook. Only the file-editing tools (`Edit`, `Write`, `MultiEdit`) are pre-allowed, the PowerShell tool is removed (`--disallowedTools PowerShell`), so Claude's shell is Bash, and no bypass or skip-permissions flag is ever passed. Claude cannot start the runner: the guard blocks `factory.py run`, and the runner refuses to start inside Claude Code. Each run writes a log, one JSON line per Claude invocation, to `.factory-local/runs/` in the factory repo.
+
+Each session also gets the factory's headless rules in its system prompt (`--append-system-prompt`; rules S15 and S16 in `stations/_rules.md`): one command per Bash call, no `;`/`&&`/`|` chains, `echo`, `$?` or `$TEMP`, no `python -c`, heredocs or scripts, files only through the Write and Edit tools, the scratch folder from `python scripts/factory.py scratch`, and no reading of `.claude/` settings. Its shell returns to the factory root after every command (`CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR=1`), so `python scripts/factory.py …` always works. A denial still stops the run even when the session recovers from it (exit 6): read the run log's `after` state to see how far it got.
+
+**Before the first run on a target:**
+- Open Claude Code once in the factory repo and accept its workspace trust dialog. Without it, a headless session ignores the factory's `permissions.allow` rules.
+- Allow the target's configured commands **exactly**, in your own `.claude/settings.local.json` (for example `"allow": ["Bash(python -m unittest)"]`). The AC verifier and the walking skeleton run them through Claude's shell, with your full environment (unlike `verify run`), so allow nothing broader, and remove the rule when you are done.
+- Use the native `claude` executable; the runner refuses a `claude.cmd` shim.
+
+**Sandbox targets only.** The runner works with your GitHub credentials, so code the model writes could still use them. Unattended runs on real projects wait for the bot identity without merge permission ([B-49](docs/backlog.md#b-49)); see [ADR-0006](docs/adr/0006-threat-model-typed-commands-and-executed-code.md).
+
 ### Commands
 
 | Command | What it does | Stops at |
