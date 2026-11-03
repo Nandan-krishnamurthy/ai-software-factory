@@ -90,6 +90,6 @@ In rework mode the order is reversed: the checkpoint first (`--review-round <k>`
 ## Done check
 - [ ] `gh pr list --repo <R> --head <B> --state open --json number,body` lists exactly one PR, whose body contains `<!-- factory:pr story=` and `Closes #<I>`.
 - [ ] `python scripts/factory.py pr check <P>` exits 0: the body is the factory's render of the evidence for the PR's head, with the S10 verdict lines unchanged, and every gate passed.
-- [ ] `git -C <T> log origin/<B> -1 --format=%B` shows `Factory-Station: S11`, and `docs/factory/traceability.md` on `<B>` lists `#<P>` for each REQ in the story's **Traces to**.
+- [ ] `git -C <T> log origin/<B> -1 --format=%B` shows `Factory-Station: S11` (or `S09` or `S08`, when step 6 was skipped because the rows already listed `#<P>`, as in a rework), and `docs/factory/traceability.md` on `<B>` lists `#<P>` for each REQ in the story's **Traces to**.
 - [ ] `python scripts/factory.py state --json` reports `GATE_B_WAITING_REVIEW` with `details.pr` `<P>`.
 - [ ] Rework mode: `python scripts/factory.py feedback --pr <P> --rework` lists no item, and the checkpoint's `review_round` is `<k>`.

@@ -436,6 +436,49 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
 - **Source:** the adversarial review of PR #58 (G5, 2026-10-30); [S01](../stations/S01-discovery.md) step 4; [ADR-0006](adr/0006-threat-model-typed-commands-and-executed-code.md)
 - **Status:** verified (the station text; the environment is Claude Code's) · **Owner:** unassigned: a separately tracked follow-up, sequenced by the human · **State:** open
 
+## Handed on by T8.1
+
+### <a id="b-51"></a>B-51 The runner stops after a denial, but cannot stop a fallback within the same session
+- **What:** the headless runner reads Claude's `--output-format json` result, which arrives only when the session has ended. When the result lists `permission_denials`, the runner stops with exit 6 (`EXIT_DENIED`) and invokes Claude no further (decision R5). It cannot interrupt the session itself, so a tool call Claude makes **after** a denial, within the same invocation, still runs.
+- **Shown live (L3, 2026-11-02, Claude Code v2.1.316):** asked to run `python --version`, Claude's PowerShell call was denied (`is_error: false`, `subtype: success`, one entry in `permission_denials`). Claude then ran the same command with Bash, which succeeded (`Python 3.12.6`). Replayed through the runner with a fake adapter, that result gives exit 6 after one invocation, naming `PowerShell 'python --version'`. L2 showed the same pattern on a factory command: `/factory-status` first tried `python scripts/factory.py target show` with PowerShell, which no allow rule covers (the rules name only the Bash form), was denied, and fell back to Bash. So a headless invocation on Windows could stop the runner whenever Claude picked PowerShell for an allow-listed command. **Addressed for PowerShell (human, 2026-11-02):** the runner now passes `--disallowedTools PowerShell`, which removes the tool from the headless session, so Claude's shell is Bash; R1's allowed tools, R5 and the permission rules are unchanged. A fallback after any other denial is still not interrupted.
+- **What still holds:** the fallback goes through the same permission rules and guard hook as any other call. In L3 the session was in Manual mode (`permissionMode: "default"`), and Claude Code's own rules allowed the Bash call. A fallback can do only what those rules and the guard already allow; what is lost is the runner's control over what happens after a denial.
+- **Decision (human, 2026-11-02):** Option A: keep R5 unchanged and document the gap. Not chosen: Option B, which streams the session (`stream-json`) and stops it at the first denial, before any fallback. That would reverse R5's "never stop a session partway", and a session stopped partway is a recovery scenario (T8.2's kill-and-resume).
+- **Source:** T8.1 live check L3; `scripts/factory/runner.py` (`run_until_gate`, `Invocation.denials`); `tests/test_runner.py` (`test_permission_denials_stop_and_say_what_was_denied`)
+- **Status:** verified (the code and its test; observed live in L3) · **Owner:** T8.1 (Option A) · **State:** accepted
+
+### <a id="b-52"></a>B-52 A factory guard block counts as a permission denial, so it stops the runner
+- **What:** Claude Code reports a call blocked by a PreToolUse hook in the result's `permission_denials`, like a call the permission rules denied. The runner does not tell them apart, so any guard block during a headless invocation stops the run with exit 6 after that invocation, even if the station then corrected itself (for example a raw `git status`, refused by the guard, followed by `python scripts/factory.py git status`).
+- **Shown live (L1, 2026-11-02, Claude Code v2.1.316):** the guard blocked `git -C <sandbox> status` in a headless session ("PreToolUse:Bash hook error … Blocked by the factory guard"), and the result listed that call in `permission_denials`. Replayed through the runner, it gives exit 6 after one invocation.
+- **Effect:** fail-safe, but in a real run a station's harmless self-correction ends the run. The run log and the stop reason name the blocked call; the human re-runs the runner or the command.
+- **Candidate (not decided):** word the stop reason by cause (guard block or missing permission), or stop on a guard block only when the station did not recover. Either needs the result to tell the two apart, which the JSON result does not do today.
+- **Source:** T8.1 live check L1; `scripts/factory/runner.py` (`run_until_gate`)
+- **Status:** verified (observed live in L1; the code) · **Owner:** T8.1 (accepted with Option A, 2026-11-02) · **State:** accepted
+
+### <a id="b-53"></a>B-53 Headless runs need the target's configured commands allowed by the human, and the verifier's run skips E3
+- **What:** the AC verifier (S10) and the walking skeleton (S08) run the target's configured commands themselves, as `cd <T> && <command>`. No factory rule allows a project's command, so a headless session is refused. The L4 demonstration worked once the human added the exact rule `Bash(python -m unittest)` to their own, untracked `.claude/settings.local.json`.
+- **Security:** that run happens in Claude's shell with the user's **full environment**, not in `verify run`'s cleaned one (E3, [B-15](#b-15)). For the walking skeleton the command is still pending (unapproved), so the local rule stands in for the per-run approval an interactive session would ask for.
+- **Not decided:** the runner could derive `--allowedTools "Bash(<approved command>)"` from the approved config. That would change R1 and, for a pending command, approve it automatically: a security decision for the human. A safer candidate is a read-only factory command that runs the approved commands in E3's environment for the verifier.
+- **Source:** T8.1 L4 runs (2026-11-02/03); README, "Before the first run on a target"
+- **Status:** verified (live, L4) · **Owner:** unassigned: a decision for the human · **State:** open
+
+### <a id="b-54"></a>B-54 A plain `python -m unittest` names no test, so `verify map` cannot map ACs once the command is approved
+- **What:** `acmap` reads per-test results from lines that pair a test's name with a result. `unittest -v` prints them; plain `python -m unittest` prints dots. While the command is pending (the walking skeleton), `verdict check` accepts the verifier's own run; once it is approved, every AC needs a mapped passing test in the recorded run, so with the plain command every AC is `missing` and S10 fails.
+- **Seen in:** `factory-sandbox-m7-md`, STORY-001 (`commands.test = "python -m unittest"`, pinned by its AC4).
+- **Candidate:** S08's walking-skeleton step recommends a test command that names each test (`python -m unittest -v`, `pytest -v`); for the sandbox, a corrective change after STORY-001's merge.
+- **Source:** T8.1 L4 review of PR #7; `scripts/factory/acmap.py` (module docstring)
+- **Status:** verified (the code) · **Owner:** unassigned · **State:** open
+
+### <a id="b-55"></a>B-55 `acmap` counts a test's name and its docstring tag as two tests
+- **What:** `find_tests` records the identifier (`test_2_ac1_…`) and the docstring literal (`"#2 AC1: …"`) of the same method as two entries, and the PR body counts both: PR #7 on the sandbox reports "18 tests" for 9 test methods, and Q3 "AC1 6 tests" for 3. Matching both forms is deliberate (`unittest -v` prints the docstring), but the counts should be per test.
+- **Source:** T8.1 L4 review of PR #7; `scripts/factory/acmap.py` (`find_tests`), `scripts/factory/prbody.py` (`_tests_gate`, `_tests_added`)
+- **Status:** verified (the code and PR #7) · **Owner:** unassigned · **State:** open
+
+### <a id="b-56"></a>B-56 R5 stops a session that recovered from a denial, even when it reached its gate
+- **What:** in three of the four L4 runs that invoked Claude, the session reached its goal (S08 → S09, S09 → Gate B, S12 → Gate C), yet the run exited 6 because the result listed denials the session had recovered from. The headless discipline (rules S15/S16 in the system prompt, the scratch command, the working-directory variable) removes the deterministic causes, but a model can still improvise a command, and under R5 that still stops the run.
+- **Not decided:** distinguishing "denied but recovered, and the state reached the next gate" from other denials would change R5 (the human's decision, 2026-11-02, kept unchanged).
+- **Source:** T8.1 L4 run logs (`.factory-local/runs/`, 2026-11-02/03); [B-51](#b-51)
+- **Status:** verified (the run logs) · **Owner:** unassigned: a decision for the human · **State:** open
+
 ## Verification not yet done
 
 ### <a id="b-16"></a>B-16 `trace` on squash and rebase merges against live GitHub
@@ -665,3 +708,6 @@ Kept on purpose by the task that introduced them. Each is described in its PR.
 | T7.4 | A potential overlap is resolved only by an explicit record with literal IDs: `- <done>: changed by <new>` under `## Changed or retired requirements`, or a question (a list item with `?`) naming both IDs under `## Open questions`. A range such as "REQ-022 to REQ-026" does not name REQ-025. The check sees that a question was recorded, not whether it is a good one; the human judges that at Gate A | [task-log.md](task-log.md#t74-plan-lint-and-overlap-detection) (P-C, review of PR #53) |
 | T7.4 | The `- Files:` estimates are model-written, so the plan-time size check is only as good as the estimate; Q7 at Gate B still measures the real diff | [task-log.md](task-log.md#t74-plan-lint-and-overlap-detection) (P-A) |
 | T7.4 | "Done" for the overlap check is the local matrix's `Implemented` status, not GitHub's record of merged PRs, which `/factory-status` uses | [task-log.md](task-log.md#t74-plan-lint-and-overlap-detection) (P-B) |
+| T8.1 | The runner stops after an invocation whose result lists `permission_denials` (exit 6), but does not interrupt a fallback tool call within that invocation ([B-51](#b-51)) | [task-log.md](task-log.md#t81-headless-runner-factorypy-run---until-gate) (live check L3; Option A) |
+| T8.1 | A factory guard block is reported as a permission denial, so it also stops the runner, even when the station then corrects itself ([B-52](#b-52)) | [task-log.md](task-log.md#t81-headless-runner-factorypy-run---until-gate) (live check L1) |
+| T8.1 | `--allowedTools` names `MultiEdit` (decision R1), but Claude Code v2.1.316 exposes no `MultiEdit` tool: the headless session's tools were Bash, Edit, PowerShell and Write. Pre-allowing it has no effect | [task-log.md](task-log.md#t81-headless-runner-factorypy-run---until-gate) (live check L1, the session's `init` message) |

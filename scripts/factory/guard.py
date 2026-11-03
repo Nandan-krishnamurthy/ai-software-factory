@@ -1290,7 +1290,8 @@ def _factory_py_args(name: str, args: list[str]) -> list[str] | None:
 def _check_factory_target(name: str, args: list[str]) -> None:
     """Block Claude running ``factory.py target set`` in either mode: the active target is
     changed only by the human, in a terminal (D-10). ``target show`` and ``target check``
-    stay available."""
+    stay available. Block ``factory.py run`` too: the headless runner is started only by
+    the human, because its ``continue`` is the human's "continue" (T8.1 R2, D2)."""
     rest = _factory_py_args(name, args)
     if rest is None:
         return
@@ -1299,6 +1300,10 @@ def _check_factory_target(name: str, args: list[str]) -> None:
         _block("Claude must not change the factory's active target. Run `python "
                "scripts/factory.py target set <path>` yourself in a terminal (D-10). "
                "`target show` and `target check <path>` are available here.")
+    if positional[:1] == ["run"]:
+        _block("Claude must not start the headless runner: only the human says continue "
+               "(D2). Run `python scripts/factory.py run --until-gate --command …` yourself "
+               "in a terminal (T8.1).")
 
 
 # Must equal git.WRAPPER_SUBCOMMANDS (a test asserts this): the hook-running git commands the

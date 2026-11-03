@@ -1061,5 +1061,128 @@ class FeedbackCliTest(unittest.TestCase):
         return json.loads(out.getvalue())
 
 
+# T8.1 (the L4 runs): what a station, a command file or the AC verifier may tell a session to
+# run. A headless session cannot ask for approval, so a command outside the approved forms
+# is refused and stops the run (R5). Rule S15.
+_COMMAND_START = re.compile(r"^(?:python|gh|git|cd|rm|echo|cat|printf|npm|npx|node|pytest)\b")
+_IMPROVISED = [
+    (r";", "chains commands with `;`"),
+    (r"&&", "chains commands with `&&`"),
+    (r"\|", "pipes or chains with `|`/`||`"),
+    (r"\$\?", "reads the exit status with `$?`"),
+    (r"2>&1", "redirects stderr"),
+    (r">>?\s*\S", "writes a file with shell redirection"),
+    # $ARGUMENTS is Claude Code's own command-file substitution, made before the session
+    # reads the text: not a shell variable.
+    (r"\$\{?(?!ARGUMENTS\b)[A-Za-z_]+|%[A-Za-z_]+%", "uses a shell variable"),
+    (r"\bpython3?\s+-c\b", "runs `python -c`"),
+    (r"<<", "runs a heredoc"),
+    (r"^(?:rm|echo|cat|printf)\b", "runs a shell utility instead of a factory command or a tool"),
+    (r"^git -C \S+ (?:status|ls-files)\b", "runs hook-running git raw (C2)"),
+]
+# The one allowed compound: a command from .factory/config.json, run from inside the target.
+_ALLOWED_COMPOUND = "cd <T> && <command>"
+
+
+def improvised_commands(text: str) -> list[str]:
+    """Backticked commands (two or more words, starting with an executable) that rule S15
+    forbids. A one-word span such as `rm` is a mention, not a command."""
+    found = []
+    for span in _SPAN.findall(text):
+        cmd = span.strip()
+        if cmd == _ALLOWED_COMPOUND or len(cmd.split()) < 2 or not _COMMAND_START.match(cmd):
+            continue
+        # Placeholders such as <T>, <INC> or <story title> are not redirections.
+        bare = re.sub(r"<[^<>]+>", "X", cmd)
+        found += [f"`{cmd}`: {why}" for pattern, why in _IMPROVISED
+                  if re.search(pattern, cmd if pattern == "<<" else bare)]
+    return found
+
+
+class HeadlessDisciplineTest(unittest.TestCase):
+    """T8.1: the L4 runs stopped on commands the sessions improvised. The factory's own text
+    names only commands a headless session may run, and says how to do the rest (S15, S16)."""
+
+    def files(self):
+        return (sorted(STATIONS_DIR.glob("S*.md"))
+                + sorted((REPO_ROOT / ".claude" / "commands").glob("*.md"))
+                + [REPO_ROOT / ".claude" / "agents" / "ac-verifier.md"])
+
+    def test_no_file_tells_a_session_to_improvise(self):
+        for path in self.files():
+            with self.subTest(file=path.name):
+                self.assertEqual(improvised_commands(path.read_text(encoding="utf-8")), [])
+
+    def test_the_lint_catches_every_l4_denial(self):
+        for cmd in (
+            'python scripts/factory.py git status --porcelain; echo "rc=$?"',
+            "python scripts/factory.py comment --issue 2 && python scripts/factory.py verify",
+            'python -c "import tempfile; print(tempfile.gettempdir())"',
+            'python scripts/factory.py verdict check --issue 2 --file "$TEMP/verdict-2.md"',
+            "python -m unittest -v 2>&1",
+            "printf x >> .factory/log.md",
+            "rm -rf <T>/tests/__pycache__",
+            "git -C <T> status",
+            "git -C <T> ls-files",
+            "cat .claude/settings.local.json | head -60",
+            "python - <<'EOF'",
+            # Chains with nothing else wrong in them, so each operator is checked on its own.
+            "python scripts/factory.py state --json; python scripts/factory.py route",
+            "python scripts/factory.py state --json && python scripts/factory.py route",
+            "python scripts/factory.py state --json | python scripts/factory.py route",
+        ):
+            with self.subTest(cmd):
+                self.assertTrue(improvised_commands(f"`{cmd}`"))
+        for ok in ("python scripts/factory.py git status --porcelain", "cd <T> && <command>",
+                   "git -C <T> log origin/<B> -1 --format=%B", "`rm`",
+                   "python scripts/factory.py scratch"):
+            with self.subTest(ok=ok):
+                self.assertEqual(improvised_commands(f"`{ok}`"), [])
+
+    def test_rules_s15_and_s16(self):
+        rules = (STATIONS_DIR / "_rules.md").read_text(encoding="utf-8")
+        self.assertIn("| S15 | **One command per call, exactly as the station writes it.**",
+                      rules)
+        self.assertIn("| S16 | **Never read, change or investigate Claude Code's settings or "
+                      "permission files**", rules)
+        for phrase in ("`python -c`", "heredoc", "`rm`", "Write and Edit tools",
+                       "`python scripts/factory.py scratch`", "`cd <T> && <command>`",
+                       # S16 names the settings files only, so S10 may still check the
+                       # verifier's agent file.
+                       "`.claude/settings.json` and `.claude/settings.local.json`",
+                       "Reading the factory's agent definitions, such as "
+                       "`.claude/agents/ac-verifier.md` (S10), is allowed"):
+            self.assertIn(phrase, rules)
+        self.assertNotIn("(`.claude/` in the factory or the target)", rules)
+
+    def test_scratch_is_a_literal_path_from_the_factory(self):
+        intake = (STATIONS_DIR / "S00-intake.md").read_text(encoding="utf-8")
+        self.assertIn("`<SCRATCH>` the system temp directory, as the literal path "
+                      "`python scripts/factory.py scratch` prints", intake)
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(cli.main(["scratch"]), 0)
+        self.assertEqual(out.getvalue().strip(), str(Path(tempfile.gettempdir())))
+
+    def test_the_walking_skeleton_keeps_the_tree_clean(self):
+        s08 = (STATIONS_DIR / "S08-implement.md").read_text(encoding="utf-8")
+        for phrase in ("add what they generate to `.gitignore`", "`__pycache__/`",
+                       "Never delete generated files with `rm`"):
+            self.assertIn(phrase, s08)
+
+    def test_s11_done_check_allows_a_skipped_traceability_commit(self):
+        s11 = (STATIONS_DIR / "S11-pr.md").read_text(encoding="utf-8")
+        self.assertIn("(or `S09` or `S08`, when step 6 was skipped because the rows already "
+                      "listed `#<P>`, as in a rework)", s11)
+
+    def test_the_verifier_runs_each_command_exactly(self):
+        agent = (REPO_ROOT / ".claude" / "agents" / "ac-verifier.md").read_text(
+            encoding="utf-8")
+        self.assertIn("Run each one **exactly as given**, as its own Bash call: "
+                      "`cd <T> && <command>`", agent)
+        self.assertIn("not even `-v`", agent)
+        self.assertIn("Never run a raw `git status`", agent)
+        self.assertNotIn("(`status`, `diff`, `log`, `show`)", agent)
+
+
 if __name__ == "__main__":
     unittest.main()

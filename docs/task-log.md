@@ -927,3 +927,76 @@ E3g runner gets the full environment: KILLED ['test_every_command_gets_the_clean
 
 **Handed on (open):**
 - [B-46](backlog.md#b-46): D-8 (finding 3); finding 5 (unconfirmed, needs verification); D-6 real-filesystem coverage, including a dangling symlink at the target pointer (unverified); the guard-only wider set stays a T9.5 scope decision.
+
+---
+
+## T8.1 Headless runner: `factory.py run --until-gate`
+
+| | |
+|---|---|
+| **Specification** | [05-roadmap-m6-m9.md](05-roadmap-m6-m9.md), "T8.1 Headless runner: `factory.py run --until-gate`" |
+| **PR** | not yet opened (branch `task/T8.1-headless-runner`) |
+| **Status** | In progress: implemented and unit-tested; live checks L1–L3, PS-1, PS-2 and the L1 re-run run. L4 run on the sandbox in steps, never yet in one run that exits 0 (see "The L4 sandbox runs" below). L5 not yet run |
+
+**Approved decisions (human, 2026-11-02).**
+- **R1:** only `--allowedTools Edit Write MultiEdit` is passed; never `--permission-mode acceptEdits` or a bypass or skip-permissions flag.
+- **R2:** only the human starts the runner, in a terminal: the guard blocks `factory.py run` in both modes, the runner refuses when `CLAUDECODE` is set, and `--command continue` asks for a terminal confirmation.
+- **R3:** the run log is JSON Lines under `.factory-local/runs/`.
+- **R4:** defaults of 2 no-progress attempts, 12 invocations per run and 60 minutes per invocation, each with a command-line override.
+- **R5:** an invocation whose result lists permission denials stops the run, with exit 6 and what was denied.
+- B-48 stays open and outside T8.1. B-49, B-50, B-15, B-46 and B-47 stay documented limitations.
+- **PowerShell removed (after L2 and L3):** the runner also passes `--disallowedTools PowerShell`. On Windows with Git Bash, Claude Code makes PowerShell the primary shell, and the factory's allow rules name only Bash forms, so headless PowerShell calls were denied and would stop every run. A bare-name deny removes the tool from the session; it restricts and grants nothing. R1, R5, the guard and the permission rules are unchanged. Checked live in PS-1 and the L1 re-run (below).
+
+**Live checks (sandbox target `factory-sandbox-m7-md`, run by the human, Claude Code v2.1.316).**
+- **L1, the guard runs under `claude -p`:** passed. In a headless session started in the factory root (`permissionMode: "default"`), the guard blocked `git -C <sandbox> status`, which the permission rules allow, and the control `git -C <sandbox> log -1 --oneline` ran.
+- **L2, a custom slash command in headless mode:** `/factory-status` loaded and returned the expected `GATE_A_WAITING` report (`is_error: false`). Its result also listed a denied PowerShell call (`python scripts/factory.py target show`): the permission rules allow `Bash(python scripts/factory.py:*)` but no PowerShell form, and Claude then used Bash. Under the runner as it was, this invocation would have stopped with exit 6 ([B-51](backlog.md#b-51)); the runner now removes the PowerShell tool (above).
+- **L3, a missing permission:** `permission_denials` listed the denied PowerShell call while `is_error` was `false`; Claude then ran the same command with Bash ([B-51](backlog.md#b-51)).
+- **PS-1, PowerShell removed** (`--disallowedTools PowerShell` added): passed. The session's tools were Bash, Edit, Read and Write, with no PowerShell. `/factory-status` ran `python scripts/factory.py target show` and `status` through Bash, with `permission_denials: []`.
+- **PS-2, the scratch folder:** the Write tool could create a file in `%TEMP%`, but the Read tool was **denied** for it (a read outside the working directories). So a station may write a scratch file once, but overwriting an existing one, which needs a Read first, is refused. That is why `verdict-2.md` was deleted before re-running S10.
+- **L1 re-run, with `--disallowedTools PowerShell`:** passed. The guard still blocked `git -C <sandbox> status`, the control `git -C <sandbox> log -1 --oneline` ran, and the blocked call was still listed in `permission_denials` ([B-52](backlog.md#b-52)).
+- **L4, the sandbox demonstration (`factory-sandbox-m7-md`, STORY-001):** run in steps, see "The L4 sandbox runs" below.
+  - Gate C → Gate B over three runner runs: the story was picked, S08–S11 ran, and PR #7 was opened.
+  - The human's `/changes` (REQ-009 `Implemented` → `In progress`) was reworked in an interactive `/factory-resume`, not by the runner.
+  - After the human merged PR #7, a `run --command resume` closed the story out and reached Gate C.
+  - Every runner run that invoked Claude exited 6 on denials the session had recovered from (R5, [B-56](backlog.md#b-56)); none exited 0.
+- **L5, `NEEDS_HUMAN` without invoking Claude:** not yet run.
+
+**Limitations recorded (Option A, human, 2026-11-02).**
+- **[B-51](backlog.md#b-51):** the runner stops after an invocation that lists permission denials, but does not interrupt a fallback tool call within that invocation. R5 is unchanged.
+- **[B-52](backlog.md#b-52):** a factory guard block is reported as a permission denial, so it also stops the runner (shown in L1).
+- **`MultiEdit`:** Claude Code v2.1.316 exposes no `MultiEdit` tool (the L1 session's tools were Bash, Edit, PowerShell and Write), so pre-allowing it has no effect.
+
+**The L4 sandbox runs (2026-11-02/03, `factory-sandbox-m7-md`, STORY-001).** Five runner runs; their logs are in `.factory-local/runs/`.
+
+| Run | From → to | Exit | Why it stopped |
+|---|---|---|---|
+| `20261102T103758Z-continue` | Gate C → STORY_IN_PROGRESS / S08 | 6 | 9 denials; the AC verifier could not run `python -m unittest`, so S10 failed (fix attempt 1) |
+| `20261102T143353Z-resume` | (none) | 3 | `__pycache__` left the tree dirty (no `.gitignore`) |
+| `20261102T143642Z-resume` | S08 → S09 | 6 | 4 recovered denials |
+| `20261103T075739Z-resume` | S09 → Gate B (PR #7) | 6 | 9 recovered denials |
+| `20261103T091002Z-resume` | close-out (S12) → Gate C | 6 | 2 recovered denials |
+
+The human then added `Bash(gh pr checks:*)` to `.claude/settings.json` (S11 needs it; read-only), `Bash(python -m unittest)` to their own `.claude/settings.local.json` ([B-53](backlog.md#b-53)), and a `.gitignore` to the sandbox's story branch.
+
+**Headless discipline (human's approval, 2026-11-03).** An audit of the 24 denials found that no station-prescribed command needed a new permission:
+- **Root causes:**
+  - commands the sessions improvised: chains with `;`, `&&`, `|`, `echo` and `$?` (an empty result looked ambiguous), test-command variants, `python -c` and heredocs, shell redirection and `rm`, reading `.claude/` settings;
+  - two missing supported paths: the scratch folder had no literal path, and the Bash working directory persisted, so `python scripts/factory.py` failed after `cd <T>`;
+  - stale text: the AC verifier still listed a raw `git status`, which C2 refuses.
+- **Fix:**
+  - the runner passes `CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR=1` (`runner.HEADLESS_ENV`) and `--append-system-prompt runner.HEADLESS_RULES`;
+  - `factory.py scratch` prints the scratch folder;
+  - rules S15 (one command per call, no scripts, Write/Edit only, no `rm`) and S16 (no permission investigation);
+  - S00's `<SCRATCH>` names `factory.py scratch`;
+  - the AC verifier runs each command exactly, with no raw `status`;
+  - S08's walking skeleton adds an ignore file for what its commands generate;
+  - S11's Done check accepts a skipped traceability commit (a rework).
+- **Deviation:** `find_claude` also refuses a `claude.cmd`/`.bat` shim, because `cmd.exe` would interpret `|`, `&&` and `%VAR%` in the appended rules.
+- **Unchanged:** R1 (`--allowedTools Edit Write MultiEdit`), R5, the guard and every permission rule.
+- **Live check:** two `claude -p` sessions (Claude Code 2.1.316) in the factory root ran `cd scripts`, then `pwd`. With `runner.claude_env()`, `pwd` printed the factory root; without the variable (the control), it printed `…/scripts`. Neither had a denial.
+- **Tests and mutations:**
+  - `tests/test_runner.py`: the argument list, the environment, the rules text, the shim refusal, R5 on the real L4 close-out result, `factory.py scratch`;
+  - `tests/test_stations.py` `HeadlessDisciplineTest`: a lint that no station, command or agent file names a command S15 forbids, checked against every L4 denial; S15/S16; S00, S08, S11 and the verifier's text;
+  - `tests/test_guard.py`: `factory.py scratch` allowed in both modes;
+  - 19 new mutations and the 18 earlier T8.1 mutations: all caught.
+- **Handed on:** [B-53](backlog.md#b-53) (who allows a target's configured commands), [B-54](backlog.md#b-54) (`unittest -v` for mapping), [B-55](backlog.md#b-55) (the test count), [B-56](backlog.md#b-56) (R5 stops a recovered session that reached its gate).

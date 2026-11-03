@@ -171,6 +171,24 @@ BLOCK = [
     ("target set", bash("python scripts/factory.py target set /work/app"), "active target"),
     ("target set relative", bash("python ./scripts/factory.py target set ../x"), "active target"),
     ("target set direct", bash("./scripts/factory.py target set /x"), "active target"),
+    # --- T8.1 R2: the headless runner is human-only (its continue is the human's, D2) --
+    ("runner continue", bash("python scripts/factory.py run --until-gate --command continue"),
+     "headless runner"),
+    ("runner resume", bash("python scripts/factory.py run --until-gate --command resume"),
+     "headless runner"),
+    ("runner piped yes", bash("echo y | python scripts/factory.py run --until-gate "
+                              "--command continue"), "headless runner"),
+    ("runner direct", bash("./scripts/factory.py run --until-gate --command continue"),
+     "headless runner"),
+    ("runner via -X", bash("python -X utf8 scripts/factory.py run --command continue"),
+     "headless runner"),
+    ("runner via python3.12", bash("python3.12 scripts/factory.py run --command resume"),
+     "headless runner"),
+    ("runner with CLAUDECODE cleared",
+     bash("env -u CLAUDECODE python scripts/factory.py run --until-gate --command continue"),
+     "headless runner"),
+    ("runner in pwsh", pwsh("python scripts/factory.py run --until-gate --command continue"),
+     "headless runner"),
     ("redirect into factory-local",
      bash(f'echo x > "{FACTORY / ".factory-local" / "target.json"}"'), ".factory-local"),
     ("cp into factory-local",
@@ -415,6 +433,7 @@ ALLOW = [
     ("raw read-only -C target", bash("git -C /work/app rev-parse --short HEAD")),
     ("factory.py target show", bash("python scripts/factory.py target show")),
     ("factory.py target check", bash("python scripts/factory.py target check /work/app")),
+    ("factory.py scratch (T8.1)", bash("python scripts/factory.py scratch")),
     ("env CI only", bash("CI=1 npm test")),
     ("pwsh $env NO_COLOR", pwsh('$env:NO_COLOR = "1"; npm test')),
     # F1/F2/F3 must not block legitimate reads of a protected path.
@@ -442,6 +461,11 @@ DEV_BLOCK = [
     ("dev: target set", bash("python scripts/factory.py target set /work/app"), "active target"),
     ("dev: target set via -X", bash("python -X utf8 scripts/factory.py target set /x"),
      "active target"),
+    # T8.1 R2: so is the headless runner.
+    ("dev: runner continue",
+     bash("python scripts/factory.py run --until-gate --command continue"), "headless runner"),
+    ("dev: runner resume", bash("python scripts/factory.py run --until-gate --command resume"),
+     "headless runner"),
     # B2 pre-dated C2: raw push with --repo in self-development mode.
     ("dev: raw push --repo= to main", bash("git push --repo=origin HEAD:main"),
      "default branch"),
@@ -456,6 +480,9 @@ DEV_ALLOW = [
     ("dev: push task branch", bash("git push -q -u origin task/T1.6-guard 2>&1 | grep -v x")),
     ("dev: plain push on task branch", bash("git push")),
     ("dev: target show", bash("python scripts/factory.py target show")),
+    ("dev: route is not run", bash("python scripts/factory.py route --command factory-resume")),
+    ("dev: scratch", bash("python scripts/factory.py scratch")),
+    ("dev: run --help text in grep", bash("grep -n 'factory.py run' README.md")),
 ]
 
 

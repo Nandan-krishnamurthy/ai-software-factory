@@ -39,7 +39,7 @@ In rework mode, follow **Rework mode** below instead of steps 1–7.
    - Never read, print or commit a secret (rule S6).
 3. **New dependencies:** add one only if the story needs it, and write it in the commit message body as `New dependency: <name> — <reason>` (rule S9). S11 lists every such line in the PR.
 4. **Commands:** run the `commands.build`, `commands.lint` and `commands.typecheck` from `.factory/config.json`, from inside `<T>`, and fix what they report. A `null` command is skipped (rule H4); never guess one.
-   - **Walking skeleton only:** when this story introduces the project's build and test tooling, set each `commands` value in `.factory/config.json` **after** running that exact command successfully. Leave a command `null` if it does not exist yet.
+   - **Walking skeleton only:** when this story introduces the project's build and test tooling, set each `commands` value in `.factory/config.json` **after** running that exact command successfully. Leave a command `null` if it does not exist yet. Make sure running these commands leaves the tree clean: add what they generate to `.gitignore` in this story (for Python, `__pycache__/` and `*.py[cod]`), so that `python scripts/factory.py git status --porcelain` stays empty. Never delete generated files with `rm` (rule S15).
 5. **Size:** if the change is heading well past `limits.max_diff_lines`, excluding generated files such as lock files, stop and ask (rule H6) rather than build a story that cannot be reviewed.
 6. Append one line to `<T>/.factory/log.md`: `<UTC time> S08 <INC> #<I> implement`.
 7. Commit and push. See Checkpoint. Stage the files by name, and check `python scripts/factory.py git status --porcelain` first: nothing that looks like a secret or a stray file.
