@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Accepted: DEC-1, the human's decision of 2026-11-06 (`d8543357#1255`, 2026-11-06T08:51:50Z). Recorded by SR0.2 |
+| **Status** | Accepted: DEC-1, the human's decision of 2026-11-06 (`d8543357#1255`, 2026-11-06T08:51:50Z). Recorded by SR0.2, [PR #68](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/68) |
 | **Decided** | 2026-11-06: DEC-1, milestone SR accepted. With it, three decisions on how SR0.2 records it: [06-remediation-sr.md](../06-remediation-sr.md) is the source of truth for the SR task specifications and release gates; the human actions are numbered HA-1 to HA-8; `CLAUDE.md` is not changed by SR0.2 ([B-85](../backlog.md#b-85)) |
 | **Recorded** | 2026-11-06 |
 | **Related** | [ADR-0001](0001-strict-sequential-roadmap.md) (extended, not superseded), [ADR-0002](0002-m6-m9-roadmap-provenance.md), [ADR-0006](0006-threat-model-typed-commands-and-executed-code.md); findings [B-57 to B-84](../backlog.md#security-and-reliability-audit-2026-11-04-milestone-sr) |

@@ -1055,7 +1055,7 @@ The human then added `Bash(gh pr checks:*)` to `.claude/settings.json` (S11 need
 | | |
 |---|---|
 | **Specification** | [06-remediation-sr.md](06-remediation-sr.md#sr02-record-the-findings-and-the-sr-milestone-adr-0007), SR0.2 |
-| **PR** | not yet opened (branch `task/SR0.2-findings-adr-0007`) |
+| **PR** | [#68](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/68), branch `task/SR0.2-findings-adr-0007` (not yet merged) |
 | **Status** | In review: documentation only |
 
 **Approved decisions (human, `d8543357#1255`, 2026-11-06T08:51:50Z).**
