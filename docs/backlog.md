@@ -105,7 +105,7 @@ This is the backlog that [03-factory-plan.md](03-factory-plan.md) §5 refers to 
 
 ## Guard gaps
 
-The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` outside the target, the `/tmp` mapping and computed verbs. B-10, B-11, B-14, B-15 and B-45 (B-28's optional guard block) are not named in T9.5's Build, so whether they belong to T9.5 is a scope decision for that task. B-28 itself was resolved by a standalone task before T8.1.
+The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` outside the target, the `/tmp` mapping and computed verbs. B-10, B-11, B-14, B-15 and B-45 (B-28's optional guard block) are not named in T9.5's Build, so whether they belong to T9.5 is a scope decision for that task. B-28 itself was resolved by a standalone task before T8.1. Milestone SR ([ADR-0007](adr/0007-security-reliability-milestone-sr.md)) assigns the guard findings of the 2026-11-04 audit to its own tasks without changing the owners below: see [Security and reliability audit](#security-and-reliability-audit-2026-11-04-milestone-sr).
 
 ### <a id="b-09"></a>B-09 Computed arguments are not analysed
 - **What:** for example `gh pr $(echo merge) 5`.
@@ -122,6 +122,7 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
 ### <a id="b-11"></a>B-11 Indirect execution is not analysed
 - **What:** npm and make scripts, `./script.sh`, `python file.py`, git aliases from config files, `find -exec`. Because `verify run` runs only approved, human-merged commands, exploiting these through it needs a merged config change or project code.
 - **Source:** [PR #36](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/36), "Known gaps left for T9.5"
+- **Milestone SR (2026-11-06):** the evidence side, an approved command whose definition a branch changes, is [B-74](#b-74) (audit N18), owned by SR4.5 ([06-remediation-sr.md](06-remediation-sr.md#sr45-changed-command-definitions)). This item stays here, with release gate RG-F ([ADR-0007](adr/0007-security-reliability-milestone-sr.md)).
 - **Status:** verified · **Owner:** T9.5 (by the T6.1 decision; not named in T9.5's Build) · **State:** open
 
 ### <a id="b-12"></a>B-12 `git clone` into a folder outside the target is not blocked
@@ -137,6 +138,7 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
 ### <a id="b-14"></a>B-14 Bash writes outside the factory repo with no active target
 - **What:** with no active target, the guard blocked a direct file write to a folder outside the factory repo and scratch area, but `mkdir`, `cp` and a Python script run through Bash wrote to that same folder without being blocked.
 - **Source:** observed on 2026-10-21 in session `c878c238`, during the roadmap recovery (`c878c238#1424` onwards)
+- **Milestone SR (2026-11-06):** the same gap in target mode is [B-79](#b-79) (audit N23), owned by SR1.8. This item covers the no-target mode only, and its owner is unchanged.
 - **Status:** observed, not reproduced by a test · **Owner:** unassigned (likely T9.5; not named in its Build) · **State:** open
 
 ### <a id="b-15"></a>B-15 Credentials are not stripped from the environment of configured commands
@@ -391,6 +393,7 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
   - **D-6 real-filesystem coverage (unverified):** symlink and junction resolution is implemented (`realpath` in `guard._resolve_real`/`_under`), but no test creates a real junction or symlink and writes through it into a protected path. Nor does any test place a dangling symlink at `.factory-local/target.json`: D-5 relies on `os.path.lexists` to treat one as an unusable pointer, but a review mutation replacing it with `os.path.exists` (which follows links) went undetected, so that case is untested. Recorded as an open coverage gap; D-6 is not verified on a real filesystem.
   - **Finding 5 — an unconfirmed follow-up that needs verification, not a confirmed vulnerability and not a blocker:** a git version might run hooks defined in config (`hook.<name>.command`) that `core.hooksPath` does not govern. Git 2.52 on this machine ran no such hook in the earlier probe, and no git release is known to behave this way. First step: verify against the git versions the factory supports. Neither PR C nor PR C2 addresses it (`hook.*` is not in the guard's blocked keys and `doctor` does not report it).
   - The guard-only wider set stays a T9.5 scope decision.
+- **Milestone SR (2026-11-06):** two audit findings are gaps in what this item built. [B-57](#b-57) (audit N1): git's and `factory.py`'s options that write files pass D-3's path protection, owned by SR1.1 and SR1.2. [B-65](#b-65) (audit N9): config keys that redirect pushes, and remote URLs, owned by SR1.6 and SR1.5; it also records that E1's plan above says every `git config` write is blocked, while the code blocks only the keys it lists. This item's history and its open follow-ups (D-6, D-8, finding 5) are unchanged.
 - **Status:** verified (the guard allows the setting, and git runs it; E2, by PR B's tests; E1/T1/D-10/D-11, by PR C's tests; D-1, by PR C2's tests; D-5, by PR #64's tests); D-6 not verified on a real filesystem (open coverage gap); analysis (the merge path) · **Owner:** PR B (E2, merged), PR C (E1, T1, D-10, D-11, merged `8c87503`), PR C2 (D-1, merged `e4ffe42`) and PR #64 (D-5 fail-closed fix, merged `7314c8d`), all before T8.1 (D4); D-6 (unverified), D-8 and finding 5 remain; the guard-only rest stays a T9.5 scope decision · **State:** open
 
 ### <a id="b-47"></a>B-47 S12's check after the merge does not hold its evidence against the merge commit
@@ -427,6 +430,7 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
   4. Gate B's `APPROVED` state (`GATE_B_APPROVED_UNMERGED`) works as the architecture describes.
   5. For the sandbox: `verify run` cannot read the bot's token.
 - **Source:** the second adversarial review of PR #56 (F1, 2026-10-30); architecture §9.4; `config.IDENTITY_MODES_PLANNED`
+- **Milestone SR (2026-11-06):** the human's decision on this item is DEC-7, required by release gate RG-E. Building it, or `doctor` verifying branch protection with required reviews on every target, is required by RG-F ([ADR-0007](adr/0007-security-reliability-milestone-sr.md)).
 - **Status:** analysis · **Owner:** unassigned: not a roadmap task, so the human sequences it, as with B-28 · **State:** open
 
 ### <a id="b-50"></a>B-50 S01's baseline runs the project's commands with the user's full environment
@@ -459,6 +463,7 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
 - **Security:** that run happens in Claude's shell with the user's **full environment**, not in `verify run`'s cleaned one (E3, [B-15](#b-15)). For the walking skeleton the command is still pending (unapproved), so the local rule stands in for the per-run approval an interactive session would ask for.
 - **Not decided:** the runner could derive `--allowedTools "Bash(<approved command>)"` from the approved config. That would change R1 and, for a pending command, approve it automatically: a security decision for the human. A safer candidate is a read-only factory command that runs the approved commands in E3's environment for the verifier.
 - **Source:** T8.1 L4 runs (2026-11-02/03); README, "Before the first run on a target"
+- **Milestone SR (2026-11-06):** the decision is DEC-6, required by release gate RG-B. The install step is [B-62](#b-62) (audit N6), owned by SR6.1 ([ADR-0007](adr/0007-security-reliability-milestone-sr.md)).
 - **Status:** verified (live, L4) · **Owner:** unassigned: a decision for the human · **State:** open
 
 ### <a id="b-54"></a>B-54 A plain `python -m unittest` names no test, so `verify map` cannot map ACs once the command is approved
@@ -477,7 +482,311 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
 - **What:** in three of the four L4 runs that invoked Claude, the session reached its goal (S08 → S09, S09 → Gate B, S12 → Gate C), yet the run exited 6 because the result listed denials the session had recovered from. The headless discipline (rules S15/S16 in the system prompt, the scratch command, the working-directory variable) removes the deterministic causes, but a model can still improvise a command, and under R5 that still stops the run.
 - **Not decided:** distinguishing "denied but recovered, and the state reached the next gate" from other denials would change R5 (the human's decision, 2026-11-02, kept unchanged).
 - **Source:** T8.1 L4 run logs (`.factory-local/runs/`, 2026-11-02/03); [B-51](#b-51)
+- **Milestone SR (2026-11-06):** the decision is DEC-2, required by release gate RG-C ([ADR-0007](adr/0007-security-reliability-milestone-sr.md)).
 - **Status:** verified (the run logs) · **Owner:** unassigned: a decision for the human · **State:** open
+
+## Security and reliability audit, 2026-11-04 (milestone SR)
+
+The 28 findings that milestone SR remediates ([ADR-0007](adr/0007-security-reliability-milestone-sr.md)). The tasks that fix them, and the release gates that require them, are specified in [06-remediation-sr.md](06-remediation-sr.md). Recorded by SR0.2.
+- **Sources:** N1–N22 come from the security and reliability audit of 2026-11-04 (`876b6b9d#523`). K1–K5 come from the root-cause investigation of five known reliability issues on 2026-11-03 (`30230cfe#248`). N23 comes from re-running the audit's probe cases for the remediation roadmap (`d8543357#627`). Each was re-checked against `7aee362` on 2026-11-04. The factory's code is unchanged from `7aee362` to `b62a0f0`, where this section was written, so the file and line references still hold.
+- **Audit ID:** the finding's ID in those sources, kept as an alias. Finding N*k* is B-(56+*k*), and finding K*k* is B-(79+*k*).
+- **Gate:** the earliest release gate that requires the fix, RG-A to RG-F ([06-remediation-sr.md](06-remediation-sr.md#release-gates)). These are not the factory's own Gates A, B and C.
+- **Evidence:** IV, independently verified against the code or live data; SI, source inspection; LP, a limited probe of a pure function such as `guard.decide`, with nothing run end to end; RU, reported but not verified. The entries describe each mechanism; none gives a probe as a runnable command aimed at a real path.
+- **Risk:** the remediation roadmap's assessment, with the audit's priority (P0–P3) for comparison.
+- **Owner:** the SR task that fixes the finding. How it is fixed is decided in that task and recorded in [task-log.md](task-log.md).
+
+### <a id="b-57"></a>B-57 Pre-approved commands can overwrite the guard, the settings and the target pointer
+- **Audit ID:** N1 · **Gate:** RG-A · **Root cause:** RC1, RC2 ([ADR-0007](adr/0007-security-reliability-milestone-sr.md#root-causes))
+- **What:** The guard treats `git` as a reader and skips all arguments of `python …` (`guard.py:1214–1229`). git's `--output` and `config --file`, and factory.py's `--out`, all write files.
+- **Risk:** Critical. Disables D-10 and D-11. Combined with any pre-approved push form, it ends at an unprotected `main`. Audit: P0.
+- **Evidence:** LP (limited probe, pure function only): 5 of 5 write channels allowed in the 2026-11-04 re-run; Write-tool control blocked. Source re-checked.
+- **Related:** Enables the N2 ([B-58](#b-58)) chain; same mechanism as N22 ([B-78](#b-78)) and N23 ([B-79](#b-79))
+- **The fix is tested by:** Matrix: every write channel × every protected path → blocked; the real hook command run as a subprocess; the probes kept as regression fixtures
+- **Source:** the security and reliability audit (`876b6b9d#523`, 2026-11-04T07:30:29Z); re-checked at `7aee362` for the remediation roadmap (`d8543357#627`, 2026-11-04T08:45:36Z)
+- **Status:** verified (a probe of `guard.decide`; the code) · **Owner:** SR1.1, SR1.2 · **State:** open
+
+### <a id="b-58"></a>B-58 The guard fails open on start-up errors; the runner's preflight misses user and managed settings; the wrapper has no push check of its own
+- **Audit ID:** N2 · **Gate:** RG-A · **Root cause:** RC1 ([ADR-0007](adr/0007-security-reliability-milestone-sr.md#root-causes))
+- **What:** Fail-closed covers only `decide()`. The imports at `guard_hook.py:17–22` run before the `try`. `check_hooks` reads only the project files (`runner.py:371–387`). `_git` (`cli.py:699–730`) never checks a push.
+- **Risk:** High (Critical with N1). A crash only works if the broken file is loaded lazily (`guard_hook.py`), because a broken `guard.py` also breaks `factory.py` through `doctor.py:18`. A missing `python` also fails open. Audit: P0.
+- **Evidence:** SI (source inspection): re-checked on 2026-11-04. Exit-code behaviour comes from the docs, not a live test.
+- **Related:** N1 ([B-57](#b-57)); overlaps T9.5 and T9.6
+- **The fix is tested by:** Run the exact hook command from the settings against broken temporary copies → exit 2; the preflight refuses each unsafe settings layer
+- **Source:** the security and reliability audit (`876b6b9d#523`, 2026-11-04T07:30:29Z); re-checked at `7aee362` for the remediation roadmap (`d8543357#627`, 2026-11-04T08:45:36Z)
+- **Status:** verified (the code); the exit-code behaviour is from Claude Code's documentation, not a live test · **Owner:** SR1.3, SR1.4, SR1.5 · **State:** open
+
+### <a id="b-59"></a>B-59 Factory markers are trusted from any author
+- **Audit ID:** N3 · **Gate:** RG-E · **Root cause:** RC4 ([ADR-0007](adr/0007-security-reliability-milestone-sr.md#root-causes))
+- **What:** The snapshot fetches no author or head-repository fields (`state.py:714–722`). `find_checkpoint` takes the oldest checkpoint from anyone (`comments.py:91–98`). pick and sync match markers with no label check.
+- **Risk:** High on repositories others can write to. Low on the private single-owner sandbox. Audit: P2.
+- **Evidence:** LP (limited probe, pure function only): re-run: a stranger's PR → `GATE_A_WAITING 999-pwn`; a fake story PR → INCONSISTENT; a spam issue → `PickError` while the state says `IDLE_AT_GATE_C`
+- **Related:** Shares one trust function with K3 ([B-82](#b-82))'s answers; N16 ([B-72](#b-72)) (the `reviewers` key)
+- **The fix is tested by:** State, sync, pick and checkpoint tests with a foreign author and a fork
+- **Source:** the security and reliability audit (`876b6b9d#523`, 2026-11-04T07:30:29Z); re-checked at `7aee362` for the remediation roadmap (`d8543357#627`, 2026-11-04T08:45:36Z)
+- **Status:** verified (a probe of the state engine's pure functions) · **Owner:** SR5.1 · **State:** open
+
+### <a id="b-60"></a>B-60 GraphQL merges from a file or stdin, and settings-changing gh calls, pass the guard
+- **Audit ID:** N4 · **Gate:** RG-A · **Root cause:** RC2 ([ADR-0007](adr/0007-security-reliability-milestone-sr.md#root-causes))
+- **What:** A block list that reads command text: `-F query=@file` hides the body, and the endpoint list is incomplete.
+- **Risk:** High interactively: the approval prompt shows a file name, not a merge. In headless runs the permission rules deny `gh api` (per the audit). Audit: P0.
+- **Evidence:** LP (limited probe, pure function only): re-run: `@file`, `@-`, workflow dispatch, collaborator, webhook, `gh release create` and `gh workflow run` all allowed; the inline merge is blocked
+- **Related:** Same class as N9 ([B-65](#b-65)) (a block list)
+- **The fix is tested by:** Probe cases as regression tests; a lint that every gh command the stations use still passes
+- **Source:** the security and reliability audit (`876b6b9d#523`, 2026-11-04T07:30:29Z); re-checked at `7aee362` for the remediation roadmap (`d8543357#627`, 2026-11-04T08:45:36Z)
+- **Status:** verified (a probe of `guard.decide`) · **Owner:** SR1.7 · **State:** open
+
+### <a id="b-61"></a>B-61 No lock stops two sessions on one target
+- **Audit ID:** N5 · **Gate:** RG-B · **Root cause:** RC6 ([ADR-0007](adr/0007-security-reliability-milestone-sr.md#root-causes))
+- **What:** There is no lock anywhere in `scripts/`. pick reads, assigns and labels with nothing in between (`pick.py:189–201`).
+- **Risk:** High for the runner, or runner plus an interactive session. Medium for one person working interactively. Audit: P0.
+- **Evidence:** SI (source inspection): re-checked: no lock code
+- **Related:** Prerequisite for SR2.2 and T8.2's kill-and-resume; related to N13 ([B-69](#b-69))
+- **The fix is tested by:** A two-process race test; a stale-lock test; on Windows, a test that the liveness check never calls `os.kill`
+- **Source:** the security and reliability audit (`876b6b9d#523`, 2026-11-04T07:30:29Z); re-checked at `7aee362` for the remediation roadmap (`d8543357#627`, 2026-11-04T08:45:36Z)
+- **Status:** verified (the code) · **Owner:** SR2.1 · **State:** open
+
+### <a id="b-62"></a>B-62 Stories that add a dependency cannot pass verification
+- **Audit ID:** N6 · **Gate:** RG-E · **Root cause:** RC8 ([ADR-0007](adr/0007-security-reliability-milestone-sr.md#root-causes))
+- **What:** `VERIFY_COMMANDS` leaves out `install` (`evidence.py:129`). No station and no verifier installs.
+- **Risk:** High for portability; none on the standard-library sandbox. Audit: P2.
+- **Evidence:** SI (source inspection): re-checked
+- **Related:** [B-53](#b-53); N18 ([B-74](#b-74)) (lockfiles)
+- **The fix is tested by:** Node and Python fixtures whose story adds a dependency
+- **Source:** the security and reliability audit (`876b6b9d#523`, 2026-11-04T07:30:29Z); re-checked at `7aee362` for the remediation roadmap (`d8543357#627`, 2026-11-04T08:45:36Z)
+- **Status:** verified (the code) · **Owner:** SR6.1 · **State:** open
+
+### <a id="b-63"></a>B-63 The review round depends on the local clock
+- **Audit ID:** N7 · **Gate:** RG-D · **Root cause:** RC8 ([ADR-0007](adr/0007-security-reliability-milestone-sr.md#root-causes))
+- **What:** `committedDate` comes from the local clock (`signals.py:119–124, 225–226`).
+- **Risk:** Medium. With clock skew (WSL, VMs), a fresh `/changes` reads as PENDING. Audit: P2.
+- **Evidence:** LP (limited probe, pure function only): re-run: clock 1 h ahead → PENDING
+- **Related:** N17 ([B-73](#b-73)) (time integrity); T8.3
+- **The fix is tested by:** Skewed-clock fixture → CHANGES_REQUESTED
+- **Source:** the security and reliability audit (`876b6b9d#523`, 2026-11-04T07:30:29Z); re-checked at `7aee362` for the remediation roadmap (`d8543357#627`, 2026-11-04T08:45:36Z)
+- **Status:** verified (a probe of the review-signal functions) · **Owner:** SR4.2 · **State:** open
+
+### <a id="b-64"></a>B-64 The default branch comes from a file the model can edit
+- **Audit ID:** N8 · **Gate:** RG-F · **Root cause:** RC1 (in part), RC3, RC8 ([ADR-0007](adr/0007-security-reliability-milestone-sr.md#root-causes))
+- **What:** `guard_hook.py:44–49` reads the target's working-tree config, falling back to `main`. The protected set is {configured, main, master} (`guard.py:88`).
+- **Risk:** Medium. It can't unprotect `main` or `master`, which are always in the set. It exposes repositories whose default is another name (e.g. `develop`). Audit: P0.
+- **Evidence:** LP (limited probe, pure function only): re-run: pushing story → `develop` is allowed when the guard thinks the default is `main`
+- **Related:** [B-24](#b-24); solved by SR1.5's allowlist
+- **The fix is tested by:** Fixtures with a `develop` default and with an edited config
+- **Source:** the security and reliability audit (`876b6b9d#523`, 2026-11-04T07:30:29Z); re-checked at `7aee362` for the remediation roadmap (`d8543357#627`, 2026-11-04T08:45:36Z)
+- **Status:** verified (a probe of `guard.decide`; the code) · **Owner:** SR1.5 · **State:** open
+
+### <a id="b-65"></a>B-65 Git config keys that redirect pushes or run programs are not blocked
+- **Audit ID:** N9 · **Gate:** RG-A · **Root cause:** RC2 ([ADR-0007](adr/0007-security-reliability-milestone-sr.md#root-causes))
+- **What:** `_DANGEROUS_CONFIG` anchors `remote.*.push$` (`guard.py:749–759`), so it misses `pushurl`, `pushDefault`, `pushRemote`, `core.gitProxy` and `pager.*`. `remote.origin.url` is also allowed.
+- **Risk:** Medium. A pre-approved `git -C … config` can redirect pushes or exfiltrate code. The program-running keys reach less (a pager needs a tty; `gitProxy` applies only to `git://`); that is reasoning, not tested. Audit: P2.
+- **Evidence:** LP (limited probe, pure function only): re-run: all six keys allowed. New probe: a wrapper push to an arbitrary URL is allowed.
+- **Related:** [B-45](#b-45), [B-46](#b-46)
+- **Record versus code:** [B-46](#b-46)'s E1 plan says PR C blocks "every `git config` write in the target". The code blocks a write only when `is_risky_config` names the key (the `config` branch of `guard._check_git`), and that list is the gap above. B-46 is kept as written; this item records the difference.
+- **The fix is tested by:** Probe cases; doctor's list shares the same table
+- **Source:** the security and reliability audit (`876b6b9d#523`, 2026-11-04T07:30:29Z); re-checked at `7aee362` for the remediation roadmap (`d8543357#627`, 2026-11-04T08:45:36Z)
+- **Status:** verified (a probe of `guard.decide`; the code) · **Owner:** SR1.6, SR1.5 · **State:** open
+
+### <a id="b-66"></a>B-66 Scratch files from different targets share names
+- **Audit ID:** N10 · **Gate:** RG-B · **Root cause:** RC7 ([ADR-0007](adr/0007-security-reliability-milestone-sr.md#root-causes))
+- **What:** Names use only the issue number, in the shared `%TEMP%` (`evidence.py:834–836`).
+- **Risk:** Medium. The hash checks fail safe, but clashes stop runs. Audit: P1.
+- **Evidence:** IV (independently verified): On 2026-11-04, `%TEMP%` held sandbox #2/#3 and Task Tracker #41 files side by side. A clash between two targets has not been observed yet.
+- **Related:** K5 ([B-84](#b-84)) (same helper)
+- **The fix is tested by:** Two targets, both with issue #3 → no clash
+- **Source:** the security and reliability audit (`876b6b9d#523`, 2026-11-04T07:30:29Z); re-checked at `7aee362` for the remediation roadmap (`d8543357#627`, 2026-11-04T08:45:36Z)
+- **Status:** verified (the code; the shared folder, observed 2026-11-04); a clash between two targets not yet observed · **Owner:** SR2.4 · **State:** open
+
+### <a id="b-67"></a>B-67 Timeouts and Ctrl+C leave orphan processes; runs have no budget
+- **Audit ID:** N11 · **Gate:** RG-B · **Root cause:** RC6 ([ADR-0007](adr/0007-security-reliability-milestone-sr.md#root-causes))
+- **What:** `invoke_claude` → `run_process` → `subprocess.run(timeout)`, which kills only `claude.exe` (`gh.py:64–77`, `runner.py:202`). `KeyboardInterrupt` only logs (`cli.py:668–671`). `verify run` already kills the tree (`gh.py:135–145`).
+- **Risk:** Medium. Orphaned test runners, a leftover `.git/index.lock`, up to 12 h per run. Audit: P1.
+- **Evidence:** SI (source inspection): re-checked on 2026-11-04
+- **Related:** T8.2's kill-and-resume scenario
+- **The fix is tested by:** A fake `claude` that starts a grandchild: timeout and Ctrl+C leave no process behind
+- **Source:** the security and reliability audit (`876b6b9d#523`, 2026-11-04T07:30:29Z); re-checked at `7aee362` for the remediation roadmap (`d8543357#627`, 2026-11-04T08:45:36Z)
+- **Status:** verified (the code) · **Owner:** SR2.3 · **State:** open
+
+### <a id="b-68"></a>B-68 Fix-attempt and review-round limits exist only in prose
+- **Audit ID:** N12 · **Gate:** RG-B · **Root cause:** RC3, RC5 ([ADR-0007](adr/0007-security-reliability-milestone-sr.md#root-causes))
+- **What:** The model passes the counters in (`--fix-attempts`). `max_fix_attempts` is read nowhere outside `config.py`.
+- **Risk:** Medium. Rework can loop until the runner's 12-invocation cap, and T8.3's numbers would be wrong. Audit: P1.
+- **Evidence:** SI (source inspection): re-checked with a search
+- **Related:** K1 ([B-80](#b-80)) (transition kinds); T8.3
+- **Record versus code:** [02-factory-architecture.md](02-factory-architecture.md) §10, open question 3, states the rework limits (`limits.max_review_rounds`, `limits.max_fix_attempts`) as the decision. No code enforces them. SR3.2 enforces them.
+- **The fix is tested by:** Fixtures of transition sequences; a run over the limit → route stops
+- **Source:** the security and reliability audit (`876b6b9d#523`, 2026-11-04T07:30:29Z); re-checked at `7aee362` for the remediation roadmap (`d8543357#627`, 2026-11-04T08:45:36Z)
+- **Status:** verified (the code, by a search) · **Owner:** SR3.2 · **State:** open
+
+### <a id="b-69"></a>B-69 A crash during a label change needs a human
+- **Audit ID:** N13 · **Gate:** RG-B · **Root cause:** RC6 ([ADR-0007](adr/0007-security-reliability-milestone-sr.md#root-causes))
+- **What:** `set_status` adds the new label, then deletes the old one (`pick.py:180–185`).
+- **Risk:** Medium. INCONSISTENT stops every command until a human repairs it. Audit: P1.
+- **Evidence:** LP (limited probe, pure function only): re-run: two status labels → INCONSISTENT
+- **Related:** A concrete case of K2 ([B-81](#b-81))
+- **The fix is tested by:** One call sets the labels; a fixture with the legacy half-done state is repaired
+- **Source:** the security and reliability audit (`876b6b9d#523`, 2026-11-04T07:30:29Z); re-checked at `7aee362` for the remediation roadmap (`d8543357#627`, 2026-11-04T08:45:36Z)
+- **Status:** verified (a probe of the state engine's pure functions; the code) · **Owner:** SR2.2 · **State:** open
+
+### <a id="b-70"></a>B-70 Fixed GitHub list limits
+- **Audit ID:** N14 · **Gate:** RG-F · **Root cause:** RC8 ([ADR-0007](adr/0007-security-reliability-milestone-sr.md#root-causes))
+- **What:** 200 PRs (`state.py:714`, `closeout.py:177`, `issues.py:328`) and 100 commits (`state.py:753`).
+- **Risk:** Medium on busy repositories. The state can become UNCONFIGURED mid-story and allow `/factory-start`. Audit: P2.
+- **Evidence:** SI (source inspection): re-checked
+- **Related:** RG-F
+- **The fix is tested by:** A fake `gh` with 500 PRs and a deleted plan branch
+- **Source:** the security and reliability audit (`876b6b9d#523`, 2026-11-04T07:30:29Z); re-checked at `7aee362` for the remediation roadmap (`d8543357#627`, 2026-11-04T08:45:36Z)
+- **Status:** verified (the code) · **Owner:** SR5.3 · **State:** open
+
+### <a id="b-71"></a>B-71 Nothing proves the AC verifier ran
+- **Audit ID:** N15 · **Gate:** RG-D · **Root cause:** RC3, RC5 ([ADR-0007](adr/0007-security-reliability-milestone-sr.md#root-causes))
+- **What:** `verdict check` checks that the verdict is consistent, not where it came from.
+- **Risk:** Medium. S10's independence is advisory, so T8.3's verifier pass rate can't be trusted. Audit: P3.
+- **Evidence:** SI (source inspection): (audit; not re-checked)
+- **Related:** K4 ([B-83](#b-83)), N18 ([B-74](#b-74))
+- **The fix is tested by:** A verdict without provenance is labelled; a hash mismatch is refused
+- **Source:** the security and reliability audit (`876b6b9d#523`, 2026-11-04T07:30:29Z); re-checked at `7aee362` for the remediation roadmap (`d8543357#627`, 2026-11-04T08:45:36Z)
+- **Status:** analysis (the audit's source inspection; not re-checked on 2026-11-04) · **Owner:** SR4.4 · **State:** open
+
+### <a id="b-72"></a>B-72 Changes to sensitive files are neither caught nor flagged
+- **Audit ID:** N16 · **Gate:** RG-E · **Root cause:** RC2, RC4, RC5 ([ADR-0007](adr/0007-security-reliability-milestone-sr.md#root-causes))
+- **What:** The guard allows writes to the target's `.github/workflows` and `.claude/`. The PR body has no flag for them. The non-command config keys (`reviewers`, `limits`) can be edited on a branch.
+- **Risk:** High where workflows run with secrets and the token has `workflow` scope. Unknown for the sandbox. Audit: P2.
+- **Evidence:** LP (limited probe, pure function only): re-run: Write to a workflow file and to `.claude/settings.json` allowed
+- **Related:** N12 ([B-68](#b-68)) (`limits`), N3 ([B-59](#b-59)) (`reviewers`)
+- **The fix is tested by:** Fixture diffs; a push of a workflow change is refused
+- **Source:** the security and reliability audit (`876b6b9d#523`, 2026-11-04T07:30:29Z); re-checked at `7aee362` for the remediation roadmap (`d8543357#627`, 2026-11-04T08:45:36Z)
+- **Status:** verified (a probe of `guard.decide`) · **Owner:** SR5.2, plus human action HA-4 · **State:** open
+
+### <a id="b-73"></a>B-73 `.factory/log.md` timestamps are made up in headless runs
+- **Audit ID:** N17 · **Gate:** RG-D · **Root cause:** RC3 ([ADR-0007](adr/0007-security-reliability-milestone-sr.md#root-causes))
+- **What:** The stations require `<UTC time>`, but a headless session has no allowed clock command.
+- **Risk:** Medium. T8.3 computes metrics from these times. Audit: P1.
+- **Evidence:** IV (independently verified): Run log `20261103T145843Z-continue`: the session said its log times "are estimates"
+- **Related:** N7 ([B-63](#b-63))
+- **The fix is tested by:** A lint against hand-written times; a live line falls between the run's start and stop times
+- **Source:** the security and reliability audit (`876b6b9d#523`, 2026-11-04T07:30:29Z); re-checked at `7aee362` for the remediation roadmap (`d8543357#627`, 2026-11-04T08:45:36Z)
+- **Status:** observed (run log `20261103T145843Z-continue`) · **Owner:** SR4.1 · **State:** open
+
+### <a id="b-74"></a>B-74 Approval covers the command text, not what the command runs
+- **Audit ID:** N18 · **Gate:** RG-D · **Root cause:** none of RC1–RC8 names it
+- **What:** A branch can change `package.json` scripts, the Makefile or the pytest configuration.
+- **Risk:** Medium. Evidence integrity; B-11 covers the security side. Audit: P3.
+- **Evidence:** RU (reported, not verified): audit reasoning; not probed
+- **Related:** K4 ([B-83](#b-83)), N15 ([B-71](#b-71)), [B-11](#b-11)
+- **The fix is tested by:** Fixtures per ecosystem
+- **Source:** the security and reliability audit (`876b6b9d#523`, 2026-11-04T07:30:29Z); re-checked at `7aee362` for the remediation roadmap (`d8543357#627`, 2026-11-04T08:45:36Z)
+- **Status:** analysis (the audit's reasoning; not probed) · **Owner:** SR4.5 · **State:** open
+
+### <a id="b-75"></a>B-75 A guard test depends on this machine's state
+- **Audit ID:** N19 · **Gate:** SR0 (before SR1.1) · **Root cause:** RC8 ([ADR-0007](adr/0007-security-reliability-milestone-sr.md#root-causes))
+- **What:** It reads the real `.factory-local/target.json` (`test_guard.py:992–1006`).
+- **Risk:** Low. But the suite is red whenever a target is active, so test evidence is ambiguous. Audit: P1.
+- **Evidence:** IV (independently verified): on 2026-11-04: the suite's only failure
+- **Related:** Prerequisite for clean evidence in every SR PR
+- **The fix is tested by:** The suite passes with the pointer present and with it absent
+- **Source:** the security and reliability audit (`876b6b9d#523`, 2026-11-04T07:30:29Z); re-checked at `7aee362` for the remediation roadmap (`d8543357#627`, 2026-11-04T08:45:36Z)
+- **Status:** verified (the test fails whenever a target is active: the suite's only failure on 2026-11-04) · **Owner:** SR0.3 · **State:** open
+
+### <a id="b-76"></a>B-76 The `--amend` refusal can be sidestepped with a prefix
+- **Audit ID:** N20 · **Gate:** RG-E · **Root cause:** RC2 ([ADR-0007](adr/0007-security-reliability-milestone-sr.md#root-causes))
+- **What:** An exact-string check (`cli.py:718`).
+- **Risk:** Low. Amending before review is allowed anyway (S4). After review, the force-push it needs is blocked. Audit: P3.
+- **Evidence:** LP (limited probe, pure function only): re-run: `--amen` allowed. That git accepts the prefix was not run here.
+- **Related:** none named
+- **The fix is tested by:** Prefix cases
+- **Source:** the security and reliability audit (`876b6b9d#523`, 2026-11-04T07:30:29Z); re-checked at `7aee362` for the remediation roadmap (`d8543357#627`, 2026-11-04T08:45:36Z)
+- **Status:** verified (a probe of `guard.decide`); that git accepts the prefix was not run · **Owner:** SR1.6 · **State:** open
+
+### <a id="b-77"></a>B-77 Text and messages are inconsistent
+- **Audit ID:** N21 · **Gate:** RG-E · **Root cause:** none of RC1–RC8 names it
+- **What:** The command files tell you to run `/factory-target <path>`; target errors give the same advice; S08, S10 and S11 still diff against local `origin/<D>`; `…` is garbled on Windows.
+- **Risk:** Low. Confusion and wrong recovery advice. Audit: P3.
+- **Evidence:** SI (source inspection): The garbled `…` was observed on 2026-11-04 in guard and test output.
+- **Related:** T9.9's doc lint
+- **The fix is tested by:** Doc lint; a test with a cp1252 stderr
+- **Source:** the security and reliability audit (`876b6b9d#523`, 2026-11-04T07:30:29Z); re-checked at `7aee362` for the remediation roadmap (`d8543357#627`, 2026-11-04T08:45:36Z)
+- **Status:** verified (the command files and the code; the garbled `…` observed 2026-11-04) · **Owner:** SR6.2 · **State:** open
+
+### <a id="b-78"></a>B-78 A persistent injection channel through `~/.claude/projects`
+- **Audit ID:** N22 · **Gate:** RG-B · **Root cause:** RC1 ([ADR-0007](adr/0007-security-reliability-milestone-sr.md#root-causes))
+- **What:** `extra_write_dirs` includes it in target mode (`guard_hook.py:58`).
+- **Risk:** Medium. The runner's `--allowedTools Write` makes such writes promptless, and the memory there loads into every later session. Audit: P3.
+- **Evidence:** LP (limited probe, pure function only): re-run: Write to memory allowed; source re-checked
+- **Related:** N1 ([B-57](#b-57)) (same protected-path list)
+- **The fix is tested by:** Part of the N1 matrix
+- **Source:** the security and reliability audit (`876b6b9d#523`, 2026-11-04T07:30:29Z); re-checked at `7aee362` for the remediation roadmap (`d8543357#627`, 2026-11-04T08:45:36Z)
+- **Status:** verified (a probe of `guard.decide`; the code) · **Owner:** SR1.1 · **State:** open
+
+### <a id="b-79"></a>B-79 Bash writes outside the allowed areas pass the guard
+- **Audit ID:** N23 · **Gate:** RG-B · **Root cause:** RC1 ([ADR-0007](adr/0007-security-reliability-milestone-sr.md#root-causes))
+- **What:** For commands that aren't readers, `_scan_protected_args` checks only protected paths, not "outside the allowed areas". This contradicts the guard's own docstring (`guard.py:15–18`).
+- **Risk:** Medium. Only permission prompts or a headless denial stop a recursive delete, a copy over a shell start-up file, or a download written outside the target. Audit: not reported.
+- **Evidence:** LP (limited probe, pure function only): These were the audit's own probe cases; re-run on 2026-11-04, all allowed
+- **Related:** Same function as N1 ([B-57](#b-57)); [B-14](#b-14) covers the no-target case
+- **Found** when the audit's probe cases were re-run for the remediation roadmap; the audit had not reported it as a finding.
+- **The fix is tested by:** Matrix of the common writers × outside paths
+- **Source:** the audit's own probe cases, re-run at `7aee362` for the remediation roadmap (`d8543357#627`, 2026-11-04T08:45:36Z); not in the audit's report
+- **Status:** verified (a probe of `guard.decide`; the guard's docstring) · **Owner:** SR1.8 · **State:** open
+
+### <a id="b-80"></a>B-80 Station transitions are not declared or validated
+- **Audit ID:** K1 · **Gate:** RG-B · **Root cause:** RC5 ([ADR-0007](adr/0007-security-reliability-milestone-sr.md#root-causes))
+- **What:** No code reads `allowed_from` (search: none). A checkpoint's `next` is checked only for its format (`markers.py:31`).
+- **Risk:** Medium. An undeclared jump such as `S11 → S07` is accepted.
+- **Evidence:** SI (source inspection): re-checked
+- **Related:** Prerequisite for K2 ([B-81](#b-81)), K3 ([B-82](#b-82)) and N12 ([B-68](#b-68))
+- **Record versus code:** [02-factory-architecture.md](02-factory-architecture.md) §4.3 says of `allowed_from` that "the state engine enforces this". No code in `scripts/` reads it; only the station lint (`tests/test_stations.py`) does. SR3.1 corrects the statement ([06-remediation-sr.md](06-remediation-sr.md#sr31-declared-validated-station-transitions)).
+- **The fix is tested by:** Declared pairs accepted, undeclared refused; a lint over the station text
+- **Source:** the root-cause investigation of five known reliability issues (`30230cfe#248`, 2026-11-03T16:18:10Z); re-checked at `7aee362` for the remediation roadmap (`d8543357#627`, 2026-11-04T08:45:36Z)
+- **Status:** verified (the code, by a search) · **Owner:** SR3.1 · **State:** open
+
+### <a id="b-81"></a>B-81 Recovery destinations are not classified
+- **Audit ID:** K2 · **Gate:** RG-B · **Root cause:** RC5 ([ADR-0007](adr/0007-security-reliability-milestone-sr.md#root-causes))
+- **What:** S11's stop writes no checkpoint before it asks, so the state engine routes back to S11.
+- **Risk:** Medium. Resuming repeats a known failure: three incidents (Task Tracker #34 and #41, sandbox #3).
+- **Evidence:** SI (source inspection): plus the incident record
+- **Related:** N13 ([B-69](#b-69)) is one case of it; [B-44](#b-44)
+- **The fix is tested by:** Each problem carries its recovery station; replay of sandbox #3
+- **Source:** the root-cause investigation of five known reliability issues (`30230cfe#248`, 2026-11-03T16:18:10Z); re-checked at `7aee362` for the remediation roadmap (`d8543357#627`, 2026-11-04T08:45:36Z)
+- **Status:** verified (the station text; three incidents) · **Owner:** SR3.3 · **State:** open
+
+### <a id="b-82"></a>B-82 Human decisions are not stored as typed records
+- **Audit ID:** K3 · **Gate:** RG-B · **Root cause:** RC3, RC4 ([ADR-0007](adr/0007-security-reliability-milestone-sr.md#root-causes))
+- **What:** No code reads an answer on a story issue; `questions.py` is used only by S01. Asking is not idempotent: `post_reply` always posts a new comment (`comments.py:77–88`).
+- **Risk:** Medium. A decision can be lost or contradicted, and questions get posted twice.
+- **Evidence:** SI (source inspection): plus issue #3's comments (the question, and the answer "1")
+- **Related:** Needs SR3.3; trust as in N3 ([B-59](#b-59))
+- **The fix is tested by:** One question per key; invalid answers ignored; a resume applies the decision once
+- **Source:** the root-cause investigation of five known reliability issues (`30230cfe#248`, 2026-11-03T16:18:10Z); re-checked at `7aee362` for the remediation roadmap (`d8543357#627`, 2026-11-04T08:45:36Z)
+- **Status:** verified (the code; issue #3's comments on the sandbox) · **Owner:** SR3.4 · **State:** open
+
+### <a id="b-83"></a>B-83 H3 test-integrity checks happen too late and have gaps
+- **Audit ID:** K4 · **Gate:** RG-D · **Root cause:** none of RC1–RC8 names it
+- **What:** The check runs only in S11's `pr render`. `enclosing_test` returns `None` for an added skip decorator.
+- **Risk:** Timing: Low. Skip gap: High, because a weakened test goes undetected.
+- **Evidence:** Timing SI; skip gap LP (in-memory probe, 2026-11-03)
+- **Related:** N15 ([B-71](#b-71)), N18 ([B-74](#b-74)); [B-30](#b-30)
+- **The fix is tested by:** Skip markers in four frameworks are flagged; `verify run` reports undeclared changes
+- **Source:** the root-cause investigation of five known reliability issues (`30230cfe#248`, 2026-11-03T16:18:10Z); re-checked at `7aee362` for the remediation roadmap (`d8543357#627`, 2026-11-04T08:45:36Z)
+- **Status:** verified (timing: the code); skip gap: an in-memory probe, 2026-11-03 · **Owner:** SR4.3 · **State:** open
+
+### <a id="b-84"></a>B-84 Headless sessions hit permission failures on temporary files
+- **Audit ID:** K5 · **Gate:** RG-B · **Root cause:** RC7 ([ADR-0007](adr/0007-security-reliability-milestone-sr.md#root-causes))
+- **What:** Write is allowed everywhere, but Read outside the project is denied, and the Write tool must read an existing file before overwriting it.
+- **Risk:** Medium. It stops headless runs (exit 6).
+- **Evidence:** IV (independently verified): Run log `20261103T154643Z`: the denied read of `notes-3.md`; T8.1's PS-2
+- **Related:** N10 ([B-66](#b-66)) (same helper)
+- **The fix is tested by:** Live: a headless session rewrites an existing scratch file without a denial
+- **Source:** the root-cause investigation of five known reliability issues (`30230cfe#248`, 2026-11-03T16:18:10Z); re-checked at `7aee362` for the remediation roadmap (`d8543357#627`, 2026-11-04T08:45:36Z)
+- **Status:** observed (run log `20261103T154643Z`; T8.1's PS-2) · **Owner:** SR2.4 · **State:** open
+
+## Handed on by SR0.2
+
+### <a id="b-85"></a>B-85 `CLAUDE.md` names only ADR-0001's order, not milestone SR
+- **What:** `CLAUDE.md`, "Developing the factory itself", says that tasks run strictly in order, T0 → … → T9 ([ADR-0001](adr/0001-strict-sequential-roadmap.md)), and its list of design documents ends with docs/05. Since [ADR-0007](adr/0007-security-reliability-milestone-sr.md), milestone SR is inserted into that order at four points, and its tasks are specified in [06-remediation-sr.md](06-remediation-sr.md). A session that reads only `CLAUDE.md` would not learn that SR0–SR3 come before T8.2, or that docs/06 exists. [docs/README.md](README.md) does name both.
+- **Decision (human, 2026-11-06, `d8543357#1255`):** `CLAUDE.md` is not changed by SR0.2; the gap is recorded for a later change.
+- **Candidate (not decided):** one sentence in "Developing the factory itself" naming ADR-0007 and the SR order, and a line for docs/06 in the design documents list.
+- **Source:** SR0.2's read-only inspection (`d8543357#1247`, 2026-11-06T08:41:34Z); `CLAUDE.md` at `b62a0f0`
+- **Status:** verified (`CLAUDE.md` at `b62a0f0`) · **Owner:** unassigned: a later change, sequenced by the human · **State:** open
 
 ## Verification not yet done
 
@@ -629,7 +938,8 @@ Found while running the M7 demo on the two new sandboxes and on Task Tracker, in
   - **Re-verifying a commit that has not changed.** After S11 step 7 failed on a flaky run, S09 had to verify the same commit again. S09 step 3 always commits a `.factory/log.md` line before `verify run`, which would move the branch off the commit to be verified. The assistant skipped that commit for this run, so the log has no line for it.
 - **Candidates:** S11's stop conditions say that, once a `pr render` question is answered, the station records S11 → S09; and S09 skips its step-3 commit when the story's tests are unchanged and only the evidence is missing for the branch head.
 - **Source:** the M7 demo, Phase C (Task Tracker #41 and PR #42, 2026-10-28); [S11](../stations/S11-pr.md) steps 1, 4 and 7; [S09](../stations/S09-test.md) step 3
-- **Status:** verified · **Owner:** unassigned · **State:** open
+- **Milestone SR (2026-11-06):** part of [B-81](#b-81) (audit K2). SR3.3 closes both parts ([06-remediation-sr.md](06-remediation-sr.md#sr33-failures-carry-their-recovery-station)).
+- **Status:** verified · **Owner:** SR3.3 (milestone SR; assigned 2026-11-06 with DEC-1, previously unassigned) · **State:** open
 
 ## M6 demo findings
 
@@ -644,7 +954,8 @@ Found while running the M6 demo on Task Tracker, increment `003-priority-filter`
 - **What:** `prbody.changed_tests` matches a change outside any test (an import, a locator helper) by checking that the declared text contains the file's full path. `Changed test: due-date-priority.spec.ts …` did not match `tests/e2e/due-date-priority.spec.ts`, so `pr render` reported rule H3 problems, and also warned that the declared line named no change. [S09](../stations/S09-test.md) step 2 does not say that a full path is needed. Candidates: say so in S09, or also match by file name.
 - **Source:** the M6 demo, point 2: S11 stopped and asked on Task Tracker #34; the human approved an empty commit (`3f48c51`) with full-path lines; `scripts/factory/prbody.py` (`changed_tests`)
 - **M7 demo, Task Tracker #41 (2026-10-28):** a related case, with a different cause. The S09 commit `03aabd8` widened the existing import on line 2 of `src/app/controller.test.ts`, a modified line outside any test, and wrote no `Changed test:` line at all. `pr render` stopped with "rule H3: a line outside any test in `src/app/controller.test.ts` changed without a `Changed test:` line", and S11 asked on #41. The human chose to avoid the change rather than declare it (#41, 2026-10-28T06:53:43Z): `fad92c6` restored the line and added the new imports on a separate line, which the rule does not count. A second stop-and-ask round in two demos for an import line. Candidates, besides those above: S09 step 2 could say that an edited import is a change to declare, or the rule could treat a widened import as an addition.
-- **Status:** verified · **Owner:** unassigned · **State:** open
+- **Milestone SR (2026-11-06):** part of [B-83](#b-83) (audit K4). SR4.3 closes it ([06-remediation-sr.md](06-remediation-sr.md#sr43-h3-at-s09-and-skip-marker-detection)).
+- **Status:** verified · **Owner:** SR4.3 (milestone SR; assigned 2026-11-06 with DEC-1, previously unassigned) · **State:** open
 
 ### <a id="b-31"></a>B-31 No factory path for changing an acceptance criterion after Gate A
 - **What:** a Gate B `/changes` renamed a label that AC1 and AC2 name. The AC verifier, which sees only the issue's criteria and the diff, correctly failed AC1, and S08 had to stop and ask, because the only "fix" would have undone the feedback. At the human's request, AC1 and AC2 were edited on the issue. STORY-015 in the approved `05-stories.md` on the target's `main` and two test names in `traceability.md` are now out of date, and no station records or reconciles such a change. Needs a decision: how a rework that changes an approved criterion updates the issue and the planning documents (for example a small planning PR, or S11 carrying the document changes).
@@ -674,7 +985,7 @@ The roadmap's open-findings table ([05-roadmap-m6-m9.md](05-roadmap-m6-m9.md), "
 | <a id="b-21"></a>B-21 | A PDF PRD can't be "copied unchanged" (M2 Problem 3) | T7.2 | **resolved** by [PR #51](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/51) (T7.2, on merge): S00 copies Markdown unchanged, gives a text file or a transcribed PDF a `<!-- factory:prd-source` header ([templates/README.md](../templates/README.md), "PRD source header"), and stops and asks for any other format or for a PDF whose requirements cannot be reproduced as text. Live proof: the M7 demo. **Shown (2026-10-27):** `00-prd.md` of `factory-sandbox-m7-pdf` starts with the header; its `Blob` equals `git hash-object docs/prd.pdf`; 518 of 518 words match the PDF text, and 42 of 42 non-blank lines match the approved Markdown apart from the declared inline styles ([progress.md](progress.md#m7-plans--target-knowledge)). The stop-and-ask path for an unreadable PDF was not exercised. |
 | <a id="b-22"></a>B-22 | S00 runs `doctor` before `labels ensure` (M2 Problem 1) | T7.2 | **resolved** by [PR #51](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/51) (T7.2, on merge): S00 runs `labels ensure` first, then `doctor`; `/factory-target` says that missing labels alone are created by `/factory-start`. Live proof: the M7 demo. **Shown (2026-10-26/27):** on both new sandboxes, `labels ensure` reported `9 created` before `doctor`, which then reported `labels OK`, with no manual step ([progress.md](progress.md#m7-plans--target-knowledge)). |
 | <a id="b-23"></a>B-23 | The Gate A `/changes` revision round has never been demonstrated (M2, M4, M5) | M6 demo | **resolved**: demonstrated in the M6 demo, point 1, on Task Tracker's Planning PR #33 ([progress.md](progress.md#m6-deterministic-verification--review)) |
-| <a id="b-24"></a>B-24 | `main` has no branch protection (M5 follow-up 3) | T9.6 (`doctor`) and the runbook | open |
+| <a id="b-24"></a>B-24 | `main` has no branch protection (M5 follow-up 3). Milestone SR (2026-11-06): human action HA-3 (release gate RG-B), the runner's refusal in SR1.4 (d), and [B-64](#b-64) (audit N8) | T9.6 (`doctor`) and the runbook | open |
 | <a id="b-25"></a>B-25 | Close-out wording on an increment's last story (M5 follow-up 2) | T6.4 | **resolved** by [PR #39](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/39) |
 | — | Timed traceability walk-through, success criterion 6 (M5) | T6.4 | `trace` delivered by PR #39; the timed human walk moved to the M6 demo: see [B-17](#b-17) |
 | — | Guard gaps: `git clone` outside the target, `/tmp`, `gh pr $(echo merge)` (M4) | T9.5 | see [B-12](#b-12), [B-13](#b-13), [B-09](#b-09) |

@@ -34,6 +34,9 @@ Each entry is taken from its PR description and from the session in which the hu
 | `34ce5c38` | `34ce5c38-2316-4d05-b39a-d5a5cf9b33bc` | T7.1, T7.2, T7.3 |
 | `1821c3de` | `1821c3de-0747-4e19-a8a9-4e9b532df1bb` | T7.4, the T7 audit and its follow-up documentation PR |
 | `097efb85` | `097efb85-defc-4f51-af7e-29b021ce53d0` | The pre-T8 assessment, B-28 |
+| `30230cfe` | `30230cfe-1e8e-4c00-a9fc-1a0df7cec01f` | The root-cause investigation of five known reliability issues, 2026-11-03 (K1–K5 in [backlog.md](backlog.md#security-and-reliability-audit-2026-11-04-milestone-sr)) |
+| `876b6b9d` | `876b6b9d-48bc-4b8a-a9e8-250feaa3117d` | The security and reliability audit, 2026-11-04 (N1–N22) |
+| `d8543357` | `d8543357-ee41-4800-be80-8a9f6c902842` | The STORY-002 close-out, the remediation roadmap and N23 (2026-11-04); DEC-1, SR0.1 and SR0.2 (2026-11-06) |
 
 ---
 
@@ -43,6 +46,32 @@ Each entry is taken from its PR description and from the session in which the hu
 |---|---|
 | **Strictly sequential order**, T0 → T1 → … → T9; every task stays in its own milestone. The roadmap's closing recommendation to pull T9.1 and T7.1 forward is **rejected**. Dependency problems are handled when that milestone is reached. | Approved: `1bcf8818#1053`, 2026-10-08T06:36:54Z. Recorded in the header of [05-roadmap-m6-m9.md](05-roadmap-m6-m9.md). |
 | **The roadmap is committed verbatim**, and later decisions are recorded separately (here and in the backlog). | Approved: `c878c238#1586`, 2026-10-21T16:53:43Z. Delivered by [PR #40](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/40) (merge `2d95b7c`). |
+| **Milestone SR is accepted (DEC-1)** and inserted at four points: SR0–SR3 before T8.2; SR4 between T8.2 and T8.3; SR5, SR6.1 and SR6.2 between T8.3 and T9.1; SR6.3 after T9.9. T-task IDs, specifications and order are unchanged, and [05-roadmap-m6-m9.md](05-roadmap-m6-m9.md) is not edited. The SR tasks and release gates are specified in [06-remediation-sr.md](06-remediation-sr.md). | Approved: `d8543357#1255`, 2026-11-06T08:51:50Z. Recorded in [ADR-0007](adr/0007-security-reliability-milestone-sr.md) by SR0.2. |
+
+### Milestone SR: decisions and human actions
+
+The decisions (DEC-*n*) and human actions (HA-*n*) of [ADR-0007](adr/0007-security-reliability-milestone-sr.md), with the release gate that needs each. A status changes only with evidence: the SR PR, or the record of the human's action, that changes a row updates it here.
+
+| ID | Decision or action | Needed by | Status | Evidence |
+|---|---|---|---|---|
+| DEC-1 | Accept milestone SR and ADR-0007 | SR0 | **Decided:** accepted | `d8543357#1255`, 2026-11-06T08:51:50Z |
+| DEC-2 | How rule R5 treats recovered denials ([B-56](backlog.md#b-56)) | RG-C | Open | — |
+| DEC-3 | Rule H3 policy: S09 fixes undeclared test changes itself | RG-D | Open | — |
+| DEC-4 | Verifier provenance: a separate process (a) or labelling (b) | RG-D | Open | — |
+| DEC-5 | The decision answer format (`/choose 1` or `1`) | RG-B | Open | — |
+| DEC-6 | How headless runs get the configured commands ([B-53](backlog.md#b-53)) | RG-B | Open | Until then, the human's own allow rule ([B-53](backlog.md#b-53)) |
+| DEC-7 | A bot identity without merge permission ([B-49](backlog.md#b-49)) | RG-E | Open | — |
+| DEC-8 | If branch protection is unavailable: accept the compensating controls in writing | RG-B | Open | — |
+| DEC-9 | Runner budget defaults (wall-clock time, cost) | RG-B | Open | — |
+| DEC-10 | Lease design for two interactive sessions (SR2.1) | RG-B | Open | — |
+| HA-1 | Keep the headless runner paused until RG-B | RG-B | In effect | The human paused all factory execution on 2026-11-04 (`d8543357#639`). On 2026-11-06 the newest run log in `.factory-local/runs/` is `20261103T154643Z-resume.jsonl` |
+| HA-2 | One factory session at a time until SR2.1 | RG-A | Not confirmed | An operating rule the human has not yet confirmed adopting |
+| HA-3 | Branch protection or a ruleset on the sandbox's `main` (check the GitHub plan first) | RG-B | Not done | 2026-11-06: the GitHub API reports `protected: false` for `factory-sandbox-m7-md`'s `main` |
+| HA-4 | Check the `gh` token's scopes; drop `workflow` and admin scopes | RG-B | Not done | 2026-11-06: `gh auth status` lists the scopes `gist`, `read:org`, `repo` and `workflow` |
+| HA-5 | Clear the stale factory scratch files in `%TEMP%` before the next target-mode run (until SR2.4) | RG-A | Not done | 2026-11-06: `%TEMP%` still holds the factory's scratch files for sandbox #2 and #3 and Task Tracker #41 |
+| HA-6 | Remove the target pointer, in a terminal, while developing the factory | SR0 | **Done** | The human removed it (`d8543357#804`, 2026-11-04T11:58:19Z); on 2026-11-06 `target show` reports no active target |
+| HA-7 | Optional: delete the remote branch `story/3-several-paths-stdin-options` on the sandbox | — | Not done | 2026-11-06: the branch is still on GitHub |
+| HA-8 | Review `~/.claude/projects/…/memory/` for unexpected entries before headless runs ([B-78](backlog.md#b-78)) | RG-B | Not started | — |
 
 ---
 
@@ -1002,3 +1031,77 @@ The human then added `Bash(gh pr checks:*)` to `.claude/settings.json` (S11 need
 - **Handed on:** [B-53](backlog.md#b-53) (who allows a target's configured commands), [B-54](backlog.md#b-54) (`unittest -v` for mapping), [B-55](backlog.md#b-55) (the test count), [B-56](backlog.md#b-56) (R5 stops a recovered session that reached its gate).
 
 - **The merge:** the human merged PR #66 at 2026-11-03T13:56:47Z (`7aee362`; PR head `ca226ff`; base before the merge `3c2e9a4`). The factory never merges.
+
+---
+
+## SR0.1 Commit the T8.1 merge record
+
+| | |
+|---|---|
+| **Specification** | [06-remediation-sr.md](06-remediation-sr.md#sr01-commit-the-t81-merge-record), SR0.1 (written before this document existed; recorded here by SR0.2) |
+| **PR** | [#67](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/67), branch `task/T8.1-merged-record`, merged 2026-11-06T08:33:40Z, merge commit `b62a0f0` |
+| **Status** | Done |
+
+**Built.** One commit, `77c4db7` ("T8.1: record PR #66's merge"), changing only `docs/task-log.md` and `docs/backlog.md`: the T8.1 entry's PR, status and merge line, and the owner lines of B-51 and B-52. L4 in one run that exits 0, and L5, stay recorded as open.
+
+**Deviation.** The specification suggests the title `[T8.1] record PR #66's merge`. The human chose the title (`d8543357#923`, 2026-11-06T08:25:52Z), and the PR was later renamed to `[SR0.1] Record T8.1 merge and remediation baseline`.
+
+- **The merge:** the human merged PR #67 at 2026-11-06T08:33:40Z (`b62a0f0`; PR head `77c4db7`; base before the merge `7aee362`). The factory never merges.
+
+---
+
+## SR0.2 Record the findings and milestone SR (ADR-0007)
+
+| | |
+|---|---|
+| **Specification** | [06-remediation-sr.md](06-remediation-sr.md#sr02-record-the-findings-and-the-sr-milestone-adr-0007), SR0.2 |
+| **PR** | [#68](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/68), branch `task/SR0.2-findings-adr-0007` (not yet merged) |
+| **Status** | In review: documentation only |
+
+**Approved decisions (human, `d8543357#1255`, 2026-11-06T08:51:50Z).**
+- **DEC-1:** milestone SR is accepted. Security and reliability remediation must come before further headless execution and the later release gates ([ADR-0007](adr/0007-security-reliability-milestone-sr.md)).
+- **Task specifications:** [06-remediation-sr.md](06-remediation-sr.md) is the repository's source of truth for the SR task specifications and release gates.
+- **Human actions** are numbered HA-1 to HA-8, renamed from the roadmap's H1–H8 so as not to clash with station rules H1–H6.
+- **`CLAUDE.md`** is not changed in SR0.2; the ordering gap is recorded for a later change ([B-85](backlog.md#b-85)).
+
+**Built.**
+- **[06-remediation-sr.md](06-remediation-sr.md):** the remediation roadmap's milestone order, task dependencies, task specifications SR0.1–SR6.3, release gates and live checks, roadmap integration, resume conditions and trust levels, converted from the published HTML by a script. Its provenance gives the source file's SHA-256, and its header lists the only three changes: HA-*n* for H*n*, links in place of the source's section letters, and Markdown formatting.
+- **[ADR-0007](adr/0007-security-reliability-milestone-sr.md):** the decision, the four insertion points, release gates RG-A to RG-F in short, how SR extends ADR-0001, the overlaps with T9.5, T9.6, T9.7, T9.9, T8.2 and T8.3, root causes RC1–RC8, the task dependencies, DEC-1 to DEC-10, HA-1 to HA-8, and the related backlog items.
+- **[backlog.md](backlog.md#security-and-reliability-audit-2026-11-04-milestone-sr):**
+  - B-57 to B-84, one per finding, in the order N1–N23 then K1–K5, each with its audit ID, earliest gate, root cause, status, owning SR task and source;
+  - B-85, the `CLAUDE.md` gap, under "Handed on by SR0.2";
+  - one cross-reference line each on B-11, B-14, B-30, B-44, B-46, B-49, B-53 and B-56, one sentence in B-24's row and one in the "Guard gaps" introduction;
+  - owners: B-30 → SR4.3 and B-44 → SR3.3, as the specification assigns them (SR4.3's findings are "K4; B-30", SR3.3's "K2; B-44 (both parts)").
+- **This log:** the three sessions in the sessions table, DEC-1 in "Roadmap-level decisions", the status table of the decisions and human actions, and the SR0.1 and SR0.2 entries.
+- **[README.md](README.md):** ADR-0007 and docs/06 in the indexes; the SR order in "Where things stand"; the SR rows of "Where each kind of fact lives"; rule 1 names 06 with 03 and 05.
+
+**Deviations from the specification.**
+- **Code areas:** the specification names `docs/backlog.md`, `docs/adr/0007-*.md`, `docs/task-log.md` and `docs/README.md`. This PR also adds `docs/06-remediation-sr.md` (the approved decision above), and the backlog item B-85 (the `CLAUDE.md` decision asked for the gap to be recorded, and the README's rule 6 puts a documentation gap in the backlog).
+- **The findings' wording,** taken from the roadmap's findings table, with these changes only:
+  - "today" is written as 2026-11-04;
+  - B-79 (N23) describes its three outside-write cases instead of naming the commands with real paths (the specification's security validation);
+  - B-72 (N16) names human action HA-4 instead of H4.
+- **Status vocabulary:** the roadmap's evidence labels map onto the backlog's statuses: independently verified, source inspection and a probe of a pure function give "verified", naming what was checked; a single run log gives "observed"; a finding the audit reasoned about but nobody checked, and N15 (the audit's source inspection, not re-checked), give "analysis".
+- **The ADR's status** is "Accepted" from the start, because DEC-1 was given before the ADR was written. The specification's "Done when" (merged, the ADR accepted) is met when this PR is merged.
+- **Tests:** no doc-lint test covers these files (`tests/test_readme.py` checks the root README and docs/04 only). The checks below were run by temporary scripts, and no test file was added, as instructed.
+
+**Checks** (temporary scripts, read-only, on the branch before the PR):
+- **Aliases:** each of N1–N23 and K1–K5 appears exactly once as an `Audit ID` in the backlog (28 aliases).
+- **B-numbers:** B-57 to B-84 are unique and follow N1–N23 then K1–K5; the backlog's 85 anchors (B-01 to B-85) have no duplicate.
+- **Links:** all 473 relative links in the five changed files resolve, file and anchor.
+- **docs/05:** `git diff origin/main` is empty, the working copy equals the committed blob, and the original block's SHA-256 is still `9e061a4b…`.
+- **Files:** only `docs/06-remediation-sr.md`, `docs/adr/0007-security-reliability-milestone-sr.md`, `docs/backlog.md`, `docs/task-log.md` and `docs/README.md` change.
+- **docs/06 against its source:**
+  - rebuilding it from the published HTML with the 16 listed edits gives the committed text exactly;
+  - a word-by-word comparison of each converted section with the HTML finds no difference apart from the comparison's own markup stripping;
+  - the 30 task IDs are in the source's order.
+- **The findings against the roadmap:** each finding's owning task and earliest gate match its findings table and gate matrix.
+- **Decisions:** DEC-1 to DEC-10 and HA-1 to HA-8 are in ADR-0007 and in the status table above. DEC-1 cites `d8543357#1255` in docs/06, ADR-0007, the backlog and this log.
+- **Commands:** no added line holds a runnable destructive command or a probe aimed at a real path. One line was reviewed and kept: SR1.4's canary payload, "Bash `gh pr merge 1`". That is the specification's own text, the input the canary sends to the guard hook, which must block it.
+
+**Not in this change.** `CLAUDE.md` ([B-85](backlog.md#b-85)); [05-roadmap-m6-m9.md](05-roadmap-m6-m9.md), unchanged byte for byte; any code, test, settings or sandbox file; SR0.3 and SR1.
+
+**Handed on:**
+- **Next task: SR0.3**, making the hook test hermetic ([B-75](backlog.md#b-75), audit N19).
+- **The audit's probe scripts are outside the repository,** in Claude Code sessions' temporary folders: `probe_guard.py`, `probe_guard2.py` and `probe_state.py` in session `876b6b9d`'s scratch folder, and `probe_push.py` in session `d8543357`'s. docs/06 refers to their cases (for example "probe case 5", "probe cases 1b, 2b and 4"). SR1.1 turns them into regression fixtures. Until then they can be lost, for example if the temporary folder is cleared; HA-5 concerns only the factory's own scratch files.
+- **Not given a cross-reference line:** B-15 and B-45. ADR-0007's table of related items names both, and B-65 (N9) links to B-45.
