@@ -444,7 +444,7 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
 - **What still holds:** the fallback goes through the same permission rules and guard hook as any other call. In L3 the session was in Manual mode (`permissionMode: "default"`), and Claude Code's own rules allowed the Bash call. A fallback can do only what those rules and the guard already allow; what is lost is the runner's control over what happens after a denial.
 - **Decision (human, 2026-11-02):** Option A: keep R5 unchanged and document the gap. Not chosen: Option B, which streams the session (`stream-json`) and stops it at the first denial, before any fallback. That would reverse R5's "never stop a session partway", and a session stopped partway is a recovery scenario (T8.2's kill-and-resume).
 - **Source:** T8.1 live check L3; `scripts/factory/runner.py` (`run_until_gate`, `Invocation.denials`); `tests/test_runner.py` (`test_permission_denials_stop_and_say_what_was_denied`)
-- **Status:** verified (the code and its test; observed live in L3) · **Owner:** T8.1 (Option A) · **State:** accepted
+- **Status:** verified (the code and its test; observed live in L3) · **Owner:** T8.1 (Option A; merged in [#66](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/66), merge commit `7aee362`) · **State:** accepted
 
 ### <a id="b-52"></a>B-52 A factory guard block counts as a permission denial, so it stops the runner
 - **What:** Claude Code reports a call blocked by a PreToolUse hook in the result's `permission_denials`, like a call the permission rules denied. The runner does not tell them apart, so any guard block during a headless invocation stops the run with exit 6 after that invocation, even if the station then corrected itself (for example a raw `git status`, refused by the guard, followed by `python scripts/factory.py git status`).
@@ -452,7 +452,7 @@ The roadmap assigns the M4 guard gaps to T9.5. Its T9.5 Build lists `git clone` 
 - **Effect:** fail-safe, but in a real run a station's harmless self-correction ends the run. The run log and the stop reason name the blocked call; the human re-runs the runner or the command.
 - **Candidate (not decided):** word the stop reason by cause (guard block or missing permission), or stop on a guard block only when the station did not recover. Either needs the result to tell the two apart, which the JSON result does not do today.
 - **Source:** T8.1 live check L1; `scripts/factory/runner.py` (`run_until_gate`)
-- **Status:** verified (observed live in L1; the code) · **Owner:** T8.1 (accepted with Option A, 2026-11-02) · **State:** accepted
+- **Status:** verified (observed live in L1; the code) · **Owner:** T8.1 (accepted with Option A, 2026-11-02; merged in [#66](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/66), merge commit `7aee362`) · **State:** accepted
 
 ### <a id="b-53"></a>B-53 Headless runs need the target's configured commands allowed by the human, and the verifier's run skips E3
 - **What:** the AC verifier (S10) and the walking skeleton (S08) run the target's configured commands themselves, as `cd <T> && <command>`. No factory rule allows a project's command, so a headless session is refused. The L4 demonstration worked once the human added the exact rule `Bash(python -m unittest)` to their own, untracked `.claude/settings.local.json`.

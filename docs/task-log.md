@@ -935,8 +935,8 @@ E3g runner gets the full environment: KILLED ['test_every_command_gets_the_clean
 | | |
 |---|---|
 | **Specification** | [05-roadmap-m6-m9.md](05-roadmap-m6-m9.md), "T8.1 Headless runner: `factory.py run --until-gate`" |
-| **PR** | not yet opened (branch `task/T8.1-headless-runner`) |
-| **Status** | In progress: implemented and unit-tested; live checks L1–L3, PS-1, PS-2 and the L1 re-run run. L4 run on the sandbox in steps, never yet in one run that exits 0 (see "The L4 sandbox runs" below). L5 not yet run |
+| **PR** | [#66](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/66), branch `task/T8.1-headless-runner`, merged 2026-11-03T13:56:47Z, merge commit `7aee362` |
+| **Status** | Done (merged). Live checks L1–L3, PS-1, PS-2 and the L1 re-run run. L4 run on the sandbox in steps, never yet in one run that exits 0 (see "The L4 sandbox runs" below). L5 not yet run |
 
 **Approved decisions (human, 2026-11-02).**
 - **R1:** only `--allowedTools Edit Write MultiEdit` is passed; never `--permission-mode acceptEdits` or a bypass or skip-permissions flag.
@@ -1000,3 +1000,5 @@ The human then added `Bash(gh pr checks:*)` to `.claude/settings.json` (S11 need
   - `tests/test_guard.py`: `factory.py scratch` allowed in both modes;
   - 19 new mutations and the 18 earlier T8.1 mutations: all caught.
 - **Handed on:** [B-53](backlog.md#b-53) (who allows a target's configured commands), [B-54](backlog.md#b-54) (`unittest -v` for mapping), [B-55](backlog.md#b-55) (the test count), [B-56](backlog.md#b-56) (R5 stops a recovered session that reached its gate).
+
+- **The merge:** the human merged PR #66 at 2026-11-03T13:56:47Z (`7aee362`; PR head `ca226ff`; base before the merge `3c2e9a4`). The factory never merges.
