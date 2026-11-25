@@ -69,7 +69,7 @@ The decisions (DEC-*n*) and human actions (HA-*n*) of [ADR-0007](adr/0007-securi
 | HA-3 | Branch protection or a ruleset on the sandbox's `main` (check the GitHub plan first) | RG-B | Not done | 2026-11-06: the GitHub API reports `protected: false` for `factory-sandbox-m7-md`'s `main` |
 | HA-4 | Check the `gh` token's scopes; drop `workflow` and admin scopes | RG-B | Not done | 2026-11-06: `gh auth status` lists the scopes `gist`, `read:org`, `repo` and `workflow` |
 | HA-5 | Clear the stale factory scratch files in `%TEMP%` before the next target-mode run (until SR2.4) | RG-A | Not done | 2026-11-06: `%TEMP%` still holds the factory's scratch files for sandbox #2 and #3 and Task Tracker #41 |
-| HA-6 | Remove the target pointer, in a terminal, while developing the factory | SR0 | **Done** | The human removed it (`d8543357#804`, 2026-11-04T11:58:19Z); on 2026-11-06 `target show` reports no active target |
+| HA-6 | Remove the target pointer, in a terminal, while developing the factory | SR0 | **Done** | The human removed it (`d8543357#804`, 2026-11-04T11:58:19Z); on 2026-11-06 `target show` reports no active target. For SR0.3's target-active suite run the human set it again on 2026-11-25 (`.factory-local/target.json` written 12:59:07Z) and removed it after the run; `target show` again reports no active target |
 | HA-7 | Optional: delete the remote branch `story/3-several-paths-stdin-options` on the sandbox | — | Not done | 2026-11-06: the branch is still on GitHub |
 | HA-8 | Review `~/.claude/projects/…/memory/` for unexpected entries before headless runs ([B-78](backlog.md#b-78)) | RG-B | Not started | — |
 
@@ -1055,8 +1055,8 @@ The human then added `Bash(gh pr checks:*)` to `.claude/settings.json` (S11 need
 | | |
 |---|---|
 | **Specification** | [06-remediation-sr.md](06-remediation-sr.md#sr02-record-the-findings-and-the-sr-milestone-adr-0007), SR0.2 |
-| **PR** | [#68](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/68), branch `task/SR0.2-findings-adr-0007` (not yet merged) |
-| **Status** | In review: documentation only |
+| **PR** | [#68](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/68), branch `task/SR0.2-findings-adr-0007`, merged 2026-11-25T12:47:19Z, merge commit `4d2a76c` |
+| **Status** | Done: documentation only |
 
 **Approved decisions (human, `d8543357#1255`, 2026-11-06T08:51:50Z).**
 - **DEC-1:** milestone SR is accepted. Security and reliability remediation must come before further headless execution and the later release gates ([ADR-0007](adr/0007-security-reliability-milestone-sr.md)).
@@ -1105,3 +1105,37 @@ The human then added `Bash(gh pr checks:*)` to `.claude/settings.json` (S11 need
 - **Next task: SR0.3**, making the hook test hermetic ([B-75](backlog.md#b-75), audit N19).
 - **The audit's probe scripts are outside the repository,** in Claude Code sessions' temporary folders: `probe_guard.py`, `probe_guard2.py` and `probe_state.py` in session `876b6b9d`'s scratch folder, and `probe_push.py` in session `d8543357`'s. docs/06 refers to their cases (for example "probe case 5", "probe cases 1b, 2b and 4"). SR1.1 turns them into regression fixtures. Until then they can be lost, for example if the temporary folder is cleared; HA-5 concerns only the factory's own scratch files.
 - **Not given a cross-reference line:** B-15 and B-45. ADR-0007's table of related items names both, and B-65 (N9) links to B-45.
+
+- **The merge:** the human merged PR #68 at 2026-11-25T12:47:19Z (`4d2a76c`; PR head `1c7460a`). The factory never merges. Recorded by SR0.3.
+
+---
+
+## SR0.3 Make the hook test hermetic
+
+| | |
+|---|---|
+| **Specification** | [06-remediation-sr.md](06-remediation-sr.md#sr03-make-the-hook-test-hermetic), SR0.3 |
+| **PR** | Branch `task/SR0.3-hermetic-hook-test` (not yet merged) |
+| **Status** | In review: tests only |
+
+**Built.** In `tests/test_guard.py`, `SettingsTest`:
+- **`make_factory_copy`** copies `scripts/` (without `__pycache__`) and `.claude/settings.json` into a temporary factory root that has no `.factory-local/`. The copied hook finds its root from its own location (`target.FACTORY_ROOT`, `Path(__file__).parents[2]`), so it never reads this repository's pointer. No environment variable or flag redirects the guard's root.
+- **`run_hook`** runs the copy's hook command string with Git Bash, with `CLAUDE_PROJECT_DIR` and the payload's `cwd` set to the copy, as Claude Code would.
+- **`test_hook_command_runs_and_blocks`** (rewritten) runs the same two cases as before in the copy: `gh pr merge 5` is blocked (exit 2), `git status` is allowed (exit 0).
+- **`test_hook_command_reads_the_copys_own_pointer`** (new) writes an unreadable pointer (`{}`) into the copy and checks that `git status` is then blocked with the D-5 reason. It fails if the hook ever runs this repository's `scripts/` instead of the copy, so the rewritten test cannot pass for the wrong reason.
+
+**Deviation.** The specification's PR boundary is "tests only". This PR also changes `docs/task-log.md` and `docs/backlog.md`: this entry and B-75, which the Definition of Done requires; and the record of PR #68's merge in the SR0.2 entry, plus the HA-6 row, which have no task of their own (SR0.1 recorded T8.1's merge in a separate PR).
+
+**Checks** (2026-11-25, on `4d2a76c` plus this change):
+- **Before the fix:** `main`'s version of `test_hook_command_runs_and_blocks`, run with the target active, fails: the `git status` case gets exit 2, "Raw `git status` is not allowed while a target is active".
+- **Target active** (`target show`: `C:\Projects\factory-sandbox-m7-md`): `python -m unittest` ran 1195 tests in 426.7 s, OK (skipped=5).
+- **No target** (`target show`: no active target; `.factory-local/` holds only `runs/`): `python -m unittest` ran 1195 tests in 286.6 s, OK (skipped=5).
+- **The first no-target run was discarded:** the pointer was set while it was still running, so it was stopped and run again after the pointer was removed.
+- `python -m ruff check`: all checks passed.
+- **Unchanged:** `git diff main -- scripts` is empty, so `guard_hook.py` and `target.py` are unchanged.
+- **Security validation:** `scripts/` has 7 `os.environ` reads on `main` and 7 on this branch; none is new.
+
+**Handed on:**
+- **The audit's probe scripts are lost.** On 2026-11-25 the scratch folders of sessions `876b6b9d` and `d8543357` no longer exist, and no `probe_guard.py`, `probe_guard2.py`, `probe_state.py` or `probe_push.py` was found under `%TEMP%\claude` or `~/.claude`. SR1.1 has to rebuild its regression fixtures from the probe cases as docs/06 and the backlog describe them.
+- **SR1.1 and SR1.3** can reuse `make_factory_copy` for their temporary-factory tests (ADR-0007, "Task dependencies and sequencing").
+- **Next task: SR1.1**, closing the write channels into protected paths ([B-57](backlog.md#b-57), audit N1).

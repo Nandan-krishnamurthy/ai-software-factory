@@ -989,21 +989,55 @@ class SettingsTest(unittest.TestCase):
         self.assertIn("Bash(python scripts/factory.py:*)", allow)
         self.assertFalse([rule for rule in allow if "merge" in rule])
 
+    @staticmethod
+    def make_factory_copy(parent: Path) -> Path:
+        """A temporary factory root: copies of ``scripts/`` and ``.claude/settings.json``,
+        and no ``.factory-local/``. The copied hook finds its root from its own location
+        (``target.FACTORY_ROOT``), so it never reads this repo's target pointer (SR0.3, N19)."""
+        root = parent / "factory"
+        shutil.copytree(REPO_ROOT / "scripts", root / "scripts",
+                        ignore=shutil.ignore_patterns("__pycache__"))
+        (root / ".claude").mkdir(parents=True)
+        shutil.copy2(SettingsTest.SETTINGS, root / ".claude" / "settings.json")
+        return root
+
+    def run_hook(self, root: Path, command: str) -> subprocess.CompletedProcess:
+        """Run the copy's hook command string the way Claude Code does, with the copy as
+        the project directory."""
+        settings = json.loads((root / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        (handler,) = settings["hooks"]["PreToolUse"][0]["hooks"]
+        env = {**os.environ, "CLAUDE_PROJECT_DIR": str(root)}
+        payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command},
+                              "cwd": str(root), "hook_event_name": "PreToolUse"})
+        return subprocess.run([hook_shell(), "-c", handler["command"]], input=payload,
+                              capture_output=True, text=True, env=env, timeout=60)
+
     @unittest.skipUnless(hook_shell(), "Git Bash / bash is needed to run the hook command")
     def test_hook_command_runs_and_blocks(self):
-        """Run the exact command string from settings.json, the way Claude Code does."""
-        (handler,) = self.hook()["hooks"]
-        env = {**os.environ, "CLAUDE_PROJECT_DIR": str(REPO_ROOT)}
-        cases = [({"command": "gh pr merge 5"}, 2), ({"command": "git status"}, 0)]
-        for tool_input, expected in cases:
-            with self.subTest(tool_input=tool_input):
-                payload = json.dumps({"tool_name": "Bash", "tool_input": tool_input,
-                                      "cwd": str(REPO_ROOT), "hook_event_name": "PreToolUse"})
-                result = subprocess.run([hook_shell(), "-c", handler["command"]], input=payload,
-                                        capture_output=True, text=True, env=env, timeout=60)
-                self.assertEqual(result.returncode, expected, result.stderr)
-                if expected == 2:
-                    self.assertIn("Blocked by the factory guard", result.stderr)
+        """Run the exact command string from settings.json, in a temporary factory copy, so
+        the result does not depend on whether this repo has an active target (SR0.3, N19)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.make_factory_copy(Path(tmp).resolve())
+            self.assertFalse((root / ".factory-local").exists())
+            cases = [("gh pr merge 5", 2), ("git status", 0)]
+            for command, expected in cases:
+                with self.subTest(command=command):
+                    result = self.run_hook(root, command)
+                    self.assertEqual(result.returncode, expected, result.stderr)
+                    if expected == 2:
+                        self.assertIn("Blocked by the factory guard", result.stderr)
+
+    @unittest.skipUnless(hook_shell(), "Git Bash / bash is needed to run the hook command")
+    def test_hook_command_reads_the_copys_own_pointer(self):
+        """The copied hook reads the copy's pointer, not this repo's: an unreadable pointer
+        placed in the copy blocks a command that the clean copy allows (D-5)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.make_factory_copy(Path(tmp).resolve())
+            (root / ".factory-local").mkdir()
+            (root / ".factory-local" / "target.json").write_text("{}", encoding="utf-8")
+            result = self.run_hook(root, "git status")
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn("target pointer", result.stderr)
 
 
 if __name__ == "__main__":
