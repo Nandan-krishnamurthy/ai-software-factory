@@ -685,7 +685,7 @@ The 28 findings that milestone SR remediates ([ADR-0007](adr/0007-security-relia
 - **Related:** Prerequisite for clean evidence in every SR PR
 - **The fix is tested by:** The suite passes with the pointer present and with it absent
 - **Source:** the security and reliability audit (`876b6b9d#523`, 2026-11-04T07:30:29Z); re-checked at `7aee362` for the remediation roadmap (`d8543357#627`, 2026-11-04T08:45:36Z)
-- **Status:** verified (the test fails whenever a target is active: the suite's only failure on 2026-11-04; reproduced on 2026-11-25 with `main`'s version of the test) · **Owner:** SR0.3 · **State:** resolved by SR0.3: the test runs the hook from a temporary factory copy with no `.factory-local/`; the suite passes with a target active and with none ([task-log.md](task-log.md#sr03-make-the-hook-test-hermetic))
+- **Status:** verified (the test fails whenever a target is active: the suite's only failure on 2026-11-04; reproduced on 2026-11-25 with `main`'s version of the test) · **Owner:** SR0.3 · **State:** resolved by [PR #69](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/69) (SR0.3): the test runs the hook from a temporary factory copy with no `.factory-local/`; the suite passes with a target active and with none ([task-log.md](task-log.md#sr03-make-the-hook-test-hermetic))
 
 ### <a id="b-76"></a>B-76 The `--amend` refusal can be sidestepped with a prefix
 - **Audit ID:** N20 · **Gate:** RG-E · **Root cause:** RC2 ([ADR-0007](adr/0007-security-reliability-milestone-sr.md#root-causes))

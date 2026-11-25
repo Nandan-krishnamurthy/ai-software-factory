@@ -1115,7 +1115,7 @@ The human then added `Bash(gh pr checks:*)` to `.claude/settings.json` (S11 need
 | | |
 |---|---|
 | **Specification** | [06-remediation-sr.md](06-remediation-sr.md#sr03-make-the-hook-test-hermetic), SR0.3 |
-| **PR** | Branch `task/SR0.3-hermetic-hook-test` (not yet merged) |
+| **PR** | [#69](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/69), branch `task/SR0.3-hermetic-hook-test` (not yet merged) |
 | **Status** | In review: tests only |
 
 **Built.** In `tests/test_guard.py`, `SettingsTest`:
