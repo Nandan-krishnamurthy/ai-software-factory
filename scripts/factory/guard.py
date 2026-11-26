@@ -14,8 +14,10 @@ returns allow or block. It enforces rules that must never depend on the model be
 * **No repo-settings, secrets or branch-protection changes** (S5).
 * **File writes**: with an active target, the factory repo is read-only except
   ``.factory-local/`` (S3), and nothing may be written outside the target, the temp/scratch
-  directory and Claude's project memory (S12). Without a target (developing the factory),
-  writes are limited to the factory repo, scratch and memory.
+  directory (S12). Without a target (developing the factory), writes are limited to the
+  factory repo, scratch and Claude's project memory, which is not a write area while a
+  target is active (N22). A write is also git's write options (`--output`, `-o`,
+  `config --file`, `bundle create`) and factory.py's `--out` (SR1.1).
 
 Commands are taken apart by small bash and PowerShell tokenizers, so chained commands
 (``&&``, ``;``, ``|``), ``bash -c``/``pwsh -Command``/``eval``, env-var prefixes,
@@ -486,6 +488,11 @@ def _check_command(cmd: _Command, dialect: str, ctx: GuardContext, cwd: Path,
             name, rhs_raw = assignment
             if name.startswith("env:"):  # `$env:GIT_SSH_COMMAND = …` (D-4)
                 _block_if_git_var(name[4:])
+                if name[4:].upper() in _GIT_LOCATION_VARS:  # `$env:GIT_WORK_TREE = …` (SR1.1)
+                    value = _pwsh_substitute([w.replace(_QUOTE, "") for w in rhs_raw],
+                                             variables)
+                    _check_git_location(_GIT_LOCATION_VARS[name[4:].upper()],
+                                        value[0] if len(value) == 1 else "$(...)", ctx, cwd)
             rhs = _pwsh_substitute([w.replace(_QUOTE, "") for w in rhs_raw], variables)
             for target in _pwsh_substitute(writes, variables):
                 _check_redirect_target(target, ctx, cwd)
@@ -503,6 +510,7 @@ def _check_command(cmd: _Command, dialect: str, ctx: GuardContext, cwd: Path,
     for target in writes:
         _check_redirect_target(target, ctx, cwd)
     _scan_git_env(words, dialect)  # before _strip_wrappers removes env-var prefixes (D-4)
+    _scan_git_location_env(words, ctx, cwd)  # GIT_DIR / GIT_WORK_TREE (SR1.1)
     words = _strip_wrappers(words)
     if not words:
         return cwd
@@ -558,6 +566,7 @@ def _check_command(cmd: _Command, dialect: str, ctx: GuardContext, cwd: Path,
         return cwd
 
     _check_factory_target(name, args)
+    _check_factory_paths(name, args, ctx, cwd)
     _check_factory_git(name, args, ctx, cwd)
     _scan_protected_args(name, args, ctx, cwd)
     if name == "git":
@@ -788,6 +797,12 @@ def _check_git(args: list[str], ctx: GuardContext, cwd: Path) -> None:
         elif a == "--exec-path" or a.startswith("--exec-path="):
             _block("`git --exec-path` can make git run git-* programs from a chosen directory "
                    "(E1); not allowed")
+        elif a in ("--git-dir", "--work-tree") or a.startswith(("--git-dir=", "--work-tree=")):
+            opt, eq, value = a.partition("=")
+            if not eq:
+                value = args[i + 1] if i + 1 < len(args) else ""
+            _check_git_location(opt, value, ctx, repo_dir)
+            i += 1 if eq else 2
         elif a in _GIT_VALUE_OPTS:
             i += 2
         elif a.startswith("-"):
@@ -797,6 +812,7 @@ def _check_git(args: list[str], ctx: GuardContext, cwd: Path) -> None:
     if i >= len(args):
         return
     sub, rest = args[i], args[i + 1:]
+    _check_git_writes(sub, rest, ctx, repo_dir)
     if sub == "push":
         _check_push(rest, ctx, repo_dir)
     elif sub in ("send-pack", "http-push"):
@@ -816,6 +832,94 @@ def _check_git(args: list[str], ctx: GuardContext, cwd: Path) -> None:
             if is_risky_config(a.split("=", 1)[0]) and not reading:
                 _block(f"setting git config {a!r} could redirect pushes, define an alias, or "
                        "make git run a program the guard cannot see (rules S1, S4; E1)")
+
+
+def _long_option_is(word: str, full: str) -> bool:
+    """True when ``word`` (``--name`` or ``--name=value``) names the long option ``full``,
+    including git's and argparse's unambiguous abbreviations (``--out`` for ``--output``).
+    An abbreviation that is ambiguous makes the program fail, so treating it as ``full``
+    only ever blocks a command that would not have run."""
+    if not word.startswith("--") or len(word) < 3:
+        return False
+    name = word[2:].partition("=")[0]
+    return bool(name) and full[2:].startswith(name)
+
+
+def _option_value(rest: list[str], index: int) -> tuple[str, int]:
+    """The value of the option at ``rest[index]`` (inline after ``=``, or the next word)
+    and the index after it."""
+    word = rest[index]
+    if "=" in word:
+        return word.split("=", 1)[1], index + 1
+    return (rest[index + 1], index + 2) if index + 1 < len(rest) else ("", index + 1)
+
+
+def _check_written(what: str, path: str, ctx: GuardContext, cwd: Path) -> None:
+    """Check ``path`` as a file that ``what`` writes: the protected list and the allowed
+    write areas, as for a redirect (SR1.1, N1)."""
+    if not path:
+        return
+    try:
+        _check_redirect_target(path, ctx, cwd)
+    except Blocked as blocked:
+        _block(f"{what} writes to {blocked.reason}")
+
+
+# Subcommands whose `-o` names the file or folder written (SR1.1). Elsewhere `-o` means
+# something else (`push -o` is a push option, `grep -o` prints only the match).
+_GIT_DASH_O_WRITES = frozenset({"format-patch", "archive"})
+
+
+def _check_git_writes(sub: str, rest: list[str], ctx: GuardContext, repo_dir: Path) -> None:
+    """git options that write a file of the caller's choosing are writes, checked like a
+    redirect (SR1.1, N1): `--output` (log, show, diff, format-patch, archive and the other
+    diff commands), `-o`/`--output-directory` (format-patch, archive), `config -f/--file`
+    and `bundle create <file>`. `grep -O`/`--open-files-in-pager` runs a program, so it is
+    refused. A relative path is taken from the repository folder (`-C`)."""
+    i = 0
+    while i < len(rest):
+        word = rest[i]
+        if word == "--":
+            break
+        if _long_option_is(word, "--output") or _long_option_is(word, "--output-directory"):
+            value, i = _option_value(rest, i)
+            _check_written(f"`git {sub} {word.split('=', 1)[0]}`", value, ctx, repo_dir)
+            continue
+        if sub == "config" and (word == "-f" or _long_option_is(word, "--file")):
+            value, i = _option_value(rest, i)
+            _check_written(f"`git config {word.split('=', 1)[0]}`", value, ctx, repo_dir)
+            continue
+        if sub in _GIT_DASH_O_WRITES and word.startswith("-o") and not word.startswith("--"):
+            value, i = (word[2:], i + 1) if len(word) > 2 else _option_value(rest, i)
+            _check_written(f"`git {sub} -o`", value, ctx, repo_dir)
+            continue
+        if sub == "grep" and (_long_option_is(word, "--open-files-in-pager") or (
+                word.startswith("-") and not word.startswith("--") and "O" in word)):
+            _block("`git grep -O`/`--open-files-in-pager` runs a program of the caller's "
+                   "choosing on the matching files (SR1.1); not allowed")
+        i += 1
+    if sub == "bundle" and "create" in rest:
+        after = rest[rest.index("create") + 1:]
+        target = next((a for a in after if not a.startswith("-")), "")
+        _check_written("`git bundle create`", target, ctx, repo_dir)
+
+
+def _check_git_location(opt: str, value: str, ctx: GuardContext, base: Path) -> None:
+    """`--git-dir`/`--work-tree` may not point into the factory's `.factory-local/` in either
+    mode, nor anywhere in the factory while a target is active: git would then read and
+    write the factory's own repository or files (SR1.1, N1). With a target active, the work
+    tree is also where checkout and reset write, so it must be a write area."""
+    real = _resolve_real(value, base)
+    if real is None:
+        _block(f"cannot tell where `git {opt}` points ({value!r}); use a literal path")
+    if _under(real, ctx.factory_root / ".factory-local"):
+        _block(f"`git {opt}` points into the factory's .factory-local/ (D-10, SR1.1)")
+    if ctx.target_root is not None:
+        if _under(real, ctx.factory_root):
+            _block(f"`git {opt}` points into the factory repo, which is read-only while a "
+                   "target is active (D-11, SR1.1)")
+        if opt == "--work-tree":
+            _check_written(f"`git {opt}`", value, ctx, base)
 
 
 _PUSH_VALUE_OPTS = {"--repo", "-o", "--push-option", "--receive-pack", "--exec"}
@@ -1210,13 +1314,16 @@ def _protected_label(path: str, ctx: GuardContext, cwd: Path) -> str | None:
     return None
 
 
-# Commands that only read; naming a protected path with one of these is allowed.
+# Commands that only read; naming a protected path with one of these is allowed. `git` is not
+# one (SR1.1, N1): `clone`, `init`, `worktree add` and `bundle create` write to a positional
+# path, and its write options (`--output`, `-o`, `config --file`) are checked by
+# `_check_git_writes`.
 _READ_ONLY = frozenset({
     "cat", "type", "head", "tail", "less", "more", "nl", "od", "xxd", "strings", "cmp",
     "get-content", "gc", "ls", "dir", "get-childitem", "gci", "test-path", "get-item", "gi",
     "resolve-path", "rg", "grep", "egrep", "fgrep", "findstr", "select-string", "sls", "wc",
     "stat", "file", "readlink", "dirname", "basename", "get-filehash", "md5sum", "sha1sum",
-    "sha256sum", "git", "gh", "cd", "pushd", "popd", "set-location", "sl", "chdir",
+    "sha256sum", "gh", "cd", "pushd", "popd", "set-location", "sl", "chdir",
     "push-location", "pop-location", "eval", "invoke-expression", "iex", "cmd",
     "start-process", "saps", "start",
 })
@@ -1304,6 +1411,44 @@ def _check_factory_target(name: str, args: list[str]) -> None:
         _block("Claude must not start the headless runner: only the human says continue "
                "(D2). Run `python scripts/factory.py run --until-gate --command …` yourself "
                "in a terminal (T8.1).")
+
+
+def _check_factory_paths(name: str, args: list[str], ctx: GuardContext, cwd: Path) -> None:
+    """Check every path option of a ``factory.py`` call (SR1.1, N1). A write option
+    (``--out``) is checked as a write: the protected list and the allowed write areas. A
+    read option (``--notes``, ``--body-file``, ``--file``, ``--report``, ``--path``) may not
+    name a protected path. Options are matched anywhere after ``factory.py``, by their
+    argparse abbreviations too, against every subcommand's options at once, so neither the
+    position of the subcommand nor an abbreviation can hide one. The tables are the CLI's
+    own (``cli.WRITE_PATH_OPTIONS``, ``cli.READ_PATH_OPTIONS``)."""
+    rest = _factory_py_args(name, args)
+    if not rest or rest[0] == "git":  # the wrapper's arguments are git's: `_check_git`
+        return
+    # Imported here: cli imports doctor, which imports this module.
+    from factory.cli import READ_PATH_OPTIONS, WRITE_PATH_OPTIONS
+
+    writes = {opt for opts in WRITE_PATH_OPTIONS.values() for opt in opts}
+    reads = {opt for opts in READ_PATH_OPTIONS.values() for opt in opts}
+    i = 0
+    while i < len(rest):
+        word = rest[i]
+        if word == "--":
+            break
+        write = next((o for o in sorted(writes) if _long_option_is(word, o)), None)
+        read = None if write else next((o for o in sorted(reads) if _long_option_is(word, o)),
+                                       None)
+        if write is None and read is None:
+            i += 1
+            continue
+        value, i = _option_value(rest, i)
+        if not value or value == "-":  # `-` is stdin
+            continue
+        if write:
+            _check_written(f"`factory.py {write}`", value, ctx, cwd)
+        else:
+            label = _protected_label(value, ctx, cwd)
+            if label:
+                _block(f"`factory.py {read}` reads {value}: {label} (SR1.1)")
 
 
 # Must equal git.WRAPPER_SUBCOMMANDS (a test asserts this): the hook-running git commands the
@@ -1402,6 +1547,24 @@ def _scan_git_env(words: list[str], dialect: str) -> None:
                     break
         elif name == "setx" and index + 1 < len(words):
             _block_if_git_var(words[index + 1])
+
+
+# The environment spellings of `--git-dir` and `--work-tree`. The git wrapper passes the
+# environment on, so `GIT_WORK_TREE=<factory> factory.py git switch …` would check files out
+# into the factory (SR1.1).
+_GIT_LOCATION_VARS = {"GIT_DIR": "--git-dir", "GIT_WORK_TREE": "--work-tree"}
+
+
+def _scan_git_location_env(words: list[str], ctx: GuardContext, cwd: Path) -> None:
+    """Check ``GIT_DIR=``/``GIT_WORK_TREE=`` set as a prefix or with ``env``/``export``, as
+    ``_check_git_location`` checks the options (SR1.1)."""
+    for index, w in enumerate(words):
+        assignment = _BASH_ASSIGNMENT.match(w)
+        prefix = assignment and (index == 0 or _BASH_ASSIGNMENT.match(words[index - 1])
+                                 or _exe_name(words[index - 1]) in ("env", "export"))
+        if prefix and assignment["name"].upper() in _GIT_LOCATION_VARS:
+            opt = _GIT_LOCATION_VARS[assignment["name"].upper()]
+            _check_git_location(opt, w[assignment.end():], ctx, cwd)
 
 
 def _check_write_path(path: str, ctx: GuardContext, cwd: Path) -> None:

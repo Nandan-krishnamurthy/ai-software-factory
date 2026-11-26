@@ -179,8 +179,16 @@ def commands(text: str) -> list[str]:
 
 
 def guard_context(scratch: Path) -> guard.GuardContext:
+    # `<SCRATCH>` is substituted as /tmp/factory, so that is a scratch folder too: the guard
+    # checks factory.py's path options as writes (SR1.1).
     return guard.GuardContext(factory_root=REPO_ROOT, target_root=Path("/work/target"),
-                              cwd=REPO_ROOT, default_branch="main", scratch_dirs=(scratch,))
+                              cwd=REPO_ROOT, default_branch="main",
+                              scratch_dirs=(scratch, Path(PLACEHOLDERS["<SCRATCH>"])))
+
+
+# factory.py commands the guard blocks by design, because only the human runs them in a
+# terminal (D-10, T8.1). Stations name them only to tell the human what to run.
+HUMAN_ONLY = (["target", "set"], ["run"])
 
 
 def lint_command(command: str, ctx: guard.GuardContext) -> list[str]:
@@ -214,7 +222,9 @@ def lint_command(command: str, ctx: guard.GuardContext) -> list[str]:
                             "in .claude/settings.json nor read-only")
     elif argv[0] == "git" and argv[1:2] != ["-C"]:
         problems.append(f"`{command}`: run git as `git -C <T> …` (rule T3)")
-    if argv[0] in ("gh", "git"):
+    human_only = any(argv[2:2 + len(words)] == words for words in HUMAN_ONLY)
+    if argv[0] in ("gh", "git") or (argv[:2] == ["python", "scripts/factory.py"]
+                                    and not human_only):
         decision = guard.decide("Bash", {"command": concrete}, ctx)
         if not decision.allowed:
             problems.append(f"`{command}`: blocked by the guard: {decision.reason}")

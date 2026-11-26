@@ -52,6 +52,7 @@ from pathlib import Path
 
 from factory import acmap, comments, evidence, manifests, templates, verdict
 from factory.errors import FactoryError, GitError
+from factory.files import safe_write
 from factory.gh import Gh
 from factory.git import Git
 from factory.markers import StoryMarker, find
@@ -924,9 +925,8 @@ def default_path(issue: int) -> Path:
 
 
 def write(rendered: Rendered, path: Path) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(rendered.body.encode("utf-8"))  # bytes: no newline translation
-    return path
+    # bytes: no newline translation. safe_write refuses the factory's controls (SR1.1).
+    return safe_write(path, rendered.body.encode("utf-8"))
 
 
 def report(rendered: Rendered, issue: int, path: Path | None = None) -> str:

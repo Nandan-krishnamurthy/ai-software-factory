@@ -40,6 +40,29 @@ from factory.gh import Gh
 from factory.git import Git
 from factory.markers import PrMarker, find
 
+# Every option of this CLI that takes a file or folder path, by subcommand (SR1.1, N1). The
+# guard imports these tables, so what it checks cannot drift from what the CLI accepts; a
+# test walks ``build_parser()`` and fails on a path option missing here.
+# An option in WRITE_PATH_OPTIONS writes the file: the guard checks its value as a write
+# (the protected list and the allowed write areas).
+WRITE_PATH_OPTIONS: dict[str, tuple[str, ...]] = {
+    "pr render": ("--out",),
+    "verify run": ("--out",),
+    "verify map": ("--out",),
+}
+# An option in READ_PATH_OPTIONS only reads: the guard refuses a protected path there, so a
+# protected file's contents cannot be posted to GitHub through it.
+READ_PATH_OPTIONS: dict[str, tuple[str, ...]] = {
+    "discover": ("--path",),
+    "pr": ("--body-file",),
+    "pr render": ("--notes",),
+    "verdict check": ("--file",),
+    "verify run": ("--report",),
+    "verify check": ("--file",),
+    "comment": ("--body-file",),
+    "question ask": ("--body-file",),
+}
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
