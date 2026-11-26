@@ -55,7 +55,10 @@ def build_context(hook_input: dict) -> GuardContext:
         cwd=cwd,
         default_branch=default_branch,
         scratch_dirs=(Path(tempfile.gettempdir()),),
-        extra_write_dirs=(Path.home() / ".claude" / "projects",),
+        # Claude's project memory loads into every later session, so with a target active
+        # it is not a write area: a write there would persist into the next run (SR1.1, N22).
+        extra_write_dirs=() if target_root is not None
+        else (Path.home() / ".claude" / "projects",),
         current_branch=_current_branch,
         is_reviewed=_is_reviewed,
         target_broken=target_broken,

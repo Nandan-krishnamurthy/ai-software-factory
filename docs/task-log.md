@@ -37,6 +37,7 @@ Each entry is taken from its PR description and from the session in which the hu
 | `30230cfe` | `30230cfe-1e8e-4c00-a9fc-1a0df7cec01f` | The root-cause investigation of five known reliability issues, 2026-11-03 (K1–K5 in [backlog.md](backlog.md#security-and-reliability-audit-2026-11-04-milestone-sr)) |
 | `876b6b9d` | `876b6b9d-48bc-4b8a-a9e8-250feaa3117d` | The security and reliability audit, 2026-11-04 (N1–N22) |
 | `d8543357` | `d8543357-ee41-4800-be80-8a9f6c902842` | The STORY-002 close-out, the remediation roadmap and N23 (2026-11-04); DEC-1, SR0.1 and SR0.2 (2026-11-06) |
+| `57a811b7` | `57a811b7-f062-4f15-9695-0b97d1d04cd6` | The review and merge of SR0.2, SR0.3 (2026-11-25), SR1.1 (2026-11-26) |
 
 ---
 
@@ -1115,8 +1116,8 @@ The human then added `Bash(gh pr checks:*)` to `.claude/settings.json` (S11 need
 | | |
 |---|---|
 | **Specification** | [06-remediation-sr.md](06-remediation-sr.md#sr03-make-the-hook-test-hermetic), SR0.3 |
-| **PR** | [#69](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/69), branch `task/SR0.3-hermetic-hook-test` (not yet merged) |
-| **Status** | In review: tests only |
+| **PR** | [#69](https://github.com/Nandan-krishnamurthy/ai-software-factory/pull/69), branch `task/SR0.3-hermetic-hook-test`, merged 2026-11-26T07:13:11Z, merge commit `727c1e6` |
+| **Status** | Done: tests only |
 
 **Built.** In `tests/test_guard.py`, `SettingsTest`:
 - **`make_factory_copy`** copies `scripts/` (without `__pycache__`) and `.claude/settings.json` into a temporary factory root that has no `.factory-local/`. The copied hook finds its root from its own location (`target.FACTORY_ROOT`, `Path(__file__).parents[2]`), so it never reads this repository's pointer. No environment variable or flag redirects the guard's root.
@@ -1139,3 +1140,53 @@ The human then added `Bash(gh pr checks:*)` to `.claude/settings.json` (S11 need
 - **The audit's probe scripts are lost.** On 2026-11-25 the scratch folders of sessions `876b6b9d` and `d8543357` no longer exist, and no `probe_guard.py`, `probe_guard2.py`, `probe_state.py` or `probe_push.py` was found under `%TEMP%\claude` or `~/.claude`. SR1.1 has to rebuild its regression fixtures from the probe cases as docs/06 and the backlog describe them.
 - **SR1.1 and SR1.3** can reuse `make_factory_copy` for their temporary-factory tests (ADR-0007, "Task dependencies and sequencing").
 - **Next task: SR1.1**, closing the write channels into protected paths ([B-57](backlog.md#b-57), audit N1).
+
+- **The merge:** the human merged PR #69 at 2026-11-26T07:13:11Z (`727c1e6`; PR head `c2e7d18`). The factory never merges. Recorded by SR1.1.
+
+---
+
+## SR1.1 Close the write channels into protected paths
+
+| | |
+|---|---|
+| **Specification** | [06-remediation-sr.md](06-remediation-sr.md#sr11-close-the-write-channels-into-protected-paths), SR1.1 |
+| **PR** | Branch `task/SR1.1-close-write-channels` (not yet merged) |
+| **Status** | In review |
+
+**Approved decision (human, session `57a811b7`, 2026-11-26: "continue" in reply to the recommendation).** The audit's probe scripts were lost (SR0.3, "Handed on"). The human approved rebuilding the probe cases from the channels docs/06 and B-57, B-78 and B-79 name, committing them as test fixtures, and recording that they cannot be shown identical to the lost scripts.
+
+**Built.**
+- **`guard.py`:**
+  - `git` is no longer in `_READ_ONLY`, so a protected positional path is refused (`clone`, `init`, `worktree add`, `bundle create`).
+  - `_check_git_writes` checks as a write (the protected list and the write areas, like a redirect): `--output` on every subcommand, `-o`/`--output-directory` for `format-patch` and `archive`, `config -f/--file`, `bundle create <file>`; relative paths are taken from `-C`. Long options match git's abbreviations too (`--outp=`). `grep -O`/`--open-files-in-pager` is refused.
+  - `_check_git_location`: `--git-dir`/`--work-tree` may not point into `.factory-local/` in either mode, nor into the factory while a target is active; with a target, `--work-tree` must be a write area. `_scan_git_location_env` applies the same check to `GIT_DIR`/`GIT_WORK_TREE` set as a prefix, with `env`/`export`, or as `$env:` in PowerShell.
+  - `_check_factory_paths`: every `factory.py` path option, matched anywhere after `factory.py` and by its argparse abbreviations, against every subcommand's options at once. `--out` is checked as a write; the read options may not name a protected path.
+- **`cli.py`:** `WRITE_PATH_OPTIONS` and `READ_PATH_OPTIONS`, imported by the guard (lazily: `cli` imports `doctor`, which imports the guard). A test walks `build_parser()` and fails on a path option missing from the tables.
+- **`files.py` (new):** `safe_write` and `check_writable`. They refuse the factory's `scripts/`, `.claude/` and `.factory-local/` and `~/.claude/`, in either mode, resolving symlinks, before and after creating the folder. `prbody.write`, `acmap.write` and `evidence.write` (the JSON and the files beside it) use it.
+- **`guard_hook.py`:** with a target active, `extra_write_dirs` is empty (N22).
+- **Tests:** `tests/test_guard.py` `WriteChannelTest` (the matrix: 14 git write channels × 6 protected paths with a target, and the pointer with none; 7 factory.py write forms × 6; 9 read forms × 5; outside-area, allowed and factory-development cases; the Write-tool control) and `PathOptionTableTest`; `SettingsTest.test_hook_command_blocks_the_write_channels` (the real hook command, 6 cases, exit 2 with the reason); `tests/test_files.py`; the N22 assertions in `PointerFailClosedTest`. The station and command-file lint now runs the guard on `factory.py` commands as well (except `target set` and `run`, which only the human runs).
+- **Docs:** [02-factory-architecture.md](02-factory-architecture.md) §8, the guard's row and a `safe_write` bullet; the guard's docstring.
+
+**Decisions made while building.**
+- **Read options are checked against the protected list only.** The specification's Problem line says factory.py's `--notes` and `--body-file` "can write". The code shows they only read (`cli.py`: `read_text`); the writing option is `--out`. Reading a protected file into a GitHub post is refused; a read option elsewhere is allowed, as `cat` is. Hence two tables: the specification names only `WRITE_PATH_OPTIONS`, so `READ_PATH_OPTIONS` is an addition.
+- **In factory development, git's write options and `--out` must also be inside a write area** (the factory, scratch, memory), as a redirect already must. Everyday factory development is unchanged (the tests show it); a git write to a folder outside these is now refused in both modes.
+- **Consequence of N22:** while a target is active, Claude Code's own auto-memory writes are blocked by the guard too.
+
+**Deviations from the specification.**
+- **`GIT_DIR`/`GIT_WORK_TREE`** are not in the specification's list. The reviewer step found them (below); they are the variable spelling of `--git-dir`/`--work-tree`, which the specification lists, and the git wrapper passes the environment on, so `GIT_WORK_TREE=<factory> python scripts/factory.py git switch …` would check files out into the factory. They get the same check.
+- **`verdict.py` and `closeout.py`** are named among the writers, but write no file (no `write_text`, `write_bytes` or `open`); they are unchanged. The writers the model can reach are `prbody.write`, `evidence.write` and `acmap.write`. The pointer, `settings.local.json` and the runner's log are written by `target set` and `run`, which only the human runs, so they do not use `safe_write`.
+- **The probe fixtures are rebuilt,** not the audit's scripts (the approved decision above).
+- **Code areas:** `tests/test_stations.py` and `tests/test_commands.py` also change, so that "a lint over every station-prescribed command" covers factory.py commands (before, the lint sent only `gh` and `git` to the guard); and `docs/02` §8 (Definition of Done item 7).
+
+**Checks** (2026-11-26):
+- **Probe, before and after** (`guard.decide` on a fake factory, the rebuilt N1 cases): on `main` (`727c1e6`) `git log --output`, `git show --output`, `git config --file`, factory.py `--out`, `--notes` and `--body-file` into protected paths are all **allowed**; on this branch all six are **blocked**. A Write into memory is allowed with the old hook context and blocked with the new one; the Write-tool control is blocked in both.
+- **Mutations:** each new check was removed in turn, in a copy of the repository, and `tests.test_guard`, `test_files`, `test_commands` and `test_stations` run: **16 of 16 mutations make a test fail** (`git` back in `_READ_ONLY`; no `_check_git_writes`; no `--output`, `config --file`, `-o`, `grep -O` or `bundle create` check; exact option names only; no `_check_git_location`; no `GIT_DIR`/`GIT_WORK_TREE` check; no `_check_factory_paths`; read options unchecked; memory a write area with a target; `safe_write` checking nothing; `evidence.write` bypassing it; the lint skipping factory.py commands). In the first run the `bundle create` check survived, because the positional scan also blocked every matrix case; a test of every git channel writing outside the write areas with no target, where only the channel's own check can block, now kills it.
+- **Reviewer step, channels not in the list:** with a target active, `git worktree add` into `scripts/`, `git notes add` and `git checkout-index --prefix` are blocked (the positional scan or the raw-git policy), and `GIT_WORK_TREE`/`GIT_DIR` were allowed before the check above. With no target, `git worktree add` and `git clone` into `.factory-local/` are blocked; `git checkout-index --prefix=<factory>/.factory-local/` is still allowed ([B-86](backlog.md#b-86)).
+- **No target:** `python -m unittest` ran 1225 tests in 327.8 s, OK (skipped=6: the five as before, and `test_a_link_into_a_protected_root_is_refused`, because this Windows account cannot create symlinks). `python -m ruff check`: all checks passed.
+- **Target active:** TARGET_ACTIVE_RUN
+- **The station lint:** every station and command-file command passes, now including the factory.py ones.
+
+**Handed on:**
+- [B-86](backlog.md#b-86): `checkout-index --prefix` in factory development.
+- **B-57** stays open for SR1.2; **B-78** is resolved; **B-79** keeps SR1.8 for the other writers.
+- **Next task: SR1.2**, narrowing the pre-approved permission rules (B-57, audit N1).

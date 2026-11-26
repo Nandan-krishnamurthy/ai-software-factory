@@ -815,6 +815,289 @@ class KeywordGuardTest(unittest.TestCase):
         self.check(KEYWORD_ALLOW, ctx(), expect_allowed=True)
 
 
+# ----------------------------------------------------------------------------- SR1.1 (N1, N22)
+# The write channels into protected paths. The audit's probe scripts were lost before SR1.1
+# (see the task log), so these cases are rebuilt from the channels the specification and
+# B-57/B-78 name: git's --output, -o and config --file, factory.py's --out, --notes and
+# --body-file, and a Write into Claude's project memory.
+
+def _p(path: Path) -> str:
+    return path.as_posix()
+
+
+T, S = _p(TARGET), _p(SCRATCH)
+# Every protected path, with a target active (the hook gives no memory write area then, N22).
+PROTECTED = {
+    "guard.py": FACTORY / "scripts" / "factory" / "guard.py",
+    "guard_hook.py": FACTORY / "scripts" / "factory" / "guard_hook.py",
+    "settings.json": FACTORY / ".claude" / "settings.json",
+    "settings.local.json": FACTORY / ".claude" / "settings.local.json",
+    "target.json": FACTORY / ".factory-local" / "target.json",
+    "memory": MEMORY / "x" / "memory" / "m.md",
+}
+# git write channels: name -> command writing <p>. `isolated` ones name the path only inside
+# an option word, so no other check (the positional scan, the raw-git policy) can be what
+# blocks them: they fail if `_check_git_writes` is removed.
+GIT_WRITES = {
+    "log --output=": (lambda p: f'git -C "{T}" log -1 --output="{p}"', True),
+    "log --output <p>": (lambda p: f'git -C "{T}" log -1 --output "{p}"', False),
+    "log --outp= (abbreviated)": (lambda p: f'git -C "{T}" log -1 --outp="{p}"', True),
+    "show --output=": (lambda p: f'git -C "{T}" show HEAD --output="{p}"', True),
+    "diff --output=": (lambda p: f'git -C "{T}" diff a..b --no-ext-diff --no-textconv '
+                                 f'--output="{p}"', True),
+    "format-patch -o <p>": (lambda p: f'git -C "{T}" format-patch -1 -o "{p}"', False),
+    "format-patch -o<p>": (lambda p: f'git -C "{T}" format-patch -1 -o"{p}"', True),
+    "format-patch --output-directory=": (
+        lambda p: f'git -C "{T}" format-patch -1 --output-directory="{p}"', True),
+    "archive -o <p>": (lambda p: f'git -C "{T}" archive -o "{p}" HEAD', False),
+    "archive --output=": (lambda p: f'git -C "{T}" archive --output="{p}" HEAD', True),
+    "config --file <p>": (lambda p: f'git -C "{T}" config --file "{p}" user.name x', False),
+    "config --file=": (lambda p: f'git -C "{T}" config --file="{p}" user.name x', True),
+    "config -f <p>": (lambda p: f'git -C "{T}" config -f "{p}" user.name x', False),
+    "bundle create <p>": (lambda p: f'git -C "{T}" bundle create "{p}" HEAD', False),
+}
+FACTORY_PY = "python scripts/factory.py"
+# factory.py write options: every one is matched inside its option word or by value.
+FACTORY_PY_WRITES = {
+    "pr render --out": lambda p: f'{FACTORY_PY} pr render --issue 1 --notes "{S}/n.md" '
+                                 f'--out "{p}"',
+    "pr render --out=": lambda p: f'{FACTORY_PY} pr render --issue 1 --notes "{S}/n.md" '
+                                  f'--out="{p}"',
+    "pr render --ou (abbreviated)": lambda p: f'{FACTORY_PY} pr render --issue 1 --notes '
+                                              f'"{S}/n.md" --ou "{p}"',
+    "pr <option> render --out": lambda p: f'{FACTORY_PY} pr --title t render --issue 1 '
+                                          f'--notes "{S}/n.md" --out "{p}"',
+    "verify run --out": lambda p: f'{FACTORY_PY} verify run --issue 1 --out "{p}"',
+    "verify map --out": lambda p: f'{FACTORY_PY} verify map --issue 1 --out "{p}"',
+    "python3 ./scripts/factory.py": lambda p: f'python3 ./scripts/factory.py verify map '
+                                              f'--issue 1 --out "{p}"',
+}
+# factory.py read options: a protected path may not be read into a GitHub post.
+FACTORY_PY_READS = {
+    "pr render --notes": lambda p: f'{FACTORY_PY} pr render --issue 1 --notes "{p}" '
+                                   f'--out "{S}/pr.md"',
+    "pr --body-file": lambda p: f'{FACTORY_PY} pr --head b --title t --body-file "{p}"',
+    "comment --body-file": lambda p: f'{FACTORY_PY} comment --issue 1 --kind reply '
+                                     f'--body-file "{p}"',
+    "comment --body-file=": lambda p: f'{FACTORY_PY} comment --issue 1 --kind reply '
+                                      f'--body-file="{p}"',
+    "question ask --body-file": lambda p: f'{FACTORY_PY} question ask --key k --title t '
+                                          f'--body-file "{p}"',
+    "verdict check --file": lambda p: f'{FACTORY_PY} verdict check --issue 1 --file "{p}"',
+    "verify check --file": lambda p: f'{FACTORY_PY} verify check --issue 1 --file "{p}"',
+    "verify run --report": lambda p: f'{FACTORY_PY} verify run --issue 1 --report "{p}"',
+    "discover --path": lambda p: f'{FACTORY_PY} discover --path "{p}"',
+}
+
+
+class WriteChannelTest(unittest.TestCase):
+    """SR1.1: every write channel × every protected path is blocked (N1, N22)."""
+
+    def target_ctx(self):
+        return ctx(extra_write_dirs=())  # what the hook builds with a target active (N22)
+
+    def assert_blocked(self, command, context, why=None):
+        decision = decide(*bash(command), context)
+        self.assertFalse(decision.allowed, command)
+        if why:
+            self.assertIn(why, decision.reason, command)
+
+    def assert_allowed(self, command, context):
+        decision = decide(*bash(command), context)
+        self.assertTrue(decision.allowed, f"{command} -> {decision.reason}")
+
+    def test_git_write_channels_into_protected_paths_are_blocked(self):
+        for channel, (make, isolated) in GIT_WRITES.items():
+            for label, path in PROTECTED.items():
+                with self.subTest(channel=channel, path=label):
+                    self.assert_blocked(make(_p(path)), self.target_ctx(),
+                                        "writes to" if isolated and channel.startswith(
+                                            ("log", "show", "diff", "config")) else None)
+
+    def test_git_write_channels_into_the_pointer_are_blocked_with_no_target(self):
+        # No raw-git policy in factory development, so only the new checks can block these.
+        pointer = _p(PROTECTED["target.json"])
+        for channel, (make, isolated) in GIT_WRITES.items():
+            with self.subTest(channel=channel):
+                self.assert_blocked(make(pointer), ctx(target=False),
+                                    "writes to" if isolated else None)
+
+    def test_git_writes_outside_the_write_areas_are_blocked(self):
+        self.assert_blocked(f'git -C "{T}" log -1 --output="{_p(OUTSIDE)}/x.txt"',
+                            self.target_ctx(), "writes to")
+
+    def test_every_git_write_channel_is_checked_as_a_write_with_no_target(self):
+        # Outside the write areas and not protected: neither the positional scan (protected
+        # paths only) nor the raw-git policy (target mode only) can block these, so each
+        # channel's own check must.
+        outside = f"{_p(OUTSIDE)}/out"
+        for channel, (make, _) in GIT_WRITES.items():
+            with self.subTest(channel=channel):
+                self.assert_blocked(make(outside), ctx(target=False), "writes to")
+
+    def test_git_location_variables_are_checked_like_the_options(self):
+        f = _p(FACTORY)
+        for command in (f'GIT_WORK_TREE="{f}" {FACTORY_PY} git switch x',
+                        f'env GIT_WORK_TREE="{f}" {FACTORY_PY} git switch x',
+                        f'export GIT_DIR="{f}/.git"',
+                        f'GIT_DIR="{f}/.git" git -C "{T}" log -1'):
+            with self.subTest(command=command):
+                self.assert_blocked(command, self.target_ctx(), "git --")
+        decision = decide(*pwsh(f'$env:GIT_WORK_TREE = "{f}"'), self.target_ctx())
+        self.assertFalse(decision.allowed)
+        self.assertIn("git --work-tree", decision.reason)
+        self.assert_blocked(f'GIT_DIR="{f}/.factory-local" git log -1', ctx(target=False),
+                            ".factory-local")
+        # Into the target, or in factory development, they stay allowed.
+        self.assert_allowed(f'GIT_WORK_TREE="{T}" {FACTORY_PY} git status', self.target_ctx())
+        self.assert_allowed(f'GIT_DIR="{f}/.git" git log -1', ctx(target=False))
+
+    def test_git_reads_and_writes_into_write_areas_are_allowed(self):
+        for command in (
+            f'git -C "{T}" log --oneline -5',
+            f'git -C "{T}" log -1 --output="{S}/log.txt"',
+            f'git -C "{T}" show HEAD:README.md',
+            f'git -C "{T}" diff a..b --no-ext-diff --no-textconv --stat',
+            f'git -C "{T}" config --get remote.origin.url',
+            f'git -C "{T}" config --file "{T}/.gitmodules" --get submodule.x.url',
+            f'git -C "{T}" log --oneline-graph',  # not an abbreviation of --output
+            f'git -C "{T}" log -1 --output="{T}/log.txt"',
+        ):
+            with self.subTest(command=command):
+                self.assert_allowed(command, self.target_ctx())
+
+    def test_git_positional_writes_into_protected_paths_are_blocked(self):
+        # git is no longer a "reader": a protected positional path is refused.
+        local = _p(FACTORY / ".factory-local" / "x")
+        for command in (f'git clone https://github.com/o/r "{local}"',
+                        f'git worktree add "{local}"', f'git init "{local}"'):
+            with self.subTest(command=command):
+                self.assert_blocked(command, ctx(target=False), ".factory-local")
+
+    def test_git_grep_open_files_in_pager_is_blocked(self):
+        for command in ("git grep -O foo", "git grep -Ovim foo", "git grep -nO foo",
+                        "git grep --open-files-in-pager=vim foo", "git grep --open foo"):
+            with self.subTest(command=command):
+                self.assert_blocked(command, ctx(target=False), "runs a program")
+        self.assert_allowed("git grep -n -o foo", ctx(target=False))
+
+    def test_git_dir_and_work_tree_into_the_factory_are_blocked(self):
+        cases = [
+            (f'git --git-dir="{_p(FACTORY / ".git")}" -C "{T}" log -1', self.target_ctx()),
+            (f'git --work-tree="{_p(FACTORY)}" -C "{T}" log -1', self.target_ctx()),
+            (f'git --work-tree="{_p(OUTSIDE)}" -C "{T}" log -1', self.target_ctx()),
+            (f'{FACTORY_PY} git --work-tree="{_p(FACTORY)}" switch x', self.target_ctx()),
+            (f'git --git-dir="{_p(FACTORY / ".factory-local")}" log -1', ctx(target=False)),
+        ]
+        for command, context in cases:
+            with self.subTest(command=command):
+                self.assert_blocked(command, context, "git --")
+        # With the value as a separate word, the positional scan blocks it first.
+        self.assert_blocked(f'git --work-tree "{_p(FACTORY / "scripts")}" -C "{T}" log -1',
+                            self.target_ctx())
+        # Factory development is unchanged: git may point at the factory's own repository.
+        self.assert_allowed(f'git --git-dir="{_p(FACTORY / ".git")}" --work-tree='
+                            f'"{_p(FACTORY)}" log -1', ctx(target=False))
+
+    def test_factory_py_write_options_into_protected_paths_are_blocked(self):
+        for option, make in FACTORY_PY_WRITES.items():
+            for label, path in PROTECTED.items():
+                with self.subTest(option=option, path=label):
+                    self.assert_blocked(make(_p(path)), self.target_ctx(), "writes to")
+
+    def test_factory_py_write_options_into_the_pointer_are_blocked_with_no_target(self):
+        for option, make in FACTORY_PY_WRITES.items():
+            with self.subTest(option=option):
+                self.assert_blocked(make(_p(PROTECTED["target.json"])), ctx(target=False),
+                                    "writes to")
+
+    def test_factory_py_writes_outside_the_write_areas_are_blocked(self):
+        self.assert_blocked(FACTORY_PY_WRITES["pr render --out"](f"{_p(OUTSIDE)}/pr.md"),
+                            self.target_ctx(), "writes to")
+
+    def test_factory_py_read_options_naming_protected_paths_are_blocked(self):
+        for option, make in FACTORY_PY_READS.items():
+            for label, path in PROTECTED.items():
+                if label == "memory":  # not protected: it is no longer a write area
+                    continue
+                with self.subTest(option=option, path=label):
+                    self.assert_blocked(make(_p(path)), self.target_ctx(), "reads")
+
+    def test_factory_py_path_options_in_the_write_areas_are_allowed(self):
+        for command in (
+            f'{FACTORY_PY} pr render --issue 1 --notes "{S}/n.md" --out "{S}/pr.md"',
+            f'{FACTORY_PY} verify run --issue 1 --out "{S}/evidence-1.json"',
+            f'{FACTORY_PY} verify run --issue 1 --report "{T}/reports/junit.xml"',
+            f'{FACTORY_PY} comment --issue 1 --kind reply --body-file "{S}/r.md"',
+            f'{FACTORY_PY} comment --issue 1 --kind reply --body-file -',
+            f'{FACTORY_PY} pr --head b --title t --body-file "{S}/pr.md" --draft',
+            f'{FACTORY_PY} verify run --issue 1',
+        ):
+            with self.subTest(command=command):
+                self.assert_allowed(command, self.target_ctx())
+
+    def test_factory_development_is_unchanged(self):
+        dev = ctx(target=False)
+        for command in (
+            f'git log -1 --output="{_p(FACTORY / "log.txt")}"',
+            f'{FACTORY_PY} pr render --issue 1 --notes "{S}/n.md" --out '
+            f'"{_p(FACTORY / "pr.md")}"',
+            f'git config --file "{_p(FACTORY / ".git" / "config")}" --get user.name',
+        ):
+            with self.subTest(command=command):
+                self.assert_allowed(command, dev)
+        self.assertTrue(decide("Write", {"file_path": str(PROTECTED["memory"])}, dev).allowed)
+
+    def test_the_write_tool_control_is_still_blocked(self):
+        for label in ("guard.py", "settings.json", "target.json", "memory"):
+            with self.subTest(path=label):
+                decision = decide("Write", {"file_path": str(PROTECTED[label])},
+                                  self.target_ctx())
+                self.assertFalse(decision.allowed)
+
+
+class PathOptionTableTest(unittest.TestCase):
+    """cli.WRITE_PATH_OPTIONS and READ_PATH_OPTIONS list exactly the CLI's path options, so
+    the guard's checks cannot drift from what the CLI accepts (SR1.1)."""
+
+    PATH_METAVARS = {"F", "PATH", "DIR"}
+
+    def parser_path_options(self):
+        import argparse
+
+        from factory import cli
+
+        found: dict[str, set[str]] = {}
+
+        def walk(parser, prefix):
+            for action in parser._actions:
+                if isinstance(action, argparse._SubParsersAction):
+                    for name, sub in action.choices.items():
+                        walk(sub, f"{prefix} {name}".strip())
+                elif action.option_strings and action.metavar in self.PATH_METAVARS:
+                    found.setdefault(prefix, set()).update(
+                        o for o in action.option_strings if o.startswith("--"))
+
+        walk(cli.build_parser(), "")
+        return found
+
+    def test_the_tables_match_the_parser(self):
+        from factory import cli
+
+        tables: dict[str, set[str]] = {}
+        for table in (cli.WRITE_PATH_OPTIONS, cli.READ_PATH_OPTIONS):
+            for sub, options in table.items():
+                tables.setdefault(sub, set()).update(options)
+        self.assertEqual(self.parser_path_options(), tables)
+
+    def test_no_option_is_both_a_read_and_a_write(self):
+        from factory import cli
+
+        for sub, options in cli.WRITE_PATH_OPTIONS.items():
+            with self.subTest(sub=sub):
+                self.assertFalse(set(options) & set(cli.READ_PATH_OPTIONS.get(sub, ())))
+
+
 class HookAdapterTest(unittest.TestCase):
     def run_hook(self, payload):
         raw = payload if isinstance(payload, bytes) else json.dumps(payload).encode("utf-8")
@@ -937,6 +1220,15 @@ class PointerFailClosedTest(unittest.TestCase):
         ctx = self.context()
         self.assertFalse(ctx.target_broken)
         self.assertEqual(ctx.target_root, app)
+        # N22: Claude's project memory is not a write area while a target is active.
+        self.assertEqual(ctx.extra_write_dirs, ())
+        memory = Path.home() / ".claude" / "projects" / "x" / "memory" / "m.md"
+        with mock.patch.object(guard_hook.target_mod, "FACTORY_ROOT", self.factory):
+            self.assertFalse(decide("Write", {"file_path": str(memory)}, ctx).allowed)
+
+    def test_memory_stays_a_write_area_with_no_target(self):
+        ctx = self.context()
+        self.assertEqual(ctx.extra_write_dirs, (Path.home() / ".claude" / "projects",))
 
 
 def hook_shell() -> str | None:
@@ -1001,13 +1293,14 @@ class SettingsTest(unittest.TestCase):
         shutil.copy2(SettingsTest.SETTINGS, root / ".claude" / "settings.json")
         return root
 
-    def run_hook(self, root: Path, command: str) -> subprocess.CompletedProcess:
+    def run_hook(self, root: Path, command: str, tool: str = "Bash",
+                 tool_input: dict | None = None) -> subprocess.CompletedProcess:
         """Run the copy's hook command string the way Claude Code does, with the copy as
         the project directory."""
         settings = json.loads((root / ".claude" / "settings.json").read_text(encoding="utf-8"))
         (handler,) = settings["hooks"]["PreToolUse"][0]["hooks"]
         env = {**os.environ, "CLAUDE_PROJECT_DIR": str(root)}
-        payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command},
+        payload = json.dumps({"tool_name": tool, "tool_input": tool_input or {"command": command},
                               "cwd": str(root), "hook_event_name": "PreToolUse"})
         return subprocess.run([hook_shell(), "-c", handler["command"]], input=payload,
                               capture_output=True, text=True, env=env, timeout=60)
@@ -1038,6 +1331,45 @@ class SettingsTest(unittest.TestCase):
             result = self.run_hook(root, "git status")
             self.assertEqual(result.returncode, 2, result.stderr)
             self.assertIn("target pointer", result.stderr)
+
+    @unittest.skipUnless(hook_shell(), "Git Bash / bash is needed to run the hook command")
+    def test_hook_command_blocks_the_write_channels(self):
+        """SR1.1 end to end: the real hook command, with a target active in a factory copy,
+        blocks 6 representative write channels with exit 2 and the reason (N1, N22)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp).resolve()
+            root = self.make_factory_copy(base)
+            app = base / "app"
+            app.mkdir()
+            (root / ".factory-local").mkdir()
+            (root / ".factory-local" / "target.json").write_text(
+                json.dumps({"path": str(app), "repo": "o/app"}), encoding="utf-8")
+            guard_py = (root / "scripts" / "factory" / "guard.py").as_posix()
+            settings = (root / ".claude" / "settings.json").as_posix()
+            pointer = (root / ".factory-local" / "target.json").as_posix()
+            local = (root / ".claude" / "settings.local.json").as_posix()
+            hook_py = (root / "scripts" / "factory" / "guard_hook.py").as_posix()
+            memory = Path.home() / ".claude" / "projects" / "sr11-probe" / "memory" / "m.md"
+            a = app.as_posix()
+            cases = [
+                ("Bash", {"command": f'git -C "{a}" log -1 --output="{guard_py}"'}, "writes to"),
+                ("Bash", {"command": f'git -C "{a}" config --file="{settings}" user.name x'},
+                 "writes to"),
+                ("Bash", {"command": f'git -C "{a}" show HEAD --output="{pointer}"'},
+                 "writes to"),
+                ("Bash", {"command": f'python scripts/factory.py pr render --issue 1 --notes '
+                                     f'n.md --out "{local}"'}, "writes to"),
+                ("Bash", {"command": f'python scripts/factory.py verify map --issue 1 '
+                                     f'--out="{hook_py}"'}, "writes to"),
+                ("Write", {"file_path": str(memory)}, "writes are allowed only"),
+            ]
+            for tool, tool_input, why in cases:
+                with self.subTest(tool=tool, tool_input=tool_input):
+                    result = self.run_hook(root, "", tool=tool, tool_input=tool_input)
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    self.assertIn("Blocked by the factory guard", result.stderr)
+                    self.assertIn(why, result.stderr)
+            self.assertFalse(memory.exists())
 
 
 if __name__ == "__main__":

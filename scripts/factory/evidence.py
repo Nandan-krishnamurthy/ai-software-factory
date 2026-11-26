@@ -121,6 +121,7 @@ from factory.errors import (
     GhAuthError,
     GitError,
 )
+from factory.files import safe_write
 from factory.gh import Gh, ProcessResult, run_command_line
 from factory.git import Git, with_config
 from factory.target import parse_github_remote
@@ -839,16 +840,15 @@ def default_path(issue: int) -> Path:
 def write(evidence: Evidence, path: Path) -> Path:
     """Write the evidence JSON to ``path``, and beside it the test command's full output
     and the captured reports, the local files ``verify map`` reads (T6.2)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(evidence.to_dict(), indent=2, ensure_ascii=False) + "\n",
-                    encoding="utf-8")
+    # safe_write refuses the factory's controls (SR1.1), for the JSON and each file beside it.
+    safe_write(path, json.dumps(evidence.to_dict(), indent=2, ensure_ascii=False) + "\n")
     if "test" in evidence.outputs:
         # Bytes, not text: no newline translation, so the file hashes as recorded.
-        output_path(path).write_bytes(evidence.outputs["test"].encode("utf-8"))
+        safe_write(output_path(path), evidence.outputs["test"].encode("utf-8"))
     for index, report in enumerate(evidence.reports, start=1):
         if report["path"] in evidence.report_data:
-            report_copy_path(path, index, report["path"]).write_bytes(
-                evidence.report_data[report["path"]])
+            safe_write(report_copy_path(path, index, report["path"]),
+                       evidence.report_data[report["path"]])
     return path
 
 

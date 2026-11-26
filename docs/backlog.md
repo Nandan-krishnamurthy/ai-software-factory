@@ -503,7 +503,7 @@ The 28 findings that milestone SR remediates ([ADR-0007](adr/0007-security-relia
 - **Related:** Enables the N2 ([B-58](#b-58)) chain; same mechanism as N22 ([B-78](#b-78)) and N23 ([B-79](#b-79))
 - **The fix is tested by:** Matrix: every write channel × every protected path → blocked; the real hook command run as a subprocess; the probes kept as regression fixtures
 - **Source:** the security and reliability audit (`876b6b9d#523`, 2026-11-04T07:30:29Z); re-checked at `7aee362` for the remediation roadmap (`d8543357#627`, 2026-11-04T08:45:36Z)
-- **Status:** verified (a probe of `guard.decide`; the code) · **Owner:** SR1.1, SR1.2 · **State:** open
+- **Status:** verified (a probe of `guard.decide`; the code) · **Owner:** SR1.1, SR1.2 · **State:** open: SR1.1 closed the write channels (git's write options, `--git-dir`/`--work-tree` and their variables, factory.py's path options, `safe_write`); its probe re-run shows all of them blocked ([task-log.md](task-log.md#sr11-close-the-write-channels-into-protected-paths)). SR1.2's narrowing of the pre-approved permission rules remains
 
 ### <a id="b-58"></a>B-58 The guard fails open on start-up errors; the runner's preflight misses user and managed settings; the wrapper has no push check of its own
 - **Audit ID:** N2 · **Gate:** RG-A · **Root cause:** RC1 ([ADR-0007](adr/0007-security-reliability-milestone-sr.md#root-causes))
@@ -715,7 +715,7 @@ The 28 findings that milestone SR remediates ([ADR-0007](adr/0007-security-relia
 - **Related:** N1 ([B-57](#b-57)) (same protected-path list)
 - **The fix is tested by:** Part of the N1 matrix
 - **Source:** the security and reliability audit (`876b6b9d#523`, 2026-11-04T07:30:29Z); re-checked at `7aee362` for the remediation roadmap (`d8543357#627`, 2026-11-04T08:45:36Z)
-- **Status:** verified (a probe of `guard.decide`; the code) · **Owner:** SR1.1 · **State:** open
+- **Status:** verified (a probe of `guard.decide`; the code) · **Owner:** SR1.1 · **State:** resolved by SR1.1: with a target active, `guard_hook.build_context` gives no memory write area, so a Write or a git or factory.py write into `~/.claude/projects` is blocked; with no target it is unchanged. `safe_write` refuses `~/.claude/` in either mode ([task-log.md](task-log.md#sr11-close-the-write-channels-into-protected-paths))
 
 ### <a id="b-79"></a>B-79 Bash writes outside the allowed areas pass the guard
 - **Audit ID:** N23 · **Gate:** RG-B · **Root cause:** RC1 ([ADR-0007](adr/0007-security-reliability-milestone-sr.md#root-causes))
@@ -726,7 +726,7 @@ The 28 findings that milestone SR remediates ([ADR-0007](adr/0007-security-relia
 - **Found** when the audit's probe cases were re-run for the remediation roadmap; the audit had not reported it as a finding.
 - **The fix is tested by:** Matrix of the common writers × outside paths
 - **Source:** the audit's own probe cases, re-run at `7aee362` for the remediation roadmap (`d8543357#627`, 2026-11-04T08:45:36Z); not in the audit's report
-- **Status:** verified (a probe of `guard.decide`; the guard's docstring) · **Owner:** SR1.8 · **State:** open
+- **Status:** verified (a probe of `guard.decide`; the guard's docstring) · **Owner:** SR1.8 · **State:** open. SR1.1 closed the `factory.py` part: `--out` must be in a write area. The other writers (`rm`, `cp`, `curl -o` and the rest) remain SR1.8's
 
 ### <a id="b-80"></a>B-80 Station transitions are not declared or validated
 - **Audit ID:** K1 · **Gate:** RG-B · **Root cause:** RC5 ([ADR-0007](adr/0007-security-reliability-milestone-sr.md#root-causes))
@@ -787,6 +787,15 @@ The 28 findings that milestone SR remediates ([ADR-0007](adr/0007-security-relia
 - **Candidate (not decided):** one sentence in "Developing the factory itself" naming ADR-0007 and the SR order, and a line for docs/06 in the design documents list.
 - **Source:** SR0.2's read-only inspection (`d8543357#1247`, 2026-11-06T08:41:34Z); `CLAUDE.md` at `b62a0f0`
 - **Status:** verified (`CLAUDE.md` at `b62a0f0`) · **Owner:** unassigned: a later change, sequenced by the human · **State:** open
+
+## Handed on by SR1.1
+
+### <a id="b-86"></a>B-86 git write channels outside SR1.1's list, in factory development
+- **What:** SR1.1's reviewer step tried channels the specification does not list. With a target active, all of them are blocked (the positional scan, the raw-git policy, or the new `GIT_DIR`/`GIT_WORK_TREE` check). With **no** target, `git checkout-index -a --prefix=<factory>/.factory-local/` is still allowed: `--prefix` is an option word, so the positional scan does not see it, and it is not one of `_check_git_writes`'s options. It writes the index's files under that prefix, so it can create files inside `.factory-local/`.
+- **Risk:** Low. Only in factory development (no target), where the factory tree is writable anyway; `.factory-local/` is the one protected folder in that mode (D-10).
+- **Candidate (not decided):** treat `checkout-index --prefix` as a write in `_check_git_writes`, or move to an allowlist of git options with a path value (RC2).
+- **Source:** SR1.1's probe of channels not in the list, 2026-11-26, on this branch's guard (task log, "Checks")
+- **Status:** verified (a probe of `guard.decide`) · **Owner:** unassigned: SR1.6 (git option gaps) or SR1.8 (writes outside the allowed areas), as the human decides · **State:** open
 
 ## Verification not yet done
 

@@ -563,6 +563,15 @@ class CommandFileLintTest(unittest.TestCase):
                     words = span.split()[2:4]
                     self.assertTrue(" ".join(words) in allowed or words[0] in allowed, span)
 
+    def test_lint_runs_the_guard_on_factory_py_commands(self):
+        """SR1.1: a factory.py command whose --out leaves the write areas fails the lint;
+        the human-only commands are exempt because the guard blocks them by design."""
+        problems = lint_command("python scripts/factory.py pr render --issue 1 --notes "
+                                "<SCRATCH>/n.md --out /work/elsewhere/pr.md", self.ctx)
+        self.assertTrue(any("blocked by the guard" in p for p in problems), problems)
+        self.assertEqual(lint_command("python scripts/factory.py target set <path>",
+                                      self.ctx), [])
+
     def test_lint_rejects_arguments_that_git_bash_would_rewrite(self):
         problems = lint_command("python scripts/factory.py route --command /factory-start",
                                 self.ctx)

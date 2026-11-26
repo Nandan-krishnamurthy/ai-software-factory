@@ -50,6 +50,7 @@ from typing import Any
 from factory.comments import MAP_END, MAP_START, map_block
 from factory.errors import FactoryError, GitError
 from factory.evidence import Evidence, clean_lines
+from factory.files import safe_write
 from factory.git import Git
 
 SCHEMA = 1
@@ -450,10 +451,8 @@ def default_path(issue: int) -> Path:
 
 
 def write(acmap: AcMap, path: Path) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(acmap.to_dict(), indent=2, ensure_ascii=False) + "\n",
-                    encoding="utf-8")
-    return path
+    # safe_write refuses the factory's controls (SR1.1).
+    return safe_write(path, json.dumps(acmap.to_dict(), indent=2, ensure_ascii=False) + "\n")
 
 
 def read(path: Path) -> AcMap:
